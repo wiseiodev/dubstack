@@ -30,6 +30,10 @@ export async function createTestRepo(): Promise<{
 	);
 
 	await execa("git", ["init", "-b", "main"], { cwd: dir, env: GIT_TEST_ENV });
+	await execa("git", ["config", "user.name", "Test User"], { cwd: dir });
+	await execa("git", ["config", "user.email", "test@dubstack.test"], {
+		cwd: dir,
+	});
 	await execa("git", ["commit", "--allow-empty", "-m", "init"], {
 		cwd: dir,
 		env: GIT_TEST_ENV,
