@@ -17,11 +17,32 @@ When `main` updates or you amend an earlier branch, `dub restack` cascades rebas
 
 ## Install
 
+**Homebrew (Recommended)**
+
+```bash
+brew tap wiseiodev/dubstack
+brew install dubstack
+```
+
+To update to the latest version:
+
+```bash
+brew upgrade dubstack
+```
+
+**npm**
+
+```bash
+npm install -g dubstack
+```
+
+**From Source** (for contributors)
+
 > Requires **Node ≥ 22** and **pnpm**.
 
 ```bash
 # Clone and install
-git clone <repo-url> && cd dubstack
+git clone https://github.com/wiseiodev/dubstack.git && cd dubstack
 pnpm install
 
 # Link globally so `dub` is available everywhere
