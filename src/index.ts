@@ -18,6 +18,7 @@
  * @packageDocumentation
  */
 
+import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
 import { create } from "./commands/create.js";
@@ -27,12 +28,15 @@ import { restack, restackContinue } from "./commands/restack.js";
 import { undo } from "./commands/undo.js";
 import { DubError } from "./lib/errors.js";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
+
 const program = new Command();
 
 program
 	.name("dub")
 	.description("Manage stacked diffs (dependent git branches) with ease")
-	.version("0.1.0");
+	.version(version);
 
 program
 	.command("init")

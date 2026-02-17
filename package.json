@@ -6,8 +6,12 @@
 	"bin": {
 		"dub": "./dist/index.js"
 	},
+	"files": [
+		"dist"
+	],
 	"scripts": {
 		"build": "tsc",
+		"prepack": "pnpm build",
 		"dev": "tsx src/index.ts",
 		"test": "vitest run",
 		"typecheck": "tsc --noEmit",
