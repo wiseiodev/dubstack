@@ -84,6 +84,18 @@ dub undo
 
 DubStack provides skills for AI coding agents (like Cursor, Windsurf, etc.) to use the CLI effectively.
 
+You can install them easily using the `dub skills` command:
+
+```bash
+# Install all skills
+dub skills add
+
+# Install specific skill
+dub skills add dub-flow
+```
+
+Alternatively, you can install them manually via `npx`:
+
 ```bash
 # Core CLI reference & workflows
 npx skills add wiseiodev/dubstack/skills/dubstack

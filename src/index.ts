@@ -203,6 +203,32 @@ program
 		}
 	});
 
+program
+	.command("skills")
+	.description("Manage DubStack agent skills")
+	.addCommand(
+		new Command("add")
+			.description("Install agent skills (e.g. dubstack, dub-flow)")
+			.argument("[skills...]", "Names of skills to install (default: all)")
+			.option("-g, --global", "Install skills globally")
+			.option("--dry-run", "Preview actions without installing")
+			.action(async (skills, options) => {
+				const { addSkills } = await import("./commands/skills");
+				await addSkills(skills, options);
+			}),
+	)
+	.addCommand(
+		new Command("remove")
+			.description("Remove agent skills")
+			.argument("[skills...]", "Names of skills to remove (default: all)")
+			.option("-g, --global", "Remove skills globally")
+			.option("--dry-run", "Preview actions without removing")
+			.action(async (skills, options) => {
+				const { removeSkills } = await import("./commands/skills");
+				await removeSkills(skills, options);
+			}),
+	);
+
 async function runSubmit(options: { dryRun?: boolean }) {
 	const result = await submit(process.cwd(), options.dryRun ?? false);
 
