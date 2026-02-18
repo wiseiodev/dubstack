@@ -76,7 +76,20 @@ git checkout main && git pull
 dub restack
 
 # 5. Made a mistake? Undo it
+# 5. Made a mistake? Undo it
 dub undo
+```
+
+## Agent Skills
+
+DubStack provides skills for AI coding agents (like Cursor, Windsurf, etc.) to use the CLI effectively.
+
+```bash
+# Core CLI reference & workflows
+npx skills add wiseiodev/dubstack/skills/dubstack
+
+# Specialized PR creation workflow
+npx skills add wiseiodev/dubstack/skills/dub-flow
 ```
 
 ## Commands
