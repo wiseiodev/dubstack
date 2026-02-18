@@ -303,3 +303,19 @@ export async function commitStaged(
 		);
 	}
 }
+
+/**
+ * Returns a list of all local branch names.
+ */
+export async function listBranches(cwd: string): Promise<string[]> {
+	try {
+		const { stdout } = await execa(
+			"git",
+			["branch", "--format=%(refname:short)"],
+			{ cwd },
+		);
+		return stdout.trim().split("\n").filter(Boolean);
+	} catch {
+		throw new DubError("Failed to list branches.");
+	}
+}

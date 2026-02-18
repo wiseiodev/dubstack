@@ -21,6 +21,7 @@
 import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
+import { checkout, interactiveCheckout } from "./commands/checkout";
 import { create } from "./commands/create";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
@@ -185,6 +186,22 @@ program
 	.description("Submit the current stack (alias for submit)")
 	.option("--dry-run", "Print what would happen without executing")
 	.action(runSubmit);
+
+program
+	.command("co")
+	.argument("[branch]", "Branch to checkout (interactive if omitted)")
+	.description("Checkout a branch (interactive picker if no name given)")
+	.action(async (branch?: string) => {
+		if (branch) {
+			const result = await checkout(branch, process.cwd());
+			console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+		} else {
+			const result = await interactiveCheckout(process.cwd());
+			if (result) {
+				console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+			}
+		}
+	});
 
 async function runSubmit(options: { dryRun?: boolean }) {
 	const result = await submit(process.cwd(), options.dryRun ?? false);
