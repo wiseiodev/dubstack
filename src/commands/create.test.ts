@@ -1,11 +1,12 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, gitInRepo } from "../../test/helpers.js";
-import { DubError } from "../lib/errors.js";
-import { getCurrentBranch } from "../lib/git.js";
-import { readState } from "../lib/state.js";
-import { readUndoEntry } from "../lib/undo-log.js";
-import { create } from "./create.js";
-import { init } from "./init.js";
+import { createTestRepo, gitInRepo } from "../../test/helpers";
+import { getCurrentBranch } from "../lib/git";
+import { readState } from "../lib/state";
+import { readUndoEntry } from "../lib/undo-log";
+import { create } from "./create";
+import { init } from "./init";
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -29,6 +30,7 @@ describe("create", () => {
 
 		expect(result.branch).toBe("feat/first");
 		expect(result.parent).toBe("main");
+		expect(result.committed).toBeUndefined();
 		expect(await getCurrentBranch(dir)).toBe("feat/first");
 
 		const state = await readState(dir);
@@ -61,20 +63,21 @@ describe("create", () => {
 		await gitInRepo(dir, ["checkout", "-b", "existing"]);
 		await gitInRepo(dir, ["checkout", "main"]);
 
-		await expect(create("existing", dir)).rejects.toThrow(DubError);
 		await expect(create("existing", dir)).rejects.toThrow("already exists");
 
-		// State should be unchanged
 		const state = await readState(dir);
 		expect(state.stacks).toHaveLength(0);
 	});
 
-	it("throws when not initialized", async () => {
+	it("auto-initializes when not initialized", async () => {
 		const repo2 = await createTestRepo();
 		try {
-			await expect(create("feat/x", repo2.dir)).rejects.toThrow(
-				"not initialized",
-			);
+			await gitInRepo(repo2.dir, ["commit", "--allow-empty", "-m", "seed"]);
+			const result = await create("feat/x", repo2.dir);
+
+			expect(result.branch).toBe("feat/x");
+			const state = await readState(repo2.dir);
+			expect(state.stacks).toHaveLength(1);
 		} finally {
 			await repo2.cleanup();
 		}
@@ -88,5 +91,63 @@ describe("create", () => {
 		expect(entry.previousBranch).toBe("main");
 		expect(entry.createdBranches).toEqual(["feat/first"]);
 		expect(entry.previousState.stacks).toHaveLength(0);
+	});
+});
+
+describe("create with -m", () => {
+	it("creates branch and commits staged changes", async () => {
+		fs.writeFileSync(path.join(dir, "feature.ts"), "export const x = 1;\n");
+		await gitInRepo(dir, ["add", "feature.ts"]);
+
+		const result = await create("feat/api", dir, {
+			message: "feat: add API",
+		});
+
+		expect(result.branch).toBe("feat/api");
+		expect(result.committed).toBe("feat: add API");
+		expect(await getCurrentBranch(dir)).toBe("feat/api");
+
+		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
+		expect(stdout.trim()).toBe("feat: add API");
+	});
+
+	it("throws when nothing is staged", async () => {
+		await expect(
+			create("feat/empty", dir, { message: "feat: nothing" }),
+		).rejects.toThrow("No staged changes");
+	});
+});
+
+describe("create with -a -m", () => {
+	it("stages all files, creates branch, and commits", async () => {
+		fs.writeFileSync(path.join(dir, "new-file.ts"), "export const y = 2;\n");
+
+		const result = await create("feat/ui", dir, {
+			message: "feat: add UI",
+			all: true,
+		});
+
+		expect(result.branch).toBe("feat/ui");
+		expect(result.committed).toBe("feat: add UI");
+
+		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
+		expect(stdout.trim()).toBe("feat: add UI");
+
+		const { stdout: status } = await gitInRepo(dir, ["status", "--porcelain"]);
+		expect(status.trim()).toBe("");
+	});
+
+	it("throws when working tree is clean", async () => {
+		await expect(
+			create("feat/clean", dir, { message: "feat: noop", all: true }),
+		).rejects.toThrow("No changes to commit");
+	});
+});
+
+describe("create with -a but no -m", () => {
+	it("throws requiring -m", async () => {
+		await expect(create("feat/bad", dir, { all: true })).rejects.toThrow(
+			"requires '-m'",
+		);
 	});
 });

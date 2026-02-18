@@ -1,5 +1,5 @@
 import { execa } from "execa";
-import { DubError } from "./errors.js";
+import { DubError } from "./errors";
 
 /**
  * Checks whether the given directory is inside a git repository.
@@ -214,5 +214,92 @@ export async function getBranchTip(name: string, cwd: string): Promise<string> {
 		return stdout.trim();
 	} catch {
 		throw new DubError(`Branch '${name}' not found.`);
+	}
+}
+
+/**
+ * Returns the subject line of the most recent commit on a branch.
+ * @throws {DubError} If the branch has no commits.
+ */
+export async function getLastCommitMessage(
+	branch: string,
+	cwd: string,
+): Promise<string> {
+	try {
+		const { stdout } = await execa(
+			"git",
+			["log", "-1", "--format=%s", branch],
+			{ cwd },
+		);
+		const message = stdout.trim();
+		if (!message) {
+			throw new DubError(`Branch '${branch}' has no commits.`);
+		}
+		return message;
+	} catch (error) {
+		if (error instanceof DubError) throw error;
+		throw new DubError(`Failed to read commit message for '${branch}'.`);
+	}
+}
+
+/**
+ * Pushes a branch to origin with `--force-with-lease`.
+ * @throws {DubError} If the push fails.
+ */
+export async function pushBranch(branch: string, cwd: string): Promise<void> {
+	try {
+		await execa("git", ["push", "--force-with-lease", "origin", branch], {
+			cwd,
+		});
+	} catch {
+		throw new DubError(
+			`Failed to push '${branch}'. The remote ref may have been updated by someone else.`,
+		);
+	}
+}
+
+/**
+ * Stages all changes (tracked, untracked, and deletions).
+ * @throws {DubError} If git add fails.
+ */
+export async function stageAll(cwd: string): Promise<void> {
+	try {
+		await execa("git", ["add", "-A"], { cwd });
+	} catch {
+		throw new DubError("Failed to stage changes.");
+	}
+}
+
+/**
+ * Checks whether there are staged changes ready to commit.
+ *
+ * `git diff --cached --quiet` exits with code 1 when changes exist
+ * and code 0 when there are none.
+ */
+export async function hasStagedChanges(cwd: string): Promise<boolean> {
+	try {
+		await execa("git", ["diff", "--cached", "--quiet"], { cwd });
+		return false;
+	} catch (error: unknown) {
+		const exitCode = (error as { exitCode?: number }).exitCode;
+		if (exitCode === 1) return true;
+		throw new DubError("Failed to check staged changes.");
+	}
+}
+
+/**
+ * Commits currently staged changes with the given message.
+ * @throws {DubError} If the commit fails (e.g., nothing staged, hook rejection).
+ */
+export async function commitStaged(
+	message: string,
+	cwd: string,
+): Promise<void> {
+	try {
+		await execa("git", ["commit", "-m", message], { cwd });
+	} catch {
+		throw new DubError(
+			`Commit failed. Ensure there are staged changes and git hooks pass.`,
+		);
 	}
 }

@@ -21,12 +21,13 @@
 import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
-import { create } from "./commands/create.js";
-import { init } from "./commands/init.js";
-import { log } from "./commands/log.js";
-import { restack, restackContinue } from "./commands/restack.js";
-import { undo } from "./commands/undo.js";
-import { DubError } from "./lib/errors.js";
+import { create } from "./commands/create";
+import { init } from "./commands/init";
+import { log } from "./commands/log";
+import { restack, restackContinue } from "./commands/restack";
+import { submit } from "./commands/submit";
+import { undo } from "./commands/undo";
+import { DubError } from "./lib/errors";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -60,21 +61,40 @@ program
 	.command("create")
 	.argument("<branch-name>", "Name of the new branch to create")
 	.description("Create a new branch stacked on top of the current branch")
+	.option("-m, --message <message>", "Commit staged changes with this message")
+	.option("-a, --all", "Stage all changes before committing (requires -m)")
 	.addHelpText(
 		"after",
 		`
 Examples:
-  $ dub create feat/api-endpoint      Create a branch on top of current branch
-  $ dub create feat/ui-component      Stack another branch on top`,
+  $ dub create feat/api                       Create branch only
+  $ dub create feat/api -m "feat: add API"    Create branch + commit staged
+  $ dub create feat/api -am "feat: add API"   Stage all + create + commit`,
 	)
-	.action(async (branchName: string) => {
-		const result = await create(branchName, process.cwd());
-		console.log(
-			chalk.green(
-				`✔ Created branch '${result.branch}' on top of '${result.parent}'`,
-			),
-		);
-	});
+	.action(
+		async (
+			branchName: string,
+			options: { message?: string; all?: boolean },
+		) => {
+			const result = await create(branchName, process.cwd(), {
+				message: options.message,
+				all: options.all,
+			});
+			if (result.committed) {
+				console.log(
+					chalk.green(
+						`✔ Created '${result.branch}' on '${result.parent}' • ${result.committed}`,
+					),
+				);
+			} else {
+				console.log(
+					chalk.green(
+						`✔ Created branch '${result.branch}' on top of '${result.parent}'`,
+					),
+				);
+			}
+		},
+	);
 
 program
 	.command("log")
@@ -144,6 +164,42 @@ Examples:
 		const result = await undo(process.cwd());
 		console.log(chalk.green(`✔ Undid '${result.undone}': ${result.details}`));
 	});
+
+program
+	.command("submit")
+	.description(
+		"Push branches and create/update GitHub PRs for the current stack",
+	)
+	.option("--dry-run", "Print what would happen without executing")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub submit           Push and create/update PRs
+  $ dub submit --dry-run Preview what would happen`,
+	)
+	.action(runSubmit);
+
+program
+	.command("ss")
+	.description("Submit the current stack (alias for submit)")
+	.option("--dry-run", "Print what would happen without executing")
+	.action(runSubmit);
+
+async function runSubmit(options: { dryRun?: boolean }) {
+	const result = await submit(process.cwd(), options.dryRun ?? false);
+
+	if (result.pushed.length > 0) {
+		console.log(
+			chalk.green(
+				`✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s)`,
+			),
+		);
+		for (const branch of [...result.created, ...result.updated]) {
+			console.log(chalk.dim(`  ↳ ${branch}`));
+		}
+	}
+}
 
 async function main() {
 	try {

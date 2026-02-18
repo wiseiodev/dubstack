@@ -1,15 +1,15 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, gitInRepo } from "../../test/helpers.js";
-import { DubError } from "../lib/errors.js";
-import { branchExists, getBranchTip, getCurrentBranch } from "../lib/git.js";
-import { readState } from "../lib/state.js";
-import { readUndoEntry } from "../lib/undo-log.js";
-import { create } from "./create.js";
-import { init } from "./init.js";
-import { restack } from "./restack.js";
-import { undo } from "./undo.js";
+import { createTestRepo, gitInRepo } from "../../test/helpers";
+import { DubError } from "../lib/errors";
+import { branchExists, getBranchTip, getCurrentBranch } from "../lib/git";
+import { readState } from "../lib/state";
+import { readUndoEntry } from "../lib/undo-log";
+import { create } from "./create";
+import { init } from "./init";
+import { restack } from "./restack";
+import { undo } from "./undo";
 
 let dir: string;
 let cleanup: () => Promise<void>;

@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DubError } from "../lib/errors.js";
-import { getRepoRoot, isGitRepo } from "../lib/git.js";
-import { initState } from "../lib/state.js";
+import { DubError } from "../lib/errors";
+import { getRepoRoot, isGitRepo } from "../lib/git";
+import { initState } from "../lib/state";
 
 interface InitResult {
 	status: "created" | "already_exists";

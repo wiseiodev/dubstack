@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo } from "../../test/helpers.js";
-import { DubError } from "./errors.js";
-import { initState } from "./state.js";
+import { createTestRepo } from "../../test/helpers";
+import { DubError } from "./errors";
+import { initState } from "./state";
 import {
 	clearUndoEntry,
 	readUndoEntry,
 	saveUndoEntry,
 	type UndoEntry,
-} from "./undo-log.js";
+} from "./undo-log";
 
 let dir: string;
 let cleanup: () => Promise<void>;

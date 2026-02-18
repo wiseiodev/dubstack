@@ -17,7 +17,7 @@
 		"url": "git+https://github.com/wiseiodev/dubstack.git"
 	},
 	"scripts": {
-		"build": "tsc",
+		"build": "tsup",
 		"prepack": "pnpm build",
 		"dev": "tsx src/index.ts",
 		"test": "vitest run",
@@ -44,6 +44,7 @@
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.2",
 		"@types/node": "^25.2.3",
+		"tsup": "^8.5.1",
 		"tsx": "^4.21.0",
 		"typescript": "^5.9.3",
 		"vitest": "^4.0.18"

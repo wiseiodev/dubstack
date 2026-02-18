@@ -1,13 +1,13 @@
-import { DubError } from "../lib/errors.js";
+import { DubError } from "../lib/errors";
 import {
 	checkoutBranch,
 	deleteBranch,
 	forceBranchTo,
 	getCurrentBranch,
 	isWorkingTreeClean,
-} from "../lib/git.js";
-import { writeState } from "../lib/state.js";
-import { clearUndoEntry, readUndoEntry } from "../lib/undo-log.js";
+} from "../lib/git";
+import { writeState } from "../lib/state";
+import { clearUndoEntry, readUndoEntry } from "../lib/undo-log";
 
 interface UndoResult {
 	undone: "create" | "restack";

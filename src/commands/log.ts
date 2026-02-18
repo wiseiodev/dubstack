@@ -1,6 +1,6 @@
-import { branchExists, getCurrentBranch } from "../lib/git.js";
-import type { Branch, Stack } from "../lib/state.js";
-import { readState } from "../lib/state.js";
+import { branchExists, getCurrentBranch } from "../lib/git";
+import type { Branch, Stack } from "../lib/state";
+import { readState } from "../lib/state";
 
 /**
  * Renders an ASCII tree view of all tracked stacks.

@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo } from "../../test/helpers.js";
-import { DubError } from "../lib/errors.js";
-import { init } from "./init.js";
+import { createTestRepo } from "../../test/helpers";
+import { DubError } from "../lib/errors";
+import { init } from "./init";
 
 let dir: string;
 let cleanup: () => Promise<void>;

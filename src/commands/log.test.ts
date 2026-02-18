@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, gitInRepo } from "../../test/helpers.js";
-import { type DubState, initState, writeState } from "../lib/state.js";
-import { log } from "./log.js";
+import { createTestRepo, gitInRepo } from "../../test/helpers";
+import { type DubState, initState, writeState } from "../lib/state";
+import { log } from "./log";
 
 let dir: string;
 let cleanup: () => Promise<void>;

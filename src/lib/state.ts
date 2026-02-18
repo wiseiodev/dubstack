@@ -1,8 +1,8 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DubError } from "./errors.js";
-import { getRepoRoot } from "./git.js";
+import { DubError } from "./errors";
+import { getRepoRoot } from "./git";
 
 /** A branch within a stack. */
 export interface Branch {
@@ -12,7 +12,9 @@ export interface Branch {
 	type?: "root";
 	/** Name of the parent branch. `null` only for root branches. */
 	parent: string | null;
-	/** GitHub PR URL. Populated in Phase 2. */
+	/** GitHub PR number. Populated after `dub submit`. */
+	pr_number: number | null;
+	/** GitHub PR URL. Populated after `dub submit`. */
 	pr_link: string | null;
 }
 
@@ -103,6 +105,25 @@ export async function initState(
 }
 
 /**
+ * Returns state, auto-initializing if not yet set up.
+ * Only catches the "not initialized" error — corrupt state still throws.
+ */
+export async function ensureState(cwd: string): Promise<DubState> {
+	try {
+		return await readState(cwd);
+	} catch (error) {
+		if (
+			error instanceof DubError &&
+			error.message.includes("not initialized")
+		) {
+			await initState(cwd);
+			return await readState(cwd);
+		}
+		throw error;
+	}
+}
+
+/**
  * Finds the stack containing a given branch.
  * @returns The matching stack, or `undefined` if the branch isn't tracked.
  */
@@ -137,7 +158,12 @@ export function addBranchToStack(
 		throw new DubError(`Branch '${child}' is already tracked in a stack.`);
 	}
 
-	const childBranch: Branch = { name: child, parent, pr_link: null };
+	const childBranch: Branch = {
+		name: child,
+		parent,
+		pr_number: null,
+		pr_link: null,
+	};
 	const existingStack = findStackForBranch(state, parent);
 
 	if (existingStack) {
@@ -147,6 +173,7 @@ export function addBranchToStack(
 			name: parent,
 			type: "root",
 			parent: null,
+			pr_number: null,
 			pr_link: null,
 		};
 		state.stacks.push({
@@ -154,4 +181,34 @@ export function addBranchToStack(
 			branches: [rootBranch, childBranch],
 		});
 	}
+}
+
+/**
+ * Returns branches in topological (BFS) order starting from the root.
+ * Useful for operations that need to process parent branches before children.
+ */
+export function topologicalOrder(stack: Stack): Branch[] {
+	const result: Branch[] = [];
+	const root = stack.branches.find((b) => b.type === "root");
+	if (!root) return result;
+
+	const childMap = new Map<string, Branch[]>();
+	for (const branch of stack.branches) {
+		if (branch.parent) {
+			const children = childMap.get(branch.parent) ?? [];
+			children.push(branch);
+			childMap.set(branch.parent, children);
+		}
+	}
+
+	const queue = [root];
+	while (queue.length > 0) {
+		const current = queue.shift();
+		if (!current) break;
+		result.push(current);
+		const children = childMap.get(current.name) ?? [];
+		queue.push(...children);
+	}
+
+	return result;
 }

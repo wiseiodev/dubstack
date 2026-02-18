@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DubError } from "./errors.js";
-import type { DubState } from "./state.js";
-import { getDubDir } from "./state.js";
+import { DubError } from "./errors";
+import type { DubState } from "./state";
+import { getDubDir } from "./state";
 
 /**
  * Snapshot of system state before a mutation, used by `dub undo`.

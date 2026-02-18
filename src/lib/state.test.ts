@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo } from "../../test/helpers.js";
-import { DubError } from "./errors.js";
+import { createTestRepo } from "../../test/helpers";
+import { DubError } from "./errors";
 import {
 	addBranchToStack,
 	type DubState,
@@ -10,7 +10,7 @@ import {
 	initState,
 	readState,
 	writeState,
-} from "./state.js";
+} from "./state";
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -55,8 +55,14 @@ describe("writeState and readState roundtrip", () => {
 				{
 					id: "test-id",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -91,7 +97,13 @@ describe("initState", () => {
 				{
 					id: "keep-me",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
 					],
 				},
 			],
@@ -113,8 +125,14 @@ describe("findStackForBranch", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -136,8 +154,14 @@ describe("addBranchToStack", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -150,6 +174,7 @@ describe("addBranchToStack", () => {
 		expect(state.stacks[0].branches[2]).toEqual({
 			name: "feat/b",
 			parent: "feat/a",
+			pr_number: null,
 			pr_link: null,
 		});
 	});
@@ -178,8 +203,14 @@ describe("addBranchToStack", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],

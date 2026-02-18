@@ -1,20 +1,23 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, gitInRepo } from "../../test/helpers.js";
-import { DubError } from "./errors.js";
+import { createTestRepo, gitInRepo } from "../../test/helpers";
+import { DubError } from "./errors";
 import {
 	branchExists,
+	commitStaged,
 	createBranch,
 	deleteBranch,
 	forceBranchTo,
 	getBranchTip,
 	getCurrentBranch,
 	getMergeBase,
+	hasStagedChanges,
 	isGitRepo,
 	isWorkingTreeClean,
 	rebaseOnto,
-} from "./git.js";
+	stageAll,
+} from "./git";
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -205,5 +208,40 @@ describe("deleteBranch", () => {
 		await gitInRepo(dir, ["checkout", "main"]);
 		await deleteBranch("to-delete", dir);
 		expect(await branchExists("to-delete", dir)).toBe(false);
+	});
+});
+
+describe("stageAll", () => {
+	it("stages untracked and modified files", async () => {
+		fs.writeFileSync(path.join(dir, "new.txt"), "new");
+		await stageAll(dir);
+		expect(await hasStagedChanges(dir)).toBe(true);
+	});
+});
+
+describe("hasStagedChanges", () => {
+	it("returns false on a clean repo", async () => {
+		expect(await hasStagedChanges(dir)).toBe(false);
+	});
+
+	it("returns true after staging a file", async () => {
+		fs.writeFileSync(path.join(dir, "staged.txt"), "content");
+		await gitInRepo(dir, ["add", "staged.txt"]);
+		expect(await hasStagedChanges(dir)).toBe(true);
+	});
+});
+
+describe("commitStaged", () => {
+	it("creates a commit with the given message", async () => {
+		fs.writeFileSync(path.join(dir, "commit-me.txt"), "data");
+		await gitInRepo(dir, ["add", "commit-me.txt"]);
+		await commitStaged("test: add file", dir);
+
+		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
+		expect(stdout.trim()).toBe("test: add file");
+	});
+
+	it("throws when nothing is staged", async () => {
+		await expect(commitStaged("empty commit", dir)).rejects.toThrow(DubError);
 	});
 });

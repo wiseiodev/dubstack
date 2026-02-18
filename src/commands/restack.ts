@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DubError } from "../lib/errors.js";
+import { DubError } from "../lib/errors";
 import {
 	branchExists,
 	checkoutBranch,
@@ -10,10 +10,14 @@ import {
 	rebaseContinue as gitRebaseContinue,
 	isWorkingTreeClean,
 	rebaseOnto,
-} from "../lib/git.js";
-import type { Branch, Stack } from "../lib/state.js";
-import { getDubDir, readState } from "../lib/state.js";
-import { saveUndoEntry } from "../lib/undo-log.js";
+} from "../lib/git";
+import {
+	getDubDir,
+	readState,
+	type Stack,
+	topologicalOrder,
+} from "../lib/state";
+import { saveUndoEntry } from "../lib/undo-log";
 
 interface RestackStep {
 	branch: string;
@@ -213,32 +217,6 @@ async function buildRestackSteps(
 	}
 
 	return steps;
-}
-
-function topologicalOrder(stack: Stack): Branch[] {
-	const result: Branch[] = [];
-	const root = stack.branches.find((b) => b.type === "root");
-	if (!root) return result;
-
-	const childMap = new Map<string, Branch[]>();
-	for (const branch of stack.branches) {
-		if (branch.parent) {
-			const children = childMap.get(branch.parent) ?? [];
-			children.push(branch);
-			childMap.set(branch.parent, children);
-		}
-	}
-
-	const queue = [root];
-	while (queue.length > 0) {
-		const current = queue.shift();
-		if (!current) break;
-		result.push(current);
-		const children = childMap.get(current.name) ?? [];
-		queue.push(...children);
-	}
-
-	return result;
 }
 
 async function getProgressPath(cwd: string): Promise<string> {
