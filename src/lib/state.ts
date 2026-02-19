@@ -137,6 +137,21 @@ export function findStackForBranch(
 }
 
 /**
+ * Returns the parent branch name for a given branch.
+ * @returns The parent branch name, or `undefined` if not found or is a root.
+ */
+export function getParent(
+	state: DubState,
+	branchName: string,
+): string | undefined {
+	const stack = findStackForBranch(state, branchName);
+	if (!stack) return undefined;
+
+	const branch = stack.branches.find((b) => b.name === branchName);
+	return branch?.parent ?? undefined;
+}
+
+/**
  * Adds a child branch to the state, linking it to its parent.
  *
  * Decision tree:

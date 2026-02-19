@@ -229,6 +229,30 @@ program
 			}),
 	);
 
+program
+	.command("modify")
+	.alias("m")
+	.description(
+		"Modify the current branch by amending commits or creating new ones",
+	)
+	.option("-a, --all", "Stage all changes before committing")
+	.option("-c, --commit", "Create a new commit instead of amending")
+	.option("-e, --edit", "Open editor to edit the commit message")
+	.option("-m, --message <message>", "Message for the new or amended commit")
+	.option("-p, --patch", "Pick hunks to stage before committing")
+	.option("-u, --update", "Stage all updates to tracked files")
+	.option(
+		"--interactive-rebase",
+		"Start an interactive rebase on the branch commits",
+	)
+	// .option("--into <branch>", "Amend staged changes to the specified branch") // TODO: Implement --into
+	// .option("--reset-author", "Set the author to the current user") // TODO: Implement --reset-author
+	// .option("-v, --verbose", "Show unified diff") // TODO: Implement verbose
+	.action(async (options) => {
+		const { modify } = await import("./commands/modify");
+		await modify(process.cwd(), options);
+	});
+
 async function runSubmit(options: { dryRun?: boolean }) {
 	const result = await submit(process.cwd(), options.dryRun ?? false);
 
