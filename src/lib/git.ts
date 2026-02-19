@@ -305,6 +305,123 @@ export async function commitStaged(
 }
 
 /**
+ * Commits currently staged changes, opening the editor if no message is provided.
+ * @param cwd - The working directory.
+ * @param options - Commit options (message, noEdit).
+ * @throws {DubError} If the commit fails.
+ */
+export async function commit(
+	cwd: string,
+	options?: { message?: string; noEdit?: boolean },
+): Promise<void> {
+	const args = ["commit"];
+	if (options?.message) {
+		args.push("-m", options.message);
+	}
+	if (options?.noEdit) {
+		args.push("--no-edit");
+	}
+
+	try {
+		await execa("git", args, { cwd, stdio: "inherit" });
+	} catch {
+		throw new DubError(
+			"Commit failed. Ensure there are staged changes and git hooks pass.",
+		);
+	}
+}
+
+/**
+ * Amends the previous commit with currently staged changes.
+ * @param cwd - The working directory.
+ * @param options - Amend options (message, noEdit).
+ * @throws {DubError} If the amend fails.
+ */
+export async function amendCommit(
+	cwd: string,
+	options?: { message?: string; noEdit?: boolean },
+): Promise<void> {
+	const args = ["commit", "--amend"];
+	if (options?.message) {
+		args.push("-m", options.message);
+	}
+	if (options?.noEdit) {
+		args.push("--no-edit");
+	}
+
+	try {
+		await execa("git", args, { cwd, stdio: "inherit" });
+	} catch (e) {
+		throw new DubError(
+			`Amend failed: ${e instanceof Error ? e.message : String(e)}`,
+		);
+	}
+}
+
+/**
+ * Starts an interactive rebase from the given base.
+ * Uses stdio: 'inherit' to allow user interaction.
+ *
+ * @param base - The commit or branch to rebase onto.
+ * @param cwd - The working directory.
+ * @throws {DubError} If rebase fails.
+ */
+export async function interactiveRebase(
+	base: string,
+	cwd: string,
+): Promise<void> {
+	try {
+		await execa("git", ["rebase", "-i", base], { cwd, stdio: "inherit" });
+	} catch {
+		throw new DubError("Interactive rebase failed or was cancelled.");
+	}
+}
+
+/**
+ * Starts an interactive staging session (git add -p).
+ * Uses stdio: 'inherit' to allow user interaction.
+ *
+ * @param cwd - The working directory.
+ * @throws {DubError} If staging fails.
+ */
+export async function interactiveStage(cwd: string): Promise<void> {
+	try {
+		await execa("git", ["add", "-p"], { cwd, stdio: "inherit" });
+	} catch {
+		throw new DubError("Interactive staging failed.");
+	}
+}
+
+/**
+ * Stages all modified and deleted files (git add -u).
+ *
+ * @param cwd - The working directory.
+ * @throws {DubError} If staging fails.
+ */
+export async function stageUpdate(cwd: string): Promise<void> {
+	try {
+		await execa("git", ["add", "-u"], { cwd });
+	} catch {
+		throw new DubError("Failed to stage updates.");
+	}
+}
+
+/**
+ * Returns the diff of changes.
+ * @param staged - If true, shows staged changes (cached). If false, shows unstaged changes.
+ */
+export async function getDiff(cwd: string, staged: boolean): Promise<string> {
+	try {
+		const args = ["diff"];
+		if (staged) args.push("--cached");
+		const { stdout } = await execa("git", args, { cwd });
+		return stdout;
+	} catch {
+		return "";
+	}
+}
+
+/**
  * Returns a list of all local branch names.
  */
 export async function listBranches(cwd: string): Promise<string[]> {
