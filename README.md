@@ -102,6 +102,10 @@ dub pr
 
 For a more detailed walkthrough, see [`QUICKSTART.md`](./QUICKSTART.md).
 
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for contributor workflow, coding-agent guidance, commit conventions, and PR expectations.
+
 ## Command Reference
 
 ### `dub init`
