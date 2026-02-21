@@ -18,6 +18,7 @@ import { getBranchPrLifecycleState } from "../lib/github";
 import { findStackForBranch, readState } from "../lib/state";
 import { classifyBranchSyncStatus } from "../lib/sync/branch-status";
 import { buildCleanupPlan } from "../lib/sync/cleanup";
+import { resolveReconcileDecision } from "../lib/sync/reconcile";
 import { printBranchOutcome, printSyncSummary } from "../lib/sync/report";
 import type {
 	BranchSyncOutcome,
@@ -278,44 +279,29 @@ export async function sync(
 			continue;
 		}
 
-		if (options.force) {
-			await hardResetBranchToRef(branch, remoteRef, cwd);
-			outcome = {
-				branch,
-				status: "reconcile-needed",
-				action: "synced",
-				message: `✔ Forced '${branch}' to remote version.`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
+		const decision = await resolveReconcileDecision({
+			branch,
+			force: options.force,
+			interactive: options.interactive,
+			promptChoice: () =>
+				choose(
+					`Branch '${branch}' diverged from remote. How should sync proceed?`,
+					[
+						{
+							label: "Take remote version (discard local divergence)",
+							value: "take-remote",
+						},
+						{ label: "Keep local version", value: "keep-local" },
+						{
+							label: "Attempt reconciliation and keep local commits",
+							value: "reconcile",
+						},
+						{ label: "Skip this branch", value: "skip" },
+					],
+				),
+		});
 
-		if (!options.interactive) {
-			outcome = {
-				branch,
-				status: "reconcile-needed",
-				action: "skipped",
-				message: `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
-
-		const decision = await choose(
-			`Branch '${branch}' diverged from remote. How should sync proceed?`,
-			[
-				{
-					label: "Take remote version (discard local divergence)",
-					value: "remote",
-				},
-				{ label: "Keep local version", value: "local" },
-				{ label: "Skip this branch", value: "skip" },
-			],
-		);
-
-		if (decision === "remote") {
+		if (decision === "take-remote") {
 			await hardResetBranchToRef(branch, remoteRef, cwd);
 			outcome = {
 				branch,
@@ -323,19 +309,28 @@ export async function sync(
 				action: "synced",
 				message: `✔ Synced '${branch}' to remote version.`,
 			};
-		} else if (decision === "local") {
+		} else if (decision === "keep-local") {
 			outcome = {
 				branch,
 				status: "reconcile-needed",
 				action: "kept-local",
 				message: `• Kept local '${branch}' (remote divergence ignored).`,
 			};
+		} else if (decision === "reconcile") {
+			outcome = {
+				branch,
+				status: "reconcile-needed",
+				action: "kept-local",
+				message: `• Kept local '${branch}' and marked for manual reconciliation.`,
+			};
 		} else {
 			outcome = {
 				branch,
 				status: "reconcile-needed",
 				action: "skipped",
-				message: `⚠ Skipped '${branch}' by user choice.`,
+				message: options.interactive
+					? `⚠ Skipped '${branch}' by user choice.`
+					: `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
 			};
 		}
 		result.branches.push(outcome);
