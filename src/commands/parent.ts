@@ -7,7 +7,10 @@ interface ParentResult {
 	parent: string;
 }
 
-export async function parent(cwd: string, branchArg?: string): Promise<ParentResult> {
+export async function parent(
+	cwd: string,
+	branchArg?: string,
+): Promise<ParentResult> {
 	const branch = branchArg ?? (await getCurrentBranch(cwd));
 	const state = await readState(cwd);
 	const stack = findStackForBranch(state, branch);

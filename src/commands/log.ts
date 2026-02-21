@@ -1,5 +1,5 @@
-import { branchExists, getCurrentBranch } from "../lib/git";
 import { DubError } from "../lib/errors";
+import { branchExists, getCurrentBranch } from "../lib/git";
 import type { Branch, Stack } from "../lib/state";
 import { findStackForBranch, readState } from "../lib/state";
 
@@ -19,7 +19,10 @@ interface LogOptions {
  * @returns Formatted ASCII tree string (no ANSI colors — caller adds chalk)
  * @throws {DubError} If not initialized
  */
-export async function log(cwd: string, options: LogOptions = {}): Promise<string> {
+export async function log(
+	cwd: string,
+	options: LogOptions = {},
+): Promise<string> {
 	const state = await readState(cwd);
 
 	if (state.stacks.length === 0) {

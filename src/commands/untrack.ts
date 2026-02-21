@@ -2,7 +2,11 @@ import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 import { DubError } from "../lib/errors";
 import { getCurrentBranch } from "../lib/git";
-import { getUntrackContext, type UntrackResult, untrackBranch } from "../lib/untrack";
+import {
+	getUntrackContext,
+	type UntrackResult,
+	untrackBranch,
+} from "../lib/untrack";
 
 interface UntrackCommandOptions {
 	downstack?: boolean;

@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DubError } from "../lib/errors";
 import { rebaseContinue } from "../lib/git";
 import { detectActiveOperation } from "../lib/operation-state";
-import { restackContinue } from "./restack";
 import { continueCommand } from "./continue";
+import { restackContinue } from "./restack";
 
 vi.mock("../lib/operation-state");
 vi.mock("../lib/git");

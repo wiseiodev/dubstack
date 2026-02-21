@@ -2,7 +2,7 @@ import { stdin as input, stdout as output } from "node:process";
 import * as readline from "node:readline/promises";
 import { DubError } from "../lib/errors";
 import { branchExists, getCurrentBranch } from "../lib/git";
-import { trackBranch, type TrackBranchResult } from "../lib/track";
+import { type TrackBranchResult, trackBranch } from "../lib/track";
 
 interface TrackOptions {
 	parent?: string;
@@ -20,7 +20,9 @@ async function promptForParent(
 	const rl = readline.createInterface({ input, output });
 	try {
 		const suffix = suggestedParent ? ` [${suggestedParent}]` : "";
-		const answer = await rl.question(`Parent branch for '${branch}'${suffix}: `);
+		const answer = await rl.question(
+			`Parent branch for '${branch}'${suffix}: `,
+		);
 		const parent = answer.trim() || suggestedParent;
 		if (!parent) {
 			throw new DubError(
@@ -58,10 +60,14 @@ export async function track(
 
 	let parent = options.parent;
 	if (!parent) {
-		const suggestedParent = await resolveSuggestedParent(cwd, branch, currentBranch);
+		const suggestedParent = await resolveSuggestedParent(
+			cwd,
+			branch,
+			currentBranch,
+		);
 		if (interactive) {
 			parent = await promptForParent(branch, suggestedParent);
-		} else {
+		} else if (suggestedParent) {
 			parent = suggestedParent;
 		}
 	}

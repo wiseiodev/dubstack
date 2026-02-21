@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Stack } from "./state";
 import { assertAcyclic, getAncestors, getDescendants } from "./graph";
+import type { Stack } from "./state";
 
 function makeStack(): Stack {
 	return {

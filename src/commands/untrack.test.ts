@@ -67,11 +67,11 @@ describe("untrack command", () => {
 			},
 		});
 
-		await expect(untrack(cwd, "feat/a", { interactive: false })).rejects.toThrow(
-			DubError,
-		);
-		await expect(untrack(cwd, "feat/a", { interactive: false })).rejects.toThrow(
-			"--downstack",
-		);
+		await expect(
+			untrack(cwd, "feat/a", { interactive: false }),
+		).rejects.toThrow(DubError);
+		await expect(
+			untrack(cwd, "feat/a", { interactive: false }),
+		).rejects.toThrow("--downstack");
 	});
 });

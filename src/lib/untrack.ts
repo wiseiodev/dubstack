@@ -46,12 +46,16 @@ export async function untrackBranch(
 	const state = await readState(cwd);
 	const stack = findStackForBranch(state, options.branch);
 	if (!stack) {
-		throw new DubError(`Branch '${options.branch}' is not tracked by DubStack.`);
+		throw new DubError(
+			`Branch '${options.branch}' is not tracked by DubStack.`,
+		);
 	}
 
 	const entry = stack.branches.find((branch) => branch.name === options.branch);
 	if (!entry) {
-		throw new DubError(`Branch '${options.branch}' is missing from tracked stack.`);
+		throw new DubError(
+			`Branch '${options.branch}' is missing from tracked stack.`,
+		);
 	}
 
 	const descendants = getDescendants(stack, options.branch);
@@ -74,8 +78,12 @@ export async function untrackBranch(
 		}
 	}
 
-	stack.branches = stack.branches.filter((branch) => !removedSet.has(branch.name));
-	state.stacks = state.stacks.filter((candidate) => candidate.branches.length > 0);
+	stack.branches = stack.branches.filter(
+		(branch) => !removedSet.has(branch.name),
+	);
+	state.stacks = state.stacks.filter(
+		(candidate) => candidate.branches.length > 0,
+	);
 
 	assertStateInvariants(state.stacks);
 	await writeState(state, cwd);
@@ -89,7 +97,9 @@ export async function untrackBranch(
 function assertStateInvariants(stacks: Stack[]) {
 	for (const stack of stacks) {
 		assertAcyclic(stack);
-		const branchMap = new Map(stack.branches.map((branch) => [branch.name, branch]));
+		const branchMap = new Map(
+			stack.branches.map((branch) => [branch.name, branch]),
+		);
 		for (const branch of stack.branches) {
 			if (branch.type === "root") {
 				if (branch.parent !== null) {

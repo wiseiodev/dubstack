@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { deleteTrackedBranch, getDeletePreview } from "../lib/delete";
 import { DubError } from "../lib/errors";
 import { getCurrentBranch } from "../lib/git";
-import { deleteTrackedBranch, getDeletePreview } from "../lib/delete";
 import { deleteCommand } from "./delete";
 
 vi.mock("../lib/git");

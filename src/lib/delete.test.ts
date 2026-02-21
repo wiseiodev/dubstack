@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestRepo } from "../../test/helpers";
+import { deleteTrackedBranch } from "./delete";
 import { checkoutBranch, deleteLocalBranch, getCurrentBranch } from "./git";
 import { initState, readState, writeState } from "./state";
-import { deleteTrackedBranch } from "./delete";
 
 vi.mock("./git", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("./git")>();
@@ -80,7 +80,9 @@ describe("deleteTrackedBranch", () => {
 
 		expect(result.deleted).toEqual(["feat/b"]);
 		const state = await readState(dir);
-		const featC = state.stacks[0].branches.find((branch) => branch.name === "feat/c");
+		const featC = state.stacks[0].branches.find(
+			(branch) => branch.name === "feat/c",
+		);
 		expect(featC?.parent).toBe("feat/a");
 	});
 

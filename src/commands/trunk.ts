@@ -7,7 +7,10 @@ interface TrunkResult {
 	trunk: string;
 }
 
-export async function trunk(cwd: string, branchArg?: string): Promise<TrunkResult> {
+export async function trunk(
+	cwd: string,
+	branchArg?: string,
+): Promise<TrunkResult> {
 	const branch = branchArg ?? (await getCurrentBranch(cwd));
 	const state = await readState(cwd);
 	const stack = findStackForBranch(state, branch);

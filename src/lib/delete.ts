@@ -45,7 +45,9 @@ export async function deleteTrackedBranch(
 	const state = await readState(cwd);
 	const stack = findStackForBranch(state, options.branch);
 	if (!stack) {
-		throw new DubError(`Branch '${options.branch}' is not tracked by DubStack.`);
+		throw new DubError(
+			`Branch '${options.branch}' is not tracked by DubStack.`,
+		);
 	}
 
 	const targets = collectTargets(stack, options);
@@ -68,7 +70,9 @@ export async function deleteTrackedBranch(
 		}
 	}
 
-	stack.branches = stack.branches.filter((branch) => !deleteSet.has(branch.name));
+	stack.branches = stack.branches.filter(
+		(branch) => !deleteSet.has(branch.name),
+	);
 
 	const reparented: Array<{ branch: string; parent: string | null }> = [];
 	for (const branch of stack.branches) {
@@ -82,7 +86,9 @@ export async function deleteTrackedBranch(
 		}
 	}
 
-	state.stacks = state.stacks.filter((candidate) => candidate.branches.length > 0);
+	state.stacks = state.stacks.filter(
+		(candidate) => candidate.branches.length > 0,
+	);
 	assertStateInvariants(state.stacks);
 	await writeState(state, cwd);
 
@@ -96,9 +102,13 @@ function collectTargets(
 	stack: Stack,
 	options: Pick<DeleteTrackedOptions, "branch" | "upstack" | "downstack">,
 ): string[] {
-	const target = stack.branches.find((branch) => branch.name === options.branch);
+	const target = stack.branches.find(
+		(branch) => branch.name === options.branch,
+	);
 	if (!target) {
-		throw new DubError(`Branch '${options.branch}' is missing from tracked stack.`);
+		throw new DubError(
+			`Branch '${options.branch}' is missing from tracked stack.`,
+		);
 	}
 	if (target.type === "root") {
 		throw new DubError(
@@ -147,7 +157,9 @@ function resolveFallbackBranch(
 function assertStateInvariants(stacks: Stack[]) {
 	for (const stack of stacks) {
 		assertAcyclic(stack);
-		const branchMap = new Map(stack.branches.map((branch) => [branch.name, branch]));
+		const branchMap = new Map(
+			stack.branches.map((branch) => [branch.name, branch]),
+		);
 		for (const branch of stack.branches) {
 			if (branch.type === "root") {
 				if (branch.parent !== null) {

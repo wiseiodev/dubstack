@@ -21,17 +21,17 @@
 import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
-import { branchInfo, formatBranchInfo } from "./commands/branch";
 import { abortCommand } from "./commands/abort";
+import { branchInfo, formatBranchInfo } from "./commands/branch";
 import {
 	checkout,
 	interactiveCheckout,
 	resolveCheckoutTrunk,
 } from "./commands/checkout";
+import { children } from "./commands/children";
 import { continueCommand } from "./commands/continue";
 import { create } from "./commands/create";
 import { deleteCommand } from "./commands/delete";
-import { children } from "./commands/children";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
@@ -42,8 +42,8 @@ import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
 import { track } from "./commands/track";
 import { trunk } from "./commands/trunk";
-import { untrack } from "./commands/untrack";
 import { undo } from "./commands/undo";
+import { untrack } from "./commands/untrack";
 import { DubError } from "./lib/errors";
 
 const require = createRequire(import.meta.url);
@@ -138,9 +138,11 @@ program
 Examples:
   $ dub log    Show the branch tree with current branch highlighted`,
 	)
-	.action(async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
-		await printLog(process.cwd(), options);
-	});
+	.action(
+		async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+			await printLog(process.cwd(), options);
+		},
+	);
 
 program
 	.command("ls")
@@ -148,9 +150,11 @@ program
 	.option("-s, --stack", "Only show the current stack")
 	.option("-a, --all", "Show all stacks (default)")
 	.option("-r, --reverse", "Reverse stack/child ordering")
-	.action(async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
-		await printLog(process.cwd(), options);
-	});
+	.action(
+		async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+			await printLog(process.cwd(), options);
+		},
+	);
 
 program
 	.command("up")
@@ -240,7 +244,10 @@ program
 	.command("track")
 	.argument("[branch]", "Branch to track (defaults to current branch)")
 	.option("-p, --parent <branch>", "Parent branch for tracking")
-	.option("--no-interactive", "Disable parent prompt and require deterministic behavior")
+	.option(
+		"--no-interactive",
+		"Disable parent prompt and require deterministic behavior",
+	)
 	.description("Track a branch or update its parent relationship")
 	.addHelpText(
 		"after",
@@ -271,7 +278,9 @@ Examples:
 					),
 				);
 				console.log(
-					chalk.dim("  Run 'dub restack' if descendant branches now need rebasing."),
+					chalk.dim(
+						"  Run 'dub restack' if descendant branches now need rebasing.",
+					),
 				);
 				return;
 			}
@@ -288,7 +297,9 @@ program
 	.argument("[branch]", "Branch to untrack (defaults to current branch)")
 	.option("--downstack", "Also untrack descendants recursively")
 	.option("--no-interactive", "Disable prompts and require explicit flags")
-	.description("Remove branch metadata from DubStack without deleting git branches")
+	.description(
+		"Remove branch metadata from DubStack without deleting git branches",
+	)
 	.addHelpText(
 		"after",
 		`
@@ -481,9 +492,7 @@ program
 				),
 			);
 			console.log(
-				chalk.dim(
-					"  Resolve conflicts, stage changes, then run: dub continue",
-				),
+				chalk.dim("  Resolve conflicts, stage changes, then run: dub continue"),
 			);
 			return;
 		}

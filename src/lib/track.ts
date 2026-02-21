@@ -58,7 +58,9 @@ export async function trackBranch(
 		return { branch, parent, status: "tracked" };
 	}
 
-	const branchEntry = sourceStack.branches.find((entry) => entry.name === branch);
+	const branchEntry = sourceStack.branches.find(
+		(entry) => entry.name === branch,
+	);
 	if (!branchEntry) {
 		throw new DubError(`Branch '${branch}' is missing from tracked state.`);
 	}
@@ -130,7 +132,9 @@ export async function trackBranch(
 function assertStateInvariants(stacks: Stack[]) {
 	for (const stack of stacks) {
 		assertAcyclic(stack);
-		const branchMap = new Map(stack.branches.map((branch) => [branch.name, branch]));
+		const branchMap = new Map(
+			stack.branches.map((branch) => [branch.name, branch]),
+		);
 		for (const branch of stack.branches) {
 			if (branch.type === "root") {
 				if (branch.parent !== null) {
