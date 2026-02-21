@@ -68,7 +68,11 @@ This is a concise command reference for agents using `dub`.
 | `dub sync --all` | Sync all tracked stacks |
 | `dub sync --no-interactive` | Deterministic non-interactive mode |
 | `dub sync --force` | Skip prompts for destructive actions |
-| `dub sync --no-restack` | Skip restack after sync |
+| `dub sync --restack` | Restack after sync (opt-in) |
+| `dub doctor` | Run health checks and remediation hints |
+| `dub ready` | Run health + submit preflight checks |
+| `dub prune` | Preview stale tracked branch metadata |
+| `dub prune --apply` | Apply stale metadata cleanup |
 | `dub restack` | Rebase branches onto updated parents |
 | `dub restack --continue` | Continue after conflict resolution |
 | `dub continue` | Continue active restack or git rebase |
@@ -80,6 +84,9 @@ This is a concise command reference for agents using `dub`.
 |---|---|
 | `dub submit` / `dub ss` | Push branches and create/update stack PRs |
 | `dub submit --dry-run` | Preview submit actions |
+| `dub submit --path current` | Submit current linear path (default) |
+| `dub submit --path stack` | Submit full stack (requires linear stack) |
+| `dub submit --path stack --fix` | Auto-fallback to current path when safe |
 | `dub pr` | Open current branch PR in browser |
 | `dub pr <branch-or-number>` | Open specific PR target |
 

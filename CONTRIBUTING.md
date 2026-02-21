@@ -26,6 +26,8 @@ pnpm install
    - `pnpm checks`
 5. Open a PR using the repository PR template.
 
+Before submitting stacked PRs, run `dub ready` to validate health + submit preflight.
+
 Core rule: changes are not ready to merge unless all three verification commands pass.
 
 ## Using A Coding Agent

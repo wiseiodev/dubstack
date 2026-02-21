@@ -26,6 +26,9 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | View stack | `dub log` / `dub ls` |
 | View current stack only | `dub log --stack` |
 | Sync with remote | `dub sync` |
+| Check stack health | `dub doctor` |
+| Pre-submit checklist | `dub ready` |
+| Prune stale tracked metadata | `dub prune [--apply]` |
 | Rebase stack | `dub restack` |
 | Continue interrupted op | `dub continue` |
 | Abort interrupted op | `dub abort` |
@@ -96,7 +99,7 @@ dub sync
 dub sync --all
 dub sync --no-interactive
 dub sync --force
-dub sync --no-restack
+dub sync --restack
 ```
 
 ```bash
@@ -109,6 +112,8 @@ dub abort
 ```bash
 dub ss
 dub submit --dry-run
+dub submit --path current
+dub submit --path stack --fix
 ```
 
 ```bash
@@ -147,7 +152,7 @@ dub trunk
 3. Inspect stack with `dub log`
 4. Submit with `dub ss`
 5. Iterate with `dub m ...` and `dub ss`
-6. Keep updated with `dub sync` (or `dub restack` when needed)
+6. Keep updated with `dub sync` (add `--restack` when you want automatic post-sync rebasing)
 
 ## Recovery Patterns
 

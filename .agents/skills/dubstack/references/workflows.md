@@ -37,6 +37,8 @@ git checkout main
 git pull
 
 dub sync
+dub doctor
+dub ready
 ```
 
 If you need deterministic non-interactive behavior:
@@ -45,13 +47,29 @@ If you need deterministic non-interactive behavior:
 dub sync --no-interactive
 ```
 
+If you want automatic restack after sync:
+
+```bash
+dub sync --restack
+```
+
 If you explicitly want destructive reconciliation:
 
 ```bash
 dub sync --force
 ```
 
-## 4) Conflict Recovery During Restack
+## 4) Clean Stale Tracked Metadata
+
+```bash
+# preview
+dub prune
+
+# apply
+dub prune --apply
+```
+
+## 5) Conflict Recovery During Restack
 
 ```bash
 dub restack
@@ -71,7 +89,7 @@ dub continue
 dub abort
 ```
 
-## 5) Open PR Quickly
+## 6) Open PR Quickly
 
 ```bash
 dub pr
@@ -81,7 +99,7 @@ dub pr feat/top
 dub pr 123
 ```
 
-## 6) Recover from Mistakes
+## 7) Recover from Mistakes
 
 ```bash
 dub undo
@@ -91,7 +109,7 @@ Notes:
 - `undo` supports one level.
 - Intended for reverting last `create` or `restack`.
 
-## 7) Repair Untracked Branch Metadata
+## 8) Repair Untracked Branch Metadata
 
 ```bash
 # branch created outside dub create
@@ -104,7 +122,7 @@ dub parent feat/manual
 dub trunk feat/manual
 ```
 
-## 8) Remove Metadata or Delete Branches Safely
+## 9) Remove Metadata or Delete Branches Safely
 
 ```bash
 # metadata-only removal
@@ -120,7 +138,7 @@ dub delete feat/top
 dub delete feat/middle --upstack --force --quiet
 ```
 
-## 9) Stack Inspection Modes
+## 10) Stack Inspection Modes
 
 ```bash
 dub log --stack
@@ -128,7 +146,7 @@ dub log --all
 dub log --reverse
 ```
 
-## 10) Stack Navigation Patterns
+## 11) Stack Navigation Patterns
 
 ```bash
 dub up
@@ -139,7 +157,7 @@ dub top
 dub bottom
 ```
 
-## 11) Checkout Patterns
+## 12) Checkout Patterns
 
 ```bash
 # interactive

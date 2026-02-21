@@ -23,16 +23,43 @@ import {
 } from "../lib/pr-body";
 import {
 	type Branch,
+	type DubState,
 	findStackForBranch,
 	readState,
+	type Stack,
 	topologicalOrder,
 	writeState,
 } from "../lib/state";
 
-interface SubmitResult {
+export type SubmitPathMode = "current" | "stack";
+
+interface SubmitBranchingBlocker {
+	parent: string;
+	children: string[];
+}
+
+export interface SubmitOptions {
+	path?: SubmitPathMode;
+	fix?: boolean;
+}
+
+export interface SubmitPlan {
+	state: DubState;
+	stack: Stack;
+	currentBranch: string;
+	rootBranch: string;
+	path: SubmitPathMode;
+	branches: Branch[];
+	fallbackApplied: boolean;
+}
+
+export interface SubmitResult {
 	pushed: string[];
 	created: string[];
 	updated: string[];
+	path: SubmitPathMode;
+	dryRun: boolean;
+	fallbackApplied: boolean;
 }
 
 /**
@@ -45,44 +72,36 @@ interface SubmitResult {
 export async function submit(
 	cwd: string,
 	dryRun: boolean,
+	options: SubmitOptions = {},
 ): Promise<SubmitResult> {
+	const plan = await getSubmitPlan(cwd, options);
+
 	await ensureGhInstalled();
 	await checkGhAuth();
 
-	const state = await readState(cwd);
-	const currentBranch = await getCurrentBranch(cwd);
-	const stack = findStackForBranch(state, currentBranch);
-
-	if (!stack) {
-		throw new DubError(
-			`Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
-		);
-	}
-
-	const ordered = topologicalOrder(stack);
-	const currentEntry = ordered.find((b) => b.name === currentBranch);
-	if (currentEntry?.type === "root") {
-		throw new DubError(
-			"Cannot submit from a root branch. Run 'dub up' or 'dub checkout <branch>' first.",
-		);
-	}
-
-	const nonRootBranches = ordered.filter((b) => b.type !== "root");
-	const rootBranch =
-		ordered.find((branch) => branch.type === "root")?.name ?? "(unknown)";
 	console.log(
-		`Submitting ${nonRootBranches.length} branch(es) from '${currentBranch}' onto trunk '${rootBranch}'.`,
+		`Submitting ${plan.branches.length} branch(es) from '${plan.currentBranch}' onto trunk '${plan.rootBranch}'.`,
 	);
+	if (plan.fallbackApplied) {
+		console.log(
+			"⚠ Submit --fix detected branching in '--path stack' mode; using '--path current' for this run.",
+		);
+	}
 	if (dryRun) {
 		console.log("[dry-run] no branches will be pushed or mutated.");
 	}
 
-	validateLinearStack(ordered);
-
-	const result: SubmitResult = { pushed: [], created: [], updated: [] };
+	const result: SubmitResult = {
+		pushed: [],
+		created: [],
+		updated: [],
+		path: plan.path,
+		dryRun,
+		fallbackApplied: plan.fallbackApplied,
+	};
 	const prMap = new Map<string, PrInfo>();
 
-	for (const branch of nonRootBranches) {
+	for (const branch of plan.branches) {
 		if (dryRun) {
 			console.log(`[dry-run] would push ${branch.name}`);
 		} else {
@@ -91,7 +110,7 @@ export async function submit(
 		result.pushed.push(branch.name);
 	}
 
-	for (const branch of nonRootBranches) {
+	for (const branch of plan.branches) {
 		const base = branch.parent as string;
 
 		if (dryRun) {
@@ -117,12 +136,14 @@ export async function submit(
 	}
 
 	if (!dryRun) {
-		await updateAllPrBodies(nonRootBranches, prMap, stack.id, cwd);
+		await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd);
 
-		for (const branch of nonRootBranches) {
+		for (const branch of plan.branches) {
 			const pr = prMap.get(branch.name);
 			if (pr) {
-				const stateBranch = stack.branches.find((b) => b.name === branch.name);
+				const stateBranch = plan.stack.branches.find(
+					(b) => b.name === branch.name,
+				);
 				if (stateBranch) {
 					stateBranch.pr_number = pr.number;
 					stateBranch.pr_link = pr.url;
@@ -140,29 +161,148 @@ export async function submit(
 				}
 			}
 		}
-		await writeState(state, cwd);
+		await writeState(plan.state, cwd);
 	}
 
 	return result;
 }
 
-function validateLinearStack(ordered: Branch[]): void {
-	const childCount = new Map<string, number>();
-	for (const branch of ordered) {
-		if (branch.parent) {
-			childCount.set(branch.parent, (childCount.get(branch.parent) ?? 0) + 1);
+export async function getSubmitPlan(
+	cwd: string,
+	options: SubmitOptions = {},
+): Promise<SubmitPlan> {
+	const state = await readState(cwd);
+	const currentBranch = await getCurrentBranch(cwd);
+	const stack = findStackForBranch(state, currentBranch);
+
+	if (!stack) {
+		throw new DubError(
+			`Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
+		);
+	}
+
+	const ordered = topologicalOrder(stack);
+	const currentEntry = ordered.find((b) => b.name === currentBranch);
+	if (currentEntry?.type === "root") {
+		throw new DubError(
+			"Cannot submit from a root branch. Run 'dub up' or 'dub checkout <branch>' first.",
+		);
+	}
+
+	const requestedPath = options.path ?? "current";
+	let resolvedPath: SubmitPathMode = requestedPath;
+	let branchesWithRoot =
+		requestedPath === "stack"
+			? ordered
+			: getCurrentPathBranches(stack, currentBranch);
+	let fallbackApplied = false;
+	let blockers = findBranchingBlockers(branchesWithRoot);
+
+	if (blockers.length > 0 && requestedPath === "stack" && options.fix) {
+		const currentPathBranches = getCurrentPathBranches(stack, currentBranch);
+		const currentPathBlockers = findBranchingBlockers(currentPathBranches);
+		if (currentPathBlockers.length === 0) {
+			resolvedPath = "current";
+			branchesWithRoot = currentPathBranches;
+			blockers = [];
+			fallbackApplied = true;
 		}
 	}
-	for (const [parent, count] of childCount) {
-		if (count > 1) {
+
+	if (blockers.length > 0) {
+		throw new DubError(buildBranchingErrorMessage(blockers, currentBranch));
+	}
+
+	const rootBranch =
+		branchesWithRoot.find((branch) => branch.type === "root" || !branch.parent)
+			?.name ?? "(unknown)";
+	const branches = branchesWithRoot.filter((b) => b.type !== "root");
+
+	return {
+		state,
+		stack,
+		currentBranch,
+		rootBranch,
+		path: resolvedPath,
+		branches,
+		fallbackApplied,
+	};
+}
+
+function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
+	const branchMap = new Map(
+		stack.branches.map((branch) => [branch.name, branch]),
+	);
+	const path: Branch[] = [];
+	const seen = new Set<string>();
+	let cursor = branchMap.get(currentBranch);
+
+	if (!cursor) {
+		throw new DubError(
+			`Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
+		);
+	}
+
+	while (cursor) {
+		if (seen.has(cursor.name)) {
 			throw new DubError(
-				`Branch '${parent}' has ${count} children. ` +
-					"Branching stacks are not supported by submit. " +
-					"Ensure each branch has at most one child. " +
-					"Use 'dub track <child> --parent <branch>' to re-parent branches and linearize the stack before submitting.",
+				`Stack metadata is invalid: cycle detected while tracing '${currentBranch}'.`,
+			);
+		}
+		seen.add(cursor.name);
+		path.push(cursor);
+		if (!cursor.parent) break;
+		cursor = branchMap.get(cursor.parent);
+		if (!cursor) {
+			throw new DubError(
+				`Stack metadata is invalid: missing parent branch while tracing '${currentBranch}'.`,
 			);
 		}
 	}
+
+	return path.reverse();
+}
+
+function findBranchingBlockers(ordered: Branch[]): SubmitBranchingBlocker[] {
+	const branchSet = new Set(ordered.map((branch) => branch.name));
+	const childMap = new Map<string, string[]>();
+
+	for (const branch of ordered) {
+		if (!branch.parent || !branchSet.has(branch.parent)) continue;
+		const children = childMap.get(branch.parent) ?? [];
+		children.push(branch.name);
+		childMap.set(branch.parent, children);
+	}
+
+	const blockers: SubmitBranchingBlocker[] = [];
+	for (const [parent, children] of childMap) {
+		if (children.length <= 1) continue;
+		blockers.push({
+			parent,
+			children: [...children].sort(),
+		});
+	}
+
+	return blockers.sort((a, b) => a.parent.localeCompare(b.parent));
+}
+
+function buildBranchingErrorMessage(
+	blockers: SubmitBranchingBlocker[],
+	currentBranch: string,
+): string {
+	const details = blockers
+		.map((blocker) => `${blocker.parent} -> ${blocker.children.join(", ")}`)
+		.join("\n  - ");
+	return (
+		"Branching stacks are not supported by submit in this mode.\n" +
+		`Found ${blockers.length} branching parent(s):\n` +
+		`  - ${details}\n` +
+		`Current branch: '${currentBranch}'\n` +
+		"Fix options:\n" +
+		"  1. Submit only your current linear path: dub submit --path current\n" +
+		"  2. Retry with safe auto-fix: dub submit --path stack --fix\n" +
+		"  3. Re-parent to linearize manually: dub track <child> --parent <branch>"
+	);
 }
 
 async function updateAllPrBodies(
