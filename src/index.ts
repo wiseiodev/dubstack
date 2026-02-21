@@ -1146,8 +1146,10 @@ function beginHistoryCapture(): void {
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
   const captureLine = (line: string) => {
+    const normalized = normalizeHistoryLine(line);
+    if (normalized.length === 0) return;
     if (output.length >= MAX_HISTORY_OUTPUT_LINES) return;
-    output.push(truncateHistoryLine(redactSensitiveText(line)));
+    output.push(truncateHistoryLine(redactSensitiveText(normalized)));
   };
 
   const captureChunk = (
@@ -1239,6 +1241,11 @@ async function finalizeHistoryCapture(
 function truncateHistoryLine(line: string): string {
   if (line.length <= MAX_HISTORY_OUTPUT_LINE_LENGTH) return line;
   return `${line.slice(0, MAX_HISTORY_OUTPUT_LINE_LENGTH)}...`;
+}
+
+function normalizeHistoryLine(line: string): string {
+  const visible = line.split('\r').pop() ?? '';
+  return visible.trim().length === 0 ? '' : visible;
 }
 
 main();

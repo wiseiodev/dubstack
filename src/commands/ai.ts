@@ -13,6 +13,7 @@ import { DubError } from '../lib/errors';
 
 interface WritableLike {
   write: (chunk: string | Uint8Array) => unknown;
+  isTTY?: boolean;
 }
 
 interface AskAiDependencies {
@@ -45,9 +46,12 @@ const THINKING_PROVIDER_OPTIONS = {
   google: {
     thinkingConfig: {
       thinkingLevel: 'high' as const,
+      includeThoughts: true,
     },
   },
 };
+
+const SPINNER_FRAMES = ['-', '\\', '|', '/'] as const;
 
 export async function askAi(
   prompt: string,
@@ -89,11 +93,39 @@ export async function askAi(
     providerOptions: THINKING_PROVIDER_OPTIONS,
   });
 
+  const thinkingRenderer = createThinkingRenderer(output);
   let wroteOutput = false;
-  for await (const part of result.textStream) {
-    output.write(part);
-    wroteOutput = true;
+  for await (const part of result.fullStream) {
+    switch (part.type) {
+      case 'reasoning-start': {
+        thinkingRenderer.start();
+        break;
+      }
+      case 'reasoning-delta': {
+        thinkingRenderer.update(part.text);
+        break;
+      }
+      case 'reasoning-end': {
+        thinkingRenderer.stop();
+        break;
+      }
+      case 'text-delta': {
+        thinkingRenderer.pauseForText();
+        output.write(part.text);
+        wroteOutput = true;
+        break;
+      }
+      case 'error': {
+        throw part.error instanceof Error
+          ? part.error
+          : new DubError('AI assistant stream failed unexpectedly.');
+      }
+      default: {
+        break;
+      }
+    }
   }
+  thinkingRenderer.stop();
 
   if (wroteOutput) {
     output.write('\n');
@@ -133,4 +165,66 @@ function resolveModel(deps: AskAiDependencies): {
   throw new DubError(
     "AI assistant requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env --gemini-key <key>' or 'dub ai env --gateway-key <key>'.",
   );
+}
+
+function createThinkingRenderer(output: WritableLike): {
+  start: () => void;
+  update: (delta: string) => void;
+  pauseForText: () => void;
+  stop: () => void;
+} {
+  if (!output.isTTY) {
+    return {
+      start() {},
+      update() {},
+      pauseForText() {},
+      stop() {},
+    };
+  }
+
+  let spinnerIndex = 0;
+  let preview = '';
+  let lineLength = 0;
+  let active = false;
+  let hasRendered = false;
+
+  const clearLine = () => {
+    if (!hasRendered) return;
+    output.write(`\r${' '.repeat(lineLength)}\r`);
+    lineLength = 0;
+    hasRendered = false;
+  };
+
+  const render = () => {
+    const frame = SPINNER_FRAMES[spinnerIndex];
+    spinnerIndex = (spinnerIndex + 1) % SPINNER_FRAMES.length;
+
+    const summary =
+      preview.length > 96 ? `${preview.slice(0, 93)}...` : preview;
+    const line = `${frame} thinking: ${summary || 'working...'}`;
+    output.write(`\r${line}`);
+    lineLength = line.length;
+    hasRendered = true;
+  };
+
+  return {
+    start() {
+      if (active) return;
+      active = true;
+      render();
+    },
+    update(delta: string) {
+      if (!active) return;
+      preview += delta;
+      render();
+    },
+    pauseForText() {
+      clearLine();
+    },
+    stop() {
+      active = false;
+      preview = '';
+      clearLine();
+    },
+  };
 }
