@@ -1,6 +1,8 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { LanguageModel } from 'ai';
-import { createGateway, streamText } from 'ai';
+import { createGateway, stepCountIs, streamText } from 'ai';
+import { createBashTool } from 'bash-tool';
+import { createLocalBashSandbox } from '../lib/ai-bash-sandbox';
 import {
   buildAiSystemPrompt,
   buildAiUserPrompt,
@@ -15,6 +17,7 @@ interface WritableLike {
 
 interface AskAiDependencies {
   streamText: typeof streamText;
+  createBashTool: typeof createBashTool;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
   collectAiContext: typeof collectAiContext;
@@ -32,6 +35,7 @@ interface AskAiResult {
 
 const DEFAULT_DEPS: AskAiDependencies = {
   streamText,
+  createBashTool,
   createGoogleGenerativeAI,
   createGateway,
   collectAiContext,
@@ -67,11 +71,21 @@ export async function askAi(
   const resolved = resolveModel(deps);
   const context = await deps.collectAiContext(cwd);
   const contextPrompt = buildAiUserPrompt(normalizedPrompt, context);
+  const bashToolkit = await deps.createBashTool({
+    destination: cwd,
+    sandbox: createLocalBashSandbox(cwd),
+    extraInstructions:
+      'Safety: use bash only when command output is needed. Avoid destructive commands (for example, rm -rf, git reset --hard, git clean -fd) unless the user explicitly asks.',
+  });
 
   const result = deps.streamText({
     model: resolved.model,
     system: buildAiSystemPrompt(),
     prompt: contextPrompt,
+    stopWhen: stepCountIs(6),
+    tools: {
+      bash: bashToolkit.tools.bash,
+    },
     providerOptions: THINKING_PROVIDER_OPTIONS,
   });
 

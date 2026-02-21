@@ -43,6 +43,18 @@ function createOutputCapture() {
   };
 }
 
+function createBashToolMock() {
+  const bashTool = { id: 'bash-tool' } as const;
+  const createBashTool = vi.fn().mockResolvedValue({
+    tools: {
+      bash: bashTool,
+      readFile: { id: 'read-file-tool' },
+      writeFile: { id: 'write-file-tool' },
+    },
+  });
+  return { createBashTool, bashTool };
+}
+
 describe('askAi', () => {
   const fakeContext: AiContext = {
     generatedAt: '2026-02-21T00:00:00.000Z',
@@ -74,6 +86,7 @@ describe('askAi', () => {
     const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
     const createGateway = vi.fn();
     const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool, bashTool } = createBashToolMock();
     const output = createOutputCapture();
 
     const result = await askAi('Explain this stack', dir, {
@@ -83,6 +96,7 @@ describe('askAi', () => {
         createGoogleGenerativeAI,
         createGateway,
         collectAiContext,
+        createBashTool,
       },
     });
 
@@ -91,6 +105,11 @@ describe('askAi', () => {
     });
     expect(googleModel).toHaveBeenCalledWith('gemini-3-flash');
     expect(createGateway).not.toHaveBeenCalled();
+    expect(createBashTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination: dir,
+      }),
+    );
     expect(result.provider).toBe('google');
     expect(output.writes.join('')).toBe('hello\n');
 
@@ -99,6 +118,10 @@ describe('askAi', () => {
         model: 'google-model',
         prompt: expect.stringContaining('Explain this stack'),
         system: expect.stringContaining('DubStack assistant'),
+        stopWhen: expect.any(Function),
+        tools: {
+          bash: bashTool,
+        },
         providerOptions: {
           google: {
             thinkingConfig: {
@@ -122,6 +145,7 @@ describe('askAi', () => {
     const gatewayModel = vi.fn().mockReturnValue('gateway-model');
     const createGateway = vi.fn().mockReturnValue(gatewayModel);
     const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
     const output = createOutputCapture();
 
     const result = await askAi('Explain this stack', dir, {
@@ -131,6 +155,7 @@ describe('askAi', () => {
         createGoogleGenerativeAI,
         createGateway,
         collectAiContext,
+        createBashTool,
       },
     });
 
