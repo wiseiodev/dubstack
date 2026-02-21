@@ -91,31 +91,43 @@ Examples:
 
 program
   .command('create')
-  .argument('<branch-name>', 'Name of the new branch to create')
+  .argument('[branch-name]', 'Name of the new branch to create')
   .description('Create a new branch stacked on top of the current branch')
   .option('-m, --message <message>', 'Commit staged changes with this message')
-  .option('-a, --all', 'Stage all changes before committing (requires -m)')
+  .option(
+    '-a, --all',
+    'Stage all changes before committing (requires -m or --ai)',
+  )
   .option(
     '-u, --update',
-    'Stage tracked file updates before committing (requires -m)',
+    'Stage tracked file updates before committing (requires -m or --ai)',
   )
-  .option('-p, --patch', 'Pick hunks to stage before committing (requires -m)')
+  .option(
+    '-p, --patch',
+    'Pick hunks to stage before committing (requires -m or --ai)',
+  )
+  .option(
+    '-i, --ai',
+    'AI-generate branch + conventional commit from staged changes',
+  )
   .addHelpText(
     'after',
     `
 Examples:
   $ dub create feat/api                       Create branch only
   $ dub create feat/api -m "feat: add API"    Create branch + commit staged
-  $ dub create feat/api -am "feat: add API"   Stage all + create + commit`,
+  $ dub create feat/api -am "feat: add API"   Stage all + create + commit
+  $ dub create --ai                            AI-generate branch + commit from staged`,
   )
   .action(
     async (
-      branchName: string,
+      branchName: string | undefined,
       options: {
         message?: string;
         all?: boolean;
         update?: boolean;
         patch?: boolean;
+        ai?: boolean;
       },
     ) => {
       const result = await create(branchName, process.cwd(), {
@@ -123,6 +135,7 @@ Examples:
         all: options.all,
         update: options.update,
         patch: options.patch,
+        ai: options.ai,
       });
       if (result.committed) {
         console.log(
@@ -1242,6 +1255,11 @@ async function finalizeHistoryCapture(
 function truncateHistoryLine(line: string): string {
   if (line.length <= MAX_HISTORY_OUTPUT_LINE_LENGTH) return line;
   return `${line.slice(0, MAX_HISTORY_OUTPUT_LINE_LENGTH)}...`;
+}
+
+function _normalizeHistoryLine(line: string): string {
+  const visible = line.split('\r').pop() ?? '';
+  return visible.trim().length === 0 ? '' : visible;
 }
 
 main();

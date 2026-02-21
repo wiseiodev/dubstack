@@ -14,6 +14,7 @@ import {
   getMergeBase,
   hasStagedChanges,
   isGitRepo,
+  isValidBranchName,
   isWorkingTreeClean,
   rebaseOnto,
   stageAll,
@@ -66,6 +67,16 @@ describe('branchExists', () => {
 
   it('returns false for a nonexistent branch', async () => {
     expect(await branchExists('nonexistent', dir)).toBe(false);
+  });
+});
+
+describe('isValidBranchName', () => {
+  it('returns true for a valid branch name', async () => {
+    expect(await isValidBranchName('feat/valid-name', dir)).toBe(true);
+  });
+
+  it('returns false for an invalid branch name', async () => {
+    expect(await isValidBranchName('feat with spaces', dir)).toBe(false);
   });
 });
 

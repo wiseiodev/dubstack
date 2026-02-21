@@ -120,7 +120,7 @@ Notes:
 - `dub create` auto-initializes state if needed.
 - Running `dub init` manually is still useful for explicit setup.
 
-### `dub create <branch>`
+### `dub create [branch]`
 
 Create a branch stacked on top of the current branch.
 
@@ -139,13 +139,20 @@ dub create feat/my-change -um "feat: ..."
 
 # interactive hunk staging + create + commit
 dub create feat/my-change -pm "feat: ..."
+
+# AI-generate branch + conventional commit from staged changes
+dub create --ai
+
+# stage all, then AI-generate branch + commit (supports -ai shorthand)
+dub create -ai
 ```
 
 Flags:
 - `-m, --message <message>`: commit message
-- `-a, --all`: stage all changes before commit (requires `-m`)
-- `-u, --update`: stage tracked-file updates before commit (requires `-m`)
-- `-p, --patch`: select hunks interactively before commit (requires `-m`)
+- `-a, --all`: stage all changes before commit (requires `-m` or `--ai`)
+- `-u, --update`: stage tracked-file updates before commit (requires `-m` or `--ai`)
+- `-p, --patch`: select hunks interactively before commit (requires `-m` or `--ai`)
+- `-i, --ai`: AI-generate branch + conventional commit from staged changes
 
 ### `dub modify` / `dub m`
 
