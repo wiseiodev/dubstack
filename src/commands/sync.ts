@@ -204,18 +204,10 @@ export async function sync(
     }
     for (const branch of cleanupPlan.toDelete) {
       if (excludedFromSync.has(branch)) continue;
-      let shouldDelete = options.force;
-      if (!shouldDelete && options.interactive) {
-        shouldDelete = await confirm(
-          `Branch '${branch}' has merged/closed PR and is in trunk. Delete local branch?`,
-        );
-      }
-      if (shouldDelete) {
-        await checkoutBranch(roots[0] ?? originalBranch, cwd);
-        await deleteBranch(branch, cwd);
-        removeBranchFromState(scopeStacks, branch);
-        result.cleaned.push(branch);
-      }
+      await checkoutBranch(roots[0] ?? originalBranch, cwd);
+      await deleteBranch(branch, cwd);
+      removeBranchFromState(scopeStacks, branch);
+      result.cleaned.push(branch);
     }
     for (const skipped of cleanupPlan.skipped) {
       console.log(

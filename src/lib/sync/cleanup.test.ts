@@ -2,18 +2,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { buildCleanupPlan } from './cleanup';
 
 describe('buildCleanupPlan', () => {
-  it('marks branch cleanable when PR is merged and branch is in trunk', async () => {
+  it('marks merged PR branch cleanable without requiring ancestry', async () => {
     const result = await buildCleanupPlan({
       branches: ['feat/a'],
       getPrStatus: vi.fn().mockResolvedValue('MERGED'),
-      isMergedIntoAnyRoot: vi.fn().mockResolvedValue(true),
+      isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
     });
 
     expect(result.toDelete).toEqual(['feat/a']);
     expect(result.skipped).toEqual([]);
   });
 
-  it('skips closed/merged PR branch when commits are not in trunk', async () => {
+  it('skips closed PR branch when commits are not in trunk', async () => {
     const result = await buildCleanupPlan({
       branches: ['feat/a'],
       getPrStatus: vi.fn().mockResolvedValue('CLOSED'),

@@ -317,7 +317,7 @@ describe('sync', () => {
     );
   });
 
-  it('cleans merged branch that is already contained in trunk', async () => {
+  it('cleans merged branch automatically without force', async () => {
     mockReadState.mockResolvedValue(
       makeState([
         { name: 'main', parent: null, type: 'root' },
@@ -325,20 +325,13 @@ describe('sync', () => {
       ]),
     );
     mockGetBranchPrLifecycleState.mockResolvedValue('MERGED');
-    mockIsAncestor.mockResolvedValue(true);
 
     const result = await sync('/repo', {
       interactive: false,
-      force: true,
       restack: false,
     });
 
     expect(mockDeleteBranch).toHaveBeenCalledWith('feat/a', '/repo');
-    expect(mockIsAncestor).toHaveBeenCalledWith(
-      'feat/a',
-      'origin/main',
-      '/repo',
-    );
     expect(result.cleaned).toContain('feat/a');
     expect(result.branches).toHaveLength(0);
     const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;

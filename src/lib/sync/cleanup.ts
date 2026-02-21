@@ -15,7 +15,13 @@ export async function buildCleanupPlan(input: {
 
   for (const branch of input.branches) {
     const prState = await input.getPrStatus(branch);
-    if (prState !== 'MERGED' && prState !== 'CLOSED') {
+    if (prState === 'MERGED') {
+      // Squash/rebase merge strategies may not preserve branch commit ancestry,
+      // but a merged PR still means the change is integrated and branch is cleanable.
+      toDelete.push(branch);
+      continue;
+    }
+    if (prState !== 'CLOSED') {
       continue;
     }
 
