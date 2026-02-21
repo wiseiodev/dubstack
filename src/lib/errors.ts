@@ -10,8 +10,8 @@
  * ```
  */
 export class DubError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "DubError";
-	}
+  constructor(message: string) {
+    super(message);
+    this.name = 'DubError';
+  }
 }

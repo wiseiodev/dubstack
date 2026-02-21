@@ -5,8 +5,9 @@ Use this as a quick implementation checklist for both human and agent contributo
 ## Language And Formatting
 
 - TypeScript + ESM imports.
-- Tabs for indentation.
-- Double quotes for strings.
+- 2-space indentation.
+- Single quotes for strings.
+- Kebab-case file names.
 - Keep changes source-first in `src/`; do not hand-edit generated output in `dist/`.
 
 ## Command Design

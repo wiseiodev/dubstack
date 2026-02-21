@@ -30,6 +30,13 @@ Before submitting stacked PRs, run `dub ready` to validate health + submit prefl
 
 Core rule: changes are not ready to merge unless all three verification commands pass.
 
+## Formatting And Naming
+
+- Biome is the source of truth for formatting/linting.
+- Use 2 spaces (not tabs) for indentation.
+- Use single quotes in JavaScript/TypeScript.
+- Use kebab-case file names.
+
 ## Using A Coding Agent
 
 If you use Codex, Claude Code, Cursor Agent, or similar:
@@ -78,3 +85,4 @@ git config commit.template .github/commit-template.txt
 - If UX or command semantics change, update docs in the same PR (`README.md`, `QUICKSTART.md`, or `.agents/*` as needed).
 - For stacked PRs, merge bottom-up. Use `dub merge-next` to avoid out-of-order merges.
 - This repo includes a merge-order guard workflow; keep it enabled as a required status check in branch protection.
+- This repo also runs a Biome autofix workflow on PRs from branches in this repository and applies unsafe autofixes (which include safe fixes) automatically.
