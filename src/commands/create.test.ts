@@ -147,7 +147,33 @@ describe("create with -a -m", () => {
 describe("create with -a but no -m", () => {
 	it("throws requiring -m", async () => {
 		await expect(create("feat/bad", dir, { all: true })).rejects.toThrow(
-			"requires '-m'",
+			"require '-m'",
 		);
+	});
+});
+
+describe("create with -u -m", () => {
+	it("stages tracked updates, creates branch, and commits", async () => {
+		const trackedFile = path.join(dir, "tracked.txt");
+		fs.writeFileSync(trackedFile, "one\n");
+		await gitInRepo(dir, ["add", "tracked.txt"]);
+		await gitInRepo(dir, ["commit", "-m", "test: add tracked file"]);
+		fs.writeFileSync(trackedFile, "two\n");
+
+		const result = await create("feat/update", dir, {
+			message: "feat: update tracked files",
+			update: true,
+		});
+
+		expect(result.branch).toBe("feat/update");
+		expect(result.committed).toBe("feat: update tracked files");
+		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
+		expect(stdout.trim()).toBe("feat: update tracked files");
+	});
+
+	it("requires -m when --update is passed", async () => {
+		await expect(
+			create("feat/update-only", dir, { update: true }),
+		).rejects.toThrow("require '-m'");
 	});
 });

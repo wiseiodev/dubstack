@@ -34,6 +34,21 @@ function getTrackedStackOrThrow(
  * Requires a linear stack path.
  */
 export async function up(cwd: string): Promise<NavigateResult> {
+	return upBySteps(cwd, 1);
+}
+
+/**
+ * Checkout the child branch of the current branch by N steps.
+ * Requires a linear stack path.
+ */
+export async function upBySteps(
+	cwd: string,
+	steps: number,
+): Promise<NavigateResult> {
+	if (!Number.isInteger(steps) || steps < 1) {
+		throw new DubError("'steps' must be a positive integer.");
+	}
+
 	const state = await readState(cwd);
 	const current = await getCurrentBranch(cwd);
 	const stack = getTrackedStackOrThrow(
@@ -41,45 +56,66 @@ export async function up(cwd: string): Promise<NavigateResult> {
 		findStackForBranch(state, current),
 	);
 
-	const children = getChildren(stack, current);
-	if (children.length === 0) {
-		throw new DubError(`No branch above '${current}' in the current stack.`);
-	}
-	if (children.length > 1) {
-		throw new DubError(
-			`Branch '${current}' has multiple children; 'dub up' requires a linear stack path.`,
-		);
+	let target = current;
+	for (let i = 0; i < steps; i++) {
+		const children = getChildren(stack, target);
+		if (children.length === 0) {
+			throw new DubError(`No branch above '${target}' in the current stack.`);
+		}
+		if (children.length > 1) {
+			throw new DubError(
+				`Branch '${target}' has multiple children; 'dub up' requires a linear stack path.`,
+			);
+		}
+		target = children[0];
 	}
 
-	await checkoutBranch(children[0], cwd);
-	return { branch: children[0], changed: children[0] !== current };
+	await checkoutBranch(target, cwd);
+	return { branch: target, changed: target !== current };
 }
 
 /**
  * Checkout the direct parent branch of the current branch.
  */
 export async function down(cwd: string): Promise<NavigateResult> {
+	return downBySteps(cwd, 1);
+}
+
+/**
+ * Checkout the parent branch of the current branch by N steps.
+ */
+export async function downBySteps(
+	cwd: string,
+	steps: number,
+): Promise<NavigateResult> {
+	if (!Number.isInteger(steps) || steps < 1) {
+		throw new DubError("'steps' must be a positive integer.");
+	}
+
 	const state = await readState(cwd);
 	const current = await getCurrentBranch(cwd);
 	const stack = getTrackedStackOrThrow(
 		current,
 		findStackForBranch(state, current),
 	);
-	const branch = getBranchByName(stack, current);
-
-	if (!branch) {
-		throw new DubError(
-			`Current branch '${current}' is not tracked by DubStack.`,
-		);
+	let target = current;
+	for (let i = 0; i < steps; i++) {
+		const branch = getBranchByName(stack, target);
+		if (!branch) {
+			throw new DubError(
+				`Current branch '${target}' is not tracked by DubStack.`,
+			);
+		}
+		if (!branch.parent) {
+			throw new DubError(
+				`Already at the bottom of the stack (root branch '${target}').`,
+			);
+		}
+		target = branch.parent;
 	}
-	if (!branch.parent) {
-		throw new DubError(
-			`Already at the bottom of the stack (root branch '${current}').`,
-		);
-	}
 
-	await checkoutBranch(branch.parent, cwd);
-	return { branch: branch.parent, changed: branch.parent !== current };
+	await checkoutBranch(target, cwd);
+	return { branch: target, changed: target !== current };
 }
 
 /**

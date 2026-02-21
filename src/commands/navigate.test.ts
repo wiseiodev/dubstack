@@ -3,7 +3,7 @@ import { createTestRepo, gitInRepo } from "../../test/helpers";
 import { getCurrentBranch } from "../lib/git";
 import { create } from "./create";
 import { init } from "./init";
-import { bottom, down, top, up } from "./navigate";
+import { bottom, down, downBySteps, top, up, upBySteps } from "./navigate";
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -32,6 +32,21 @@ describe("navigate", () => {
 		expect(await getCurrentBranch(dir)).toBe("feat/b");
 
 		const downResult = await down(dir);
+		expect(downResult.branch).toBe("feat/a");
+		expect(await getCurrentBranch(dir)).toBe("feat/a");
+	});
+
+	it("moves multiple steps with upBySteps/downBySteps", async () => {
+		await create("feat/a", dir);
+		await create("feat/b", dir);
+		await create("feat/c", dir);
+		await gitInRepo(dir, ["checkout", "feat/a"]);
+
+		const upResult = await upBySteps(dir, 2);
+		expect(upResult.branch).toBe("feat/c");
+		expect(await getCurrentBranch(dir)).toBe("feat/c");
+
+		const downResult = await downBySteps(dir, 2);
 		expect(downResult.branch).toBe("feat/a");
 		expect(await getCurrentBranch(dir)).toBe("feat/a");
 	});
@@ -85,6 +100,12 @@ describe("navigate", () => {
 		await gitInRepo(dir, ["checkout", "main"]);
 
 		await expect(down(dir)).rejects.toThrow("Already at the bottom");
+	});
+
+	it("throws for non-positive step counts", async () => {
+		await create("feat/a", dir);
+		await expect(upBySteps(dir, 0)).rejects.toThrow("positive integer");
+		await expect(downBySteps(dir, -1)).rejects.toThrow("positive integer");
 	});
 
 	it("throws for top when path is non-linear", async () => {

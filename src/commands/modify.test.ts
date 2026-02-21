@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as git from "../lib/git";
 import * as state from "../lib/state";
 import { modify } from "./modify";
@@ -10,6 +10,10 @@ vi.mock("./restack");
 
 describe("modify", () => {
 	const cwd = "/tmp/test";
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
 
 	it("should amend commit by default", async () => {
 		vi.mocked(git.getCurrentBranch).mockResolvedValue("feature-branch");
@@ -83,5 +87,53 @@ describe("modify", () => {
 
 		expect(git.interactiveRebase).toHaveBeenCalledWith("sha-main", cwd);
 		expect(restackModule.restack).toHaveBeenCalled();
+	});
+
+	it("prints staged diff with --verbose", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		vi.mocked(git.getCurrentBranch).mockResolvedValue("feature-branch");
+		vi.mocked(state.readState).mockResolvedValue({ stacks: [] });
+		vi.mocked(git.hasStagedChanges).mockResolvedValue(true);
+		vi.mocked(git.getDiff).mockResolvedValue("staged diff");
+
+		await modify(cwd, { verbose: 1 });
+
+		expect(git.getDiff).toHaveBeenCalledWith(cwd, true);
+		expect(logSpy).toHaveBeenCalledWith("staged diff");
+		logSpy.mockRestore();
+	});
+
+	it("prints unstaged diff too with --verbose --verbose", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+		vi.mocked(git.getCurrentBranch).mockResolvedValue("feature-branch");
+		vi.mocked(state.readState).mockResolvedValue({ stacks: [] });
+		vi.mocked(git.hasStagedChanges).mockResolvedValue(true);
+		vi.mocked(git.getDiff)
+			.mockResolvedValueOnce("staged diff")
+			.mockResolvedValueOnce("unstaged diff");
+
+		await modify(cwd, { verbose: 2 });
+
+		expect(git.getDiff).toHaveBeenNthCalledWith(1, cwd, true);
+		expect(git.getDiff).toHaveBeenNthCalledWith(2, cwd, false);
+		expect(logSpy).toHaveBeenCalledWith("staged diff");
+		expect(logSpy).toHaveBeenCalledWith("unstaged diff");
+		logSpy.mockRestore();
+	});
+
+	it("joins multiple -m values into one commit message", async () => {
+		vi.mocked(git.getCurrentBranch).mockResolvedValue("feature-branch");
+		vi.mocked(state.readState).mockResolvedValue({ stacks: [] });
+		vi.mocked(git.hasStagedChanges).mockResolvedValue(true);
+
+		await modify(cwd, {
+			commit: true,
+			message: ["line one", "line two"],
+		});
+
+		expect(git.commit).toHaveBeenCalledWith(cwd, {
+			message: "line one\n\nline two",
+			noEdit: true,
+		});
 	});
 });

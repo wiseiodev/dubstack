@@ -234,3 +234,35 @@ export async function updatePrBody(
 		throw new DubError(`Failed to update PR #${prNumber}: ${message}`);
 	}
 }
+
+/**
+ * Opens a PR in the browser via GitHub CLI.
+ *
+ * @param cwd - Working directory
+ * @param target - Optional branch name, PR number, or URL
+ */
+export async function openPrInBrowser(
+	cwd: string,
+	target?: string,
+): Promise<void> {
+	const args = target
+		? ["pr", "view", target, "--web"]
+		: ["pr", "view", "--web"];
+	try {
+		await execa("gh", args, { cwd, stdio: "inherit" });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (message.toLowerCase().includes("no pull requests")) {
+			throw new DubError(
+				target
+					? `No PR found for '${target}'.`
+					: "No PR found for the current branch.",
+			);
+		}
+		throw new DubError(
+			target
+				? `Failed to open PR for '${target}': ${message}`
+				: `Failed to open PR: ${message}`,
+		);
+	}
+}

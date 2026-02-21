@@ -62,6 +62,20 @@ describe("branch info", () => {
 		});
 	});
 
+	it("returns metadata for explicitly requested branch", async () => {
+		await create("feat/a", dir);
+		await create("feat/b", dir);
+		await gitInRepo(dir, ["checkout", "feat/b"]);
+
+		const info = await branchInfo(dir, "feat/a");
+		expect(info).toMatchObject({
+			currentBranch: "feat/a",
+			tracked: true,
+			parent: "main",
+			children: ["feat/b"],
+		});
+	});
+
 	it("formats tracked and untracked output for CLI display", () => {
 		const tracked = formatBranchInfo({
 			currentBranch: "feat/a",

@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestRepo, gitInRepo } from "../../test/helpers";
 import { getCurrentBranch } from "../lib/git";
 import { type DubState, readState } from "../lib/state";
-import { checkout, getTrackedBranches, getValidBranches } from "./checkout";
+import {
+	checkout,
+	getStackRelativeBranches,
+	getTrackedBranches,
+	getValidBranches,
+	resolveCheckoutTrunk,
+} from "./checkout";
 import { create } from "./create";
 import { init } from "./init";
 
@@ -35,6 +41,12 @@ describe("checkout", () => {
 
 	it("throws when branch does not exist", async () => {
 		await expect(checkout("nope", dir)).rejects.toThrow("not found");
+	});
+
+	it("resolves tracked trunk for checkout --trunk", async () => {
+		await create("feat/a", dir);
+		const trunk = await resolveCheckoutTrunk(dir);
+		expect(trunk).toBe("main");
 	});
 });
 
@@ -107,5 +119,25 @@ describe("getValidBranches", () => {
 		const tracked = ["feat/a"];
 		const local = ["main"];
 		expect(getValidBranches(tracked, local)).toEqual([]);
+	});
+});
+
+describe("getStackRelativeBranches", () => {
+	it("returns the current stack branch set", async () => {
+		await create("feat/a", dir);
+		await create("feat/b", dir);
+		await gitInRepo(dir, ["checkout", "feat/a"]);
+
+		const state = await readState(dir);
+		expect(getStackRelativeBranches(state, "feat/a")).toEqual([
+			"feat/a",
+			"feat/b",
+			"main",
+		]);
+	});
+
+	it("returns empty list for untracked branch", async () => {
+		const state = await readState(dir);
+		expect(getStackRelativeBranches(state, "rogue")).toEqual([]);
 	});
 });

@@ -4,6 +4,7 @@ import {
 	commit,
 	getBranchTip,
 	getCurrentBranch,
+	getDiff,
 	hasStagedChanges,
 	interactiveRebase,
 	interactiveStage,
@@ -28,7 +29,7 @@ interface ModifyOptions {
 	/** Amend staged changes to the specified branch. */
 	into?: string;
 	/** Message for the new or amended commit. */
-	message?: string;
+	message?: string | string[];
 	/** Pick hunks to stage before committing. */
 	patch?: boolean;
 	/** Set the author to the current user. */
@@ -36,7 +37,7 @@ interface ModifyOptions {
 	/** Stage all updates to tracked files. */
 	update?: boolean;
 	/** Show unified diff. */
-	verbose?: boolean;
+	verbose?: number;
 }
 
 /**
@@ -79,9 +80,11 @@ export async function modify(
 		await stageUpdate(cwd);
 	}
 
+	await printVerboseDiff(cwd, options.verbose ?? 0);
+
 	const hasStaged = await hasStagedChanges(cwd);
 	const shouldCreateNew = options.commit;
-	const message = options.message;
+	const message = normalizeMessage(options.message);
 	const noEdit = !options.edit && !!message;
 
 	if (shouldCreateNew) {
@@ -95,6 +98,26 @@ export async function modify(
 	}
 
 	await restackChildren(cwd);
+}
+
+function normalizeMessage(message?: string | string[]): string | undefined {
+	if (Array.isArray(message)) {
+		const chunks = message.map((part) => part.trim()).filter(Boolean);
+		return chunks.length > 0 ? chunks.join("\n\n") : undefined;
+	}
+	return message;
+}
+
+async function printVerboseDiff(cwd: string, level: number): Promise<void> {
+	if (level < 1) return;
+
+	const staged = await getDiff(cwd, true);
+	console.log(staged || "(no staged diff)");
+
+	if (level > 1) {
+		const unstaged = await getDiff(cwd, false);
+		console.log(unstaged || "(no unstaged diff)");
+	}
 }
 
 /**

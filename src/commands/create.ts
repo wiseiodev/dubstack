@@ -5,7 +5,9 @@ import {
 	createBranch,
 	getCurrentBranch,
 	hasStagedChanges,
+	interactiveStage,
 	stageAll,
+	stageUpdate,
 } from "../lib/git";
 import { addBranchToStack, ensureState, writeState } from "../lib/state";
 import { saveUndoEntry } from "../lib/undo-log";
@@ -13,6 +15,8 @@ import { saveUndoEntry } from "../lib/undo-log";
 interface CreateOptions {
 	message?: string;
 	all?: boolean;
+	update?: boolean;
+	patch?: boolean;
 }
 
 interface CreateResult {
@@ -38,8 +42,10 @@ export async function create(
 	cwd: string,
 	options?: CreateOptions,
 ): Promise<CreateResult> {
-	if (options?.all && !options.message) {
-		throw new DubError("'-a' requires '-m'. Pass a commit message.");
+	if ((options?.all || options?.update || options?.patch) && !options.message) {
+		throw new DubError(
+			"'--all', '--update', and '--patch' require '-m'. Pass a commit message.",
+		);
 	}
 
 	const state = await ensureState(cwd);
@@ -50,8 +56,12 @@ export async function create(
 	}
 
 	if (options?.message) {
-		if (options.all) {
+		if (options.patch) {
+			await interactiveStage(cwd);
+		} else if (options.all) {
 			await stageAll(cwd);
+		} else if (options.update) {
+			await stageUpdate(cwd);
 		}
 
 		if (!(await hasStagedChanges(cwd))) {

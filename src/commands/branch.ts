@@ -24,14 +24,17 @@ function getChildren(stack: Stack, branchName: string): string[] {
 /**
  * Returns tracked branch metadata for the current branch.
  */
-export async function branchInfo(cwd: string): Promise<BranchInfoResult> {
+export async function branchInfo(
+	cwd: string,
+	branchName?: string,
+): Promise<BranchInfoResult> {
 	const state = await readState(cwd);
-	const currentBranch = await getCurrentBranch(cwd);
-	const stack = findStackForBranch(state, currentBranch);
+	const resolvedBranch = branchName ?? (await getCurrentBranch(cwd));
+	const stack = findStackForBranch(state, resolvedBranch);
 
 	if (!stack) {
 		return {
-			currentBranch,
+			currentBranch: resolvedBranch,
 			tracked: false,
 			stackId: null,
 			root: null,
@@ -41,16 +44,16 @@ export async function branchInfo(cwd: string): Promise<BranchInfoResult> {
 	}
 
 	const current = stack.branches.find(
-		(branch) => branch.name === currentBranch,
+		(branch) => branch.name === resolvedBranch,
 	);
 
 	return {
-		currentBranch,
+		currentBranch: resolvedBranch,
 		tracked: true,
 		stackId: stack.id,
 		root: findRootName(stack),
 		parent: current?.parent ?? null,
-		children: getChildren(stack, currentBranch),
+		children: getChildren(stack, resolvedBranch),
 	};
 }
 

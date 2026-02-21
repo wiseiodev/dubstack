@@ -22,11 +22,16 @@ import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
 import { branchInfo, formatBranchInfo } from "./commands/branch";
-import { checkout, interactiveCheckout } from "./commands/checkout";
+import {
+	checkout,
+	interactiveCheckout,
+	resolveCheckoutTrunk,
+} from "./commands/checkout";
 import { create } from "./commands/create";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
-import { bottom, down, top, up } from "./commands/navigate";
+import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
+import { pr } from "./commands/pr";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
@@ -67,6 +72,11 @@ program
 	.description("Create a new branch stacked on top of the current branch")
 	.option("-m, --message <message>", "Commit staged changes with this message")
 	.option("-a, --all", "Stage all changes before committing (requires -m)")
+	.option(
+		"-u, --update",
+		"Stage tracked file updates before committing (requires -m)",
+	)
+	.option("-p, --patch", "Pick hunks to stage before committing (requires -m)")
 	.addHelpText(
 		"after",
 		`
@@ -78,11 +88,18 @@ Examples:
 	.action(
 		async (
 			branchName: string,
-			options: { message?: string; all?: boolean },
+			options: {
+				message?: string;
+				all?: boolean;
+				update?: boolean;
+				patch?: boolean;
+			},
 		) => {
 			const result = await create(branchName, process.cwd(), {
 				message: options.message,
 				all: options.all,
+				update: options.update,
+				patch: options.patch,
 			});
 			if (result.committed) {
 				console.log(
@@ -102,6 +119,7 @@ Examples:
 
 program
 	.command("log")
+	.alias("l")
 	.description("Display an ASCII tree of the current stack")
 	.addHelpText(
 		"after",
@@ -122,9 +140,12 @@ program
 
 program
 	.command("up")
+	.argument("[steps]", "Number of levels to traverse upstack")
+	.option("-n, --steps <count>", "Number of levels to traverse upstack")
 	.description("Checkout the child branch directly above the current branch")
-	.action(async () => {
-		const result = await up(process.cwd());
+	.action(async (stepsArg: string | undefined, options: { steps?: string }) => {
+		const steps = parseSteps(stepsArg, options.steps);
+		const result = await upBySteps(process.cwd(), steps);
 		if (result.changed) {
 			console.log(chalk.green(`✔ Switched up to '${result.branch}'`));
 		} else {
@@ -134,9 +155,12 @@ program
 
 program
 	.command("down")
+	.argument("[steps]", "Number of levels to traverse downstack")
+	.option("-n, --steps <count>", "Number of levels to traverse downstack")
 	.description("Checkout the parent branch directly below the current branch")
-	.action(async () => {
-		const result = await down(process.cwd());
+	.action(async (stepsArg: string | undefined, options: { steps?: string }) => {
+		const steps = parseSteps(stepsArg, options.steps);
+		const result = await downBySteps(process.cwd(), steps);
 		if (result.changed) {
 			console.log(chalk.green(`✔ Switched down to '${result.branch}'`));
 		} else {
@@ -182,11 +206,21 @@ program
 	.addCommand(
 		new Command("info")
 			.description("Show tracked stack info for the current branch")
-			.action(async () => {
-				const info = await branchInfo(process.cwd());
+			.argument("[branch]", "Branch to inspect (defaults to current branch)")
+			.action(async (branch?: string) => {
+				const info = await branchInfo(process.cwd(), branch);
 				console.log(formatBranchInfo(info));
 			}),
 	);
+
+program
+	.command("info")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show tracked stack info for a branch")
+	.action(async (branch?: string) => {
+		const info = await branchInfo(process.cwd(), branch);
+		console.log(formatBranchInfo(info));
+	});
 
 program
 	.command("sync")
@@ -283,20 +317,52 @@ program
 	.action(runSubmit);
 
 program
-	.command("co")
+	.command("checkout")
+	.alias("co")
 	.argument("[branch]", "Branch to checkout (interactive if omitted)")
+	.option("-t, --trunk", "Checkout the current trunk")
+	.option(
+		"-u, --show-untracked",
+		"Include untracked branches in interactive selection",
+	)
+	.option(
+		"-s, --stack",
+		"Only show ancestors and descendants of current branch in interactive selection",
+	)
+	.option(
+		"-a, --all",
+		"Show branches across all tracked stacks in interactive selection",
+	)
 	.description("Checkout a branch (interactive picker if no name given)")
-	.action(async (branch?: string) => {
-		if (branch) {
-			const result = await checkout(branch, process.cwd());
-			console.log(chalk.green(`✔ Switched to '${result.branch}'`));
-		} else {
-			const result = await interactiveCheckout(process.cwd());
-			if (result) {
+	.action(
+		async (
+			branch: string | undefined,
+			options: {
+				trunk?: boolean;
+				showUntracked?: boolean;
+				stack?: boolean;
+				all?: boolean;
+			},
+		) => {
+			if (branch) {
+				const result = await checkout(branch, process.cwd());
 				console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+			} else if (options.trunk) {
+				const trunk = await resolveCheckoutTrunk(process.cwd());
+				const result = await checkout(trunk, process.cwd());
+				console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+			} else {
+				const result = await interactiveCheckout(process.cwd(), {
+					showUntracked: options.showUntracked,
+					stack: options.stack,
+					all: options.all,
+				});
+				if (result) {
+					console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+				}
 			}
-		}
-	});
+		},
+	);
 
 program
 	.command("skills")
@@ -333,9 +399,20 @@ program
 	.option("-a, --all", "Stage all changes before committing")
 	.option("-c, --commit", "Create a new commit instead of amending")
 	.option("-e, --edit", "Open editor to edit the commit message")
-	.option("-m, --message <message>", "Message for the new or amended commit")
+	.option(
+		"-m, --message <message>",
+		"Message for the new or amended commit",
+		(value: string, previous: string[] = []) => [...previous, value],
+		[],
+	)
 	.option("-p, --patch", "Pick hunks to stage before committing")
 	.option("-u, --update", "Stage all updates to tracked files")
+	.option(
+		"-v, --verbose",
+		"Show staged diff before modify (repeat for unstaged diff too)",
+		(_value: unknown, previous = 0) => previous + 1,
+		0,
+	)
 	.option(
 		"--interactive-rebase",
 		"Start an interactive rebase on the branch commits",
@@ -345,7 +422,22 @@ program
 	// .option("-v, --verbose", "Show unified diff") // TODO: Implement verbose
 	.action(async (options) => {
 		const { modify } = await import("./commands/modify");
-		await modify(process.cwd(), options);
+		const normalizedOptions = {
+			...options,
+			message:
+				Array.isArray(options.message) && options.message.length === 1
+					? options.message[0]
+					: options.message,
+		};
+		await modify(process.cwd(), normalizedOptions);
+	});
+
+program
+	.command("pr")
+	.argument("[branch]", "Branch name or PR number to open")
+	.description("Open a branch PR in your browser")
+	.action(async (branch?: string) => {
+		await pr(process.cwd(), branch);
 	});
 
 async function runSubmit(options: { dryRun?: boolean }) {
@@ -369,6 +461,16 @@ async function printLog(cwd: string) {
 		.replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan("$1 (Current)"))
 		.replace(/⚠ \(missing\)/g, chalk.yellow("⚠ (missing)"));
 	console.log(styled);
+}
+
+function parseSteps(positional?: string, option?: string): number {
+	const raw = option ?? positional;
+	if (!raw) return 1;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isInteger(parsed) || parsed < 1) {
+		throw new DubError("Steps must be a positive integer.");
+	}
+	return parsed;
 }
 
 async function main() {

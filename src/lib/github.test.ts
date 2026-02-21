@@ -19,6 +19,7 @@ import {
 	getBranchPrLifecycleState,
 	getBranchPrSyncInfo,
 	getPr,
+	openPrInBrowser,
 	updatePrBody,
 } from "./github";
 
@@ -189,6 +190,27 @@ describe("updatePrBody", () => {
 
 		await expect(updatePrBody(42, "/tmp/body.md", "/repo")).rejects.toThrow(
 			"permissions",
+		);
+	});
+});
+
+describe("openPrInBrowser", () => {
+	it("opens current branch PR in browser when no target is provided", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "" });
+		await openPrInBrowser("/repo");
+		expect(mockExeca).toHaveBeenCalledWith("gh", ["pr", "view", "--web"], {
+			cwd: "/repo",
+			stdio: "inherit",
+		});
+	});
+
+	it("opens the PR for the provided branch/number target", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "" });
+		await openPrInBrowser("/repo", "feat/a");
+		expect(mockExeca).toHaveBeenCalledWith(
+			"gh",
+			["pr", "view", "feat/a", "--web"],
+			{ cwd: "/repo", stdio: "inherit" },
 		);
 	});
 });

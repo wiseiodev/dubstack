@@ -1,7 +1,12 @@
 import search from "@inquirer/search";
 import { DubError } from "../lib/errors";
-import { checkoutBranch, getCurrentBranch, listBranches } from "../lib/git";
-import { type DubState, readState } from "../lib/state";
+import {
+	branchExists,
+	checkoutBranch,
+	getCurrentBranch,
+	listBranches,
+} from "../lib/git";
+import { type DubState, findStackForBranch, readState } from "../lib/state";
 
 /**
  * Returns a sorted, deduplicated list of branch names tracked by DubStack.
@@ -24,6 +29,37 @@ export function getTrackedBranches(state: DubState): string[] {
 export function getValidBranches(tracked: string[], local: string[]): string[] {
 	const localSet = new Set(local);
 	return tracked.filter((b) => localSet.has(b));
+}
+
+/**
+ * Returns tracked branch names in the current stack (ancestors + descendants),
+ * including the provided branch itself.
+ */
+export function getStackRelativeBranches(
+	state: DubState,
+	branchName: string,
+): string[] {
+	const stack = findStackForBranch(state, branchName);
+	if (!stack) return [];
+	return [...new Set(stack.branches.map((branch) => branch.name))].sort();
+}
+
+/**
+ * Resolves the current trunk branch for the active stack.
+ * Falls back to local "main" or "master" if the current branch is untracked.
+ */
+export async function resolveCheckoutTrunk(cwd: string): Promise<string> {
+	const state = await readState(cwd);
+	const currentBranch = await getCurrentBranch(cwd);
+	const stack = findStackForBranch(state, currentBranch);
+	const trackedRoot =
+		stack?.branches.find((branch) => branch.type === "root")?.name ?? null;
+	if (trackedRoot) return trackedRoot;
+	if (await branchExists("main", cwd)) return "main";
+	if (await branchExists("master", cwd)) return "master";
+	throw new DubError(
+		`Could not determine trunk branch for '${currentBranch}'.`,
+	);
 }
 
 /**
@@ -54,24 +90,35 @@ export async function checkout(
  */
 export async function interactiveCheckout(
 	cwd: string,
+	options: {
+		showUntracked?: boolean;
+		stack?: boolean;
+		all?: boolean;
+	} = {},
 ): Promise<{ branch: string } | null> {
 	const state = await readState(cwd);
-	const trackedBranches = getTrackedBranches(state);
 	const localBranches = await listBranches(cwd);
+	const currentBranch = await getCurrentBranch(cwd).catch(() => null);
+	const trackedBranches = getTrackedBranches(state);
+	const stackBranches = currentBranch
+		? getStackRelativeBranches(state, currentBranch)
+		: [];
 
-	const validBranches = getValidBranches(trackedBranches, localBranches);
+	let branchCandidates = options.showUntracked
+		? [...new Set(localBranches)].sort()
+		: getValidBranches(trackedBranches, localBranches);
+
+	if (options.stack && stackBranches.length > 0) {
+		const stackSet = new Set(stackBranches);
+		branchCandidates = branchCandidates.filter((name) => stackSet.has(name));
+	}
+
+	const validBranches = branchCandidates;
 
 	if (validBranches.length === 0) {
 		throw new DubError(
 			"No valid tracked branches found. Run 'dub create' first.",
 		);
-	}
-
-	let currentBranch: string | null = null;
-	try {
-		currentBranch = await getCurrentBranch(cwd);
-	} catch {
-		// Detached HEAD — no branch marked as current
 	}
 
 	// Setup AbortController for Esc key support
