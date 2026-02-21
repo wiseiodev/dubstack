@@ -354,7 +354,7 @@ Use these when the CLI reports conflicts or an in-progress operation.
 
 ### `dub submit` / `dub ss`
 
-Push stack branches and create or update PRs.
+Push branches and create or update PRs.
 
 ```bash
 dub submit
@@ -362,6 +362,15 @@ dub ss
 
 # preview only
 dub submit --dry-run
+
+# submit only current linear path (default)
+dub submit --path current
+
+# submit the whole stack graph (requires linearity)
+dub submit --path stack
+
+# auto-fallback to current path when stack-mode is blocked
+dub submit --path stack --fix
 ```
 
 ### `dub pr [branch-or-number]`
@@ -379,7 +388,7 @@ dub pr 123
 
 ### `dub sync`
 
-Synchronize tracked branches with remote refs, then optionally restack.
+Synchronize tracked branches with remote refs.
 
 ```bash
 # sync current stack
@@ -394,8 +403,8 @@ dub sync --no-interactive
 # force destructive sync decisions
 dub sync --force
 
-# skip post-sync restack
-dub sync --no-restack
+# include post-sync restack
+dub sync --restack
 ```
 
 Current sync behavior includes:
@@ -403,7 +412,89 @@ Current sync behavior includes:
 - attempt trunk fast-forward (or overwrite with `--force`)
 - cleanup for merged/closed PR branches whose commits are confirmed in trunk
 - reconcile local/remote divergence states per branch
-- restack by default after sync
+- optional restack when `--restack` is set
+
+### `dub doctor`
+
+Run health checks for stack metadata and submit readiness.
+
+```bash
+dub doctor
+
+# check all stacks
+dub doctor --all
+
+# skip remote fetch if needed
+dub doctor --no-fetch
+```
+
+Checks include:
+- in-progress operation detection (`dub continue`/`dub abort`)
+- missing tracked local/remote branches
+- submit branching blockers
+- local/remote SHA drift
+
+### `dub ready`
+
+Run pre-submit checklist (`doctor` + submit preflight).
+
+```bash
+dub ready
+```
+
+### `dub prune`
+
+Preview or remove stale tracked branch metadata.
+
+```bash
+# preview only
+dub prune
+
+# apply removals
+dub prune --apply
+
+# include every stack
+dub prune --all --apply
+```
+
+### `dub merge-check`
+
+Validate merge order for a stack PR.
+
+```bash
+# check current branch PR
+dub merge-check
+
+# check explicit PR number
+dub merge-check --pr 123
+```
+
+### `dub merge-next` / `dub land`
+
+Merge the next safe PR in your current stack path, then run post-merge maintenance.
+
+```bash
+dub merge-next
+# alias
+dub land
+
+# preview only
+dub merge-next --dry-run
+```
+
+### `dub post-merge`
+
+Repair stack metadata and retarget remaining PRs after manual merges.
+
+```bash
+dub post-merge
+
+# preview only
+dub post-merge --dry-run
+
+# include all stacks
+dub post-merge --all
+```
 
 ### `dub restack`
 
@@ -464,6 +555,24 @@ dub ss
 git checkout main
 git pull
 dub sync
+# optional restack in one command
+dub sync --restack
+```
+
+### Merge stacks safely (bottom-up)
+
+```bash
+# merge next safe PR in stack order
+dub merge-next
+
+# run again for the next layer
+dub merge-next
+```
+
+If you merged manually, normalize state and retarget remaining PRs:
+
+```bash
+dub post-merge
 ```
 
 ### Recover from restack conflict
@@ -489,6 +598,29 @@ dub restack --continue
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
 | Wrong operation during create/restack | Use `dub undo` (single-level) |
+| PR merge blocked by order | Run `dub merge-check --pr <number>` and merge previous PR first |
+| Manual merge left stack inconsistent | Run `dub post-merge` |
+
+### Stale Branch Recovery
+
+When submit or sync gets blocked by stale tracked branches:
+
+```bash
+# 1) Inspect current health
+dub doctor
+
+# 2) Preview stale branch metadata
+dub prune
+
+# 3) Remove stale metadata if confirmed
+dub prune --apply
+
+# 4) Re-run pre-submit checks
+dub ready
+
+# 5) Submit current linear path
+dub submit --path current
+```
 
 ## State Files
 

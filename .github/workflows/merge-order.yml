@@ -1,0 +1,24 @@
+name: Merge Order Guard
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+jobs:
+  merge-order:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate DubStack merge order
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pnpm dev merge-check --pr ${{ github.event.pull_request.number }}

@@ -1,0 +1,40 @@
+name: Biome Autofix
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: biome-autofix-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  autofix:
+    permissions:
+      contents: write
+    if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Setup Biome
+        uses: biomejs/setup-biome@v2
+        with:
+          version: 2.4.2
+
+      - name: Apply Biome safe + unsafe fixes
+        run: biome check --write --unsafe .
+
+      - name: Verify Biome checks
+        run: biome check .
+
+      - name: Commit autofixes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore(biome): apply automated formatting and lint fixes'
+          commit_user_name: dubstack-bot
+          commit_user_email: actions@users.noreply.github.com

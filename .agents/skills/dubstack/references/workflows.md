@@ -1,82 +1,193 @@
-# DubStack Workflows
+# DubStack Workflow Reference
 
-## Creating a Stack
+Use these as copy-paste playbooks.
+
+## 1) Create and Submit a New Stack
 
 ```bash
-# Start from trunk
-dub co main
+git checkout main
 git pull
 
-# Create first branch + commit
-dub create feat/auth-base -am "feat: add auth types"
+dub create feat/base -am "feat: add base layer"
+dub create feat/middle -am "feat: add middle layer"
+dub create feat/top -am "feat: add top layer"
 
-# Stack second branch on top
-dub create feat/auth-login -am "feat: add login flow"
-
-# Stack third branch
-dub create feat/auth-tests -am "test: add auth tests"
-
-# Submit entire stack
+dub log
 dub ss
 ```
 
-## Updating a Branch in the Stack
-
-Scenario: You need to fix something in the middle branch `feat/auth-login`.
+## 2) Update a Middle Branch After Review
 
 ```bash
-# Checkout the branch (use interactive picker if name forgotten: `dub co`)
-dub co feat/auth-login
+dub co feat/middle
 
-# Make changes
-git add .
-git commit -m "fix: address review feedback"
+# edit files...
+dub m -a -m "fix: address review feedback"
 
-# Update upstack branches (feat/auth-tests) to build on your fix
-dub restack
+# optional diff check before modify
+dub m -vv
 
-# Submit changes
 dub ss
 ```
 
-## Syncing After Trunk Updates
-
-Scenario: `main` has moved forward, and you need to bring your stack up to date.
+## 3) Sync After Trunk Moves
 
 ```bash
-# Update main
-dub co main
+git checkout main
 git pull
 
-# Rebase the entire stack onto the new main
-dub restack
-
-# If conflicts occur:
-#   1. Resolve files
-#   2. git add <files>
-#   3. git rebase --continue
-#   4. Repeat until done
+dub sync
+dub doctor
+dub ready
 ```
 
-## Handling Merged PRs
-
-Scenario: The bottom branch `feat/auth-base` has been merged into `main`.
+If you need deterministic non-interactive behavior:
 
 ```bash
-# Update main
-dub co main
-git pull
-
-# Restack remaining branches
-# DubStack detects that feat/auth-login's parent (feat/auth-base) is merged
-# and rebases it onto main automatically (if history allows), or you may need to manually rebase.
-dub restack
+dub sync --no-interactive
 ```
 
-## Recovering from Mistakes
+If you want automatic restack after sync:
 
 ```bash
-# Created the wrong branch or messed up a restack?
+dub sync --restack
+```
+
+If you explicitly want destructive reconciliation:
+
+```bash
+dub sync --force
+```
+
+## 4) Clean Stale Tracked Metadata
+
+```bash
+# preview
+dub prune
+
+# apply
+dub prune --apply
+```
+
+## 5) Merge Stack Safely (Bottom-Up)
+
+```bash
+# optional explicit guard
+dub merge-check --pr 123
+
+# merge next safe PR + run maintenance
+dub merge-next
+
+# repeat until complete
+dub merge-next
+```
+
+If manual merges happened:
+
+```bash
+dub post-merge
+```
+
+## 6) Conflict Recovery During Restack
+
+```bash
+dub restack
+# conflict occurs
+
+# resolve files
+git add <resolved-files>
+
+dub restack --continue
+```
+
+If you are already mid-operation, use the unified recovery commands:
+
+```bash
+dub continue
+# or
+dub abort
+```
+
+## 7) Open PR Quickly
+
+```bash
+dub pr
+# or
+dub pr feat/top
+# or
+dub pr 123
+```
+
+## 8) Recover from Mistakes
+
+```bash
 dub undo
-# Reverts the last 'create' or 'restack' operation state
+```
+
+Notes:
+- `undo` supports one level.
+- Intended for reverting last `create` or `restack`.
+
+## 9) Repair Untracked Branch Metadata
+
+```bash
+# branch created outside dub create
+git checkout feat/manual
+
+dub track feat/manual --parent main
+
+# verify placement
+dub parent feat/manual
+dub trunk feat/manual
+```
+
+## 10) Remove Metadata or Delete Branches Safely
+
+```bash
+# metadata-only removal
+dub untrack feat/top
+
+# remove branch + descendants from metadata
+dub untrack feat/middle --downstack
+
+# delete branch with confirmation
+dub delete feat/top
+
+# delete branch and descendants non-interactively
+dub delete feat/middle --upstack --force --quiet
+```
+
+## 11) Stack Inspection Modes
+
+```bash
+dub log --stack
+dub log --all
+dub log --reverse
+```
+
+## 12) Stack Navigation Patterns
+
+```bash
+dub up
+dub up 2
+dub down
+dub down --steps 2
+dub top
+dub bottom
+```
+
+## 13) Checkout Patterns
+
+```bash
+# interactive
+dub checkout
+
+# interactive current stack only
+dub checkout --stack
+
+# include untracked branches
+dub checkout --show-untracked
+
+# jump to trunk
+dub checkout --trunk
 ```

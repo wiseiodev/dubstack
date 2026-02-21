@@ -1,40 +1,40 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { DubError } from "../lib/errors";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { DubError } from '../lib/errors';
 import {
-	branchExists,
-	checkoutBranch,
-	getBranchTip,
-	getCurrentBranch,
-	getMergeBase,
-	rebaseContinue as gitRebaseContinue,
-	isWorkingTreeClean,
-	rebaseOnto,
-} from "../lib/git";
+  branchExists,
+  checkoutBranch,
+  getBranchTip,
+  getCurrentBranch,
+  getMergeBase,
+  rebaseContinue as gitRebaseContinue,
+  isWorkingTreeClean,
+  rebaseOnto,
+} from '../lib/git';
 import {
-	getDubDir,
-	readState,
-	type Stack,
-	topologicalOrder,
-} from "../lib/state";
-import { saveUndoEntry } from "../lib/undo-log";
+  getDubDir,
+  readState,
+  type Stack,
+  topologicalOrder,
+} from '../lib/state';
+import { saveUndoEntry } from '../lib/undo-log';
 
 interface RestackStep {
-	branch: string;
-	parent: string;
-	parentOldTip: string;
-	status: "pending" | "done" | "skipped" | "conflicted";
+  branch: string;
+  parent: string;
+  parentOldTip: string;
+  status: 'pending' | 'done' | 'skipped' | 'conflicted';
 }
 
 interface RestackProgress {
-	originalBranch: string;
-	steps: RestackStep[];
+  originalBranch: string;
+  steps: RestackStep[];
 }
 
 interface RestackResult {
-	status: "success" | "conflict" | "up-to-date";
-	rebased: string[];
-	conflictBranch?: string;
+  status: 'success' | 'conflict' | 'up-to-date';
+  rebased: string[];
+  conflictBranch?: string;
 }
 
 /**
@@ -53,61 +53,61 @@ interface RestackResult {
  * @throws {DubError} If not initialized, dirty tree, not in a stack, or branch missing
  */
 export async function restack(cwd: string): Promise<RestackResult> {
-	const state = await readState(cwd);
+  const state = await readState(cwd);
 
-	if (!(await isWorkingTreeClean(cwd))) {
-		throw new DubError(
-			"Working tree has uncommitted changes. Commit or stash them before restacking.",
-		);
-	}
+  if (!(await isWorkingTreeClean(cwd))) {
+    throw new DubError(
+      'Working tree has uncommitted changes. Commit or stash them before restacking.',
+    );
+  }
 
-	const originalBranch = await getCurrentBranch(cwd);
-	const targetStacks = getTargetStacks(state.stacks, originalBranch);
+  const originalBranch = await getCurrentBranch(cwd);
+  const targetStacks = getTargetStacks(state.stacks, originalBranch);
 
-	if (targetStacks.length === 0) {
-		throw new DubError(
-			`Branch '${originalBranch}' is not part of any stack. Run 'dub create' first.`,
-		);
-	}
+  if (targetStacks.length === 0) {
+    throw new DubError(
+      `Branch '${originalBranch}' is not part of any stack. Run 'dub create' first.`,
+    );
+  }
 
-	const allBranches = targetStacks.flatMap((s) => s.branches);
-	for (const branch of allBranches) {
-		if (!(await branchExists(branch.name, cwd))) {
-			throw new DubError(
-				`Branch '${branch.name}' is tracked in state but no longer exists in git.\n` +
-					"  Remove it from the stack or recreate it before restacking.",
-			);
-		}
-	}
+  const allBranches = targetStacks.flatMap((s) => s.branches);
+  for (const branch of allBranches) {
+    if (!(await branchExists(branch.name, cwd))) {
+      throw new DubError(
+        `Branch '${branch.name}' is tracked in state but no longer exists in git.\n` +
+          '  Remove it from the stack or recreate it before restacking.',
+      );
+    }
+  }
 
-	// Snapshot all branch tips BEFORE building steps or rebasing
-	const branchTips: Record<string, string> = {};
-	for (const branch of allBranches) {
-		branchTips[branch.name] = await getBranchTip(branch.name, cwd);
-	}
+  // Snapshot all branch tips BEFORE building steps or rebasing
+  const branchTips: Record<string, string> = {};
+  for (const branch of allBranches) {
+    branchTips[branch.name] = await getBranchTip(branch.name, cwd);
+  }
 
-	const steps = await buildRestackSteps(targetStacks, cwd);
+  const steps = await buildRestackSteps(targetStacks, cwd);
 
-	if (steps.length === 0) {
-		return { status: "up-to-date", rebased: [] };
-	}
+  if (steps.length === 0) {
+    return { status: 'up-to-date', rebased: [] };
+  }
 
-	await saveUndoEntry(
-		{
-			operation: "restack",
-			timestamp: new Date().toISOString(),
-			previousBranch: originalBranch,
-			previousState: structuredClone(state),
-			branchTips,
-			createdBranches: [],
-		},
-		cwd,
-	);
+  await saveUndoEntry(
+    {
+      operation: 'restack',
+      timestamp: new Date().toISOString(),
+      previousBranch: originalBranch,
+      previousState: structuredClone(state),
+      branchTips,
+      createdBranches: [],
+    },
+    cwd,
+  );
 
-	const progress: RestackProgress = { originalBranch, steps };
-	await writeProgress(progress, cwd);
+  const progress: RestackProgress = { originalBranch, steps };
+  await writeProgress(progress, cwd);
 
-	return executeRestackSteps(progress, cwd);
+  return executeRestackSteps(progress, cwd);
 }
 
 /**
@@ -120,128 +120,128 @@ export async function restack(cwd: string): Promise<RestackResult> {
  * @throws {DubError} If no restack is in progress
  */
 export async function restackContinue(cwd: string): Promise<RestackResult> {
-	const progress = await readProgress(cwd);
+  const progress = await readProgress(cwd);
 
-	if (!progress) {
-		throw new DubError("No restack in progress. Run 'dub restack' to start.");
-	}
+  if (!progress) {
+    throw new DubError("No restack in progress. Run 'dub restack' to start.");
+  }
 
-	await gitRebaseContinue(cwd);
+  await gitRebaseContinue(cwd);
 
-	const conflictedStep = progress.steps.find((s) => s.status === "conflicted");
-	if (conflictedStep) {
-		conflictedStep.status = "done";
-	}
+  const conflictedStep = progress.steps.find((s) => s.status === 'conflicted');
+  if (conflictedStep) {
+    conflictedStep.status = 'done';
+  }
 
-	return executeRestackSteps(progress, cwd);
+  return executeRestackSteps(progress, cwd);
 }
 
 async function executeRestackSteps(
-	progress: RestackProgress,
-	cwd: string,
+  progress: RestackProgress,
+  cwd: string,
 ): Promise<RestackResult> {
-	const rebased: string[] = [];
+  const rebased: string[] = [];
 
-	for (const step of progress.steps) {
-		if (step.status !== "pending") {
-			if (step.status === "done") rebased.push(step.branch);
-			continue;
-		}
+  for (const step of progress.steps) {
+    if (step.status !== 'pending') {
+      if (step.status === 'done') rebased.push(step.branch);
+      continue;
+    }
 
-		const parentNewTip = await getBranchTip(step.parent, cwd);
-		if (parentNewTip === step.parentOldTip) {
-			step.status = "skipped";
-			await writeProgress(progress, cwd);
-			continue;
-		}
+    const parentNewTip = await getBranchTip(step.parent, cwd);
+    if (parentNewTip === step.parentOldTip) {
+      step.status = 'skipped';
+      await writeProgress(progress, cwd);
+      continue;
+    }
 
-		try {
-			await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
-			step.status = "done";
-			rebased.push(step.branch);
-			await writeProgress(progress, cwd);
-		} catch (error) {
-			if (error instanceof DubError && error.message.includes("Conflict")) {
-				step.status = "conflicted";
-				await writeProgress(progress, cwd);
-				return { status: "conflict", rebased, conflictBranch: step.branch };
-			}
-			throw error;
-		}
-	}
+    try {
+      await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
+      step.status = 'done';
+      rebased.push(step.branch);
+      await writeProgress(progress, cwd);
+    } catch (error) {
+      if (error instanceof DubError && error.message.includes('Conflict')) {
+        step.status = 'conflicted';
+        await writeProgress(progress, cwd);
+        return { status: 'conflict', rebased, conflictBranch: step.branch };
+      }
+      throw error;
+    }
+  }
 
-	await clearProgress(cwd);
-	await checkoutBranch(progress.originalBranch, cwd);
+  await clearProgress(cwd);
+  await checkoutBranch(progress.originalBranch, cwd);
 
-	const allSkipped = progress.steps.every(
-		(s) => s.status === "skipped" || s.status === "done",
-	);
-	return {
-		status: rebased.length === 0 && allSkipped ? "up-to-date" : "success",
-		rebased,
-	};
+  const allSkipped = progress.steps.every(
+    (s) => s.status === 'skipped' || s.status === 'done',
+  );
+  return {
+    status: rebased.length === 0 && allSkipped ? 'up-to-date' : 'success',
+    rebased,
+  };
 }
 
 function getTargetStacks(stacks: Stack[], currentBranch: string): Stack[] {
-	// If current branch is a root of any stacks, restack all of them
-	const rootStacks = stacks.filter((s) =>
-		s.branches.some((b) => b.name === currentBranch && b.type === "root"),
-	);
-	if (rootStacks.length > 0) return rootStacks;
+  // If current branch is a root of any stacks, restack all of them
+  const rootStacks = stacks.filter((s) =>
+    s.branches.some((b) => b.name === currentBranch && b.type === 'root'),
+  );
+  if (rootStacks.length > 0) return rootStacks;
 
-	// Otherwise, find the stack containing the current branch
-	const stack = stacks.find((s) =>
-		s.branches.some((b) => b.name === currentBranch),
-	);
-	return stack ? [stack] : [];
+  // Otherwise, find the stack containing the current branch
+  const stack = stacks.find((s) =>
+    s.branches.some((b) => b.name === currentBranch),
+  );
+  return stack ? [stack] : [];
 }
 
 async function buildRestackSteps(
-	stacks: Stack[],
-	cwd: string,
+  stacks: Stack[],
+  cwd: string,
 ): Promise<RestackStep[]> {
-	const steps: RestackStep[] = [];
+  const steps: RestackStep[] = [];
 
-	for (const stack of stacks) {
-		const ordered = topologicalOrder(stack);
-		for (const branch of ordered) {
-			if (branch.type === "root" || !branch.parent) continue;
-			const mergeBase = await getMergeBase(branch.parent, branch.name, cwd);
-			steps.push({
-				branch: branch.name,
-				parent: branch.parent,
-				parentOldTip: mergeBase,
-				status: "pending",
-			});
-		}
-	}
+  for (const stack of stacks) {
+    const ordered = topologicalOrder(stack);
+    for (const branch of ordered) {
+      if (branch.type === 'root' || !branch.parent) continue;
+      const mergeBase = await getMergeBase(branch.parent, branch.name, cwd);
+      steps.push({
+        branch: branch.name,
+        parent: branch.parent,
+        parentOldTip: mergeBase,
+        status: 'pending',
+      });
+    }
+  }
 
-	return steps;
+  return steps;
 }
 
 async function getProgressPath(cwd: string): Promise<string> {
-	const dubDir = await getDubDir(cwd);
-	return path.join(dubDir, "restack-progress.json");
+  const dubDir = await getDubDir(cwd);
+  return path.join(dubDir, 'restack-progress.json');
 }
 
 async function writeProgress(
-	progress: RestackProgress,
-	cwd: string,
+  progress: RestackProgress,
+  cwd: string,
 ): Promise<void> {
-	const progressPath = await getProgressPath(cwd);
-	fs.writeFileSync(progressPath, `${JSON.stringify(progress, null, 2)}\n`);
+  const progressPath = await getProgressPath(cwd);
+  fs.writeFileSync(progressPath, `${JSON.stringify(progress, null, 2)}\n`);
 }
 
 async function readProgress(cwd: string): Promise<RestackProgress | null> {
-	const progressPath = await getProgressPath(cwd);
-	if (!fs.existsSync(progressPath)) return null;
-	const raw = fs.readFileSync(progressPath, "utf-8");
-	return JSON.parse(raw) as RestackProgress;
+  const progressPath = await getProgressPath(cwd);
+  if (!fs.existsSync(progressPath)) return null;
+  const raw = fs.readFileSync(progressPath, 'utf-8');
+  return JSON.parse(raw) as RestackProgress;
 }
 
 async function clearProgress(cwd: string): Promise<void> {
-	const progressPath = await getProgressPath(cwd);
-	if (fs.existsSync(progressPath)) {
-		fs.unlinkSync(progressPath);
-	}
+  const progressPath = await getProgressPath(cwd);
+  if (fs.existsSync(progressPath)) {
+    fs.unlinkSync(progressPath);
+  }
 }

@@ -7,7 +7,7 @@ Guidance for AI coding agents working in this repository.
 - Project: `dubstack`
 - Type: TypeScript CLI (ESM) for stacked git branch workflows
 - Main entrypoint: `src/index.ts`
-- Core commands: `create`, `restack`, `submit`/`ss`, `undo`, `co`, `modify`, `skills`
+- Core commands: `create`, `restack`, `submit`/`ss`, `merge-next`/`land`, `post-merge`, `undo`, `co`, `modify`, `skills`
 - State storage: `.git/dubstack/*` inside the target git repository
 
 ## 2) Environment And Tooling
@@ -32,6 +32,7 @@ Use these commands from the repo root:
 - CLI wiring: `src/index.ts`
 - Command implementations: `src/commands/*.ts`
 - Shared logic: `src/lib/*.ts`
+- Agent contributor docs: `.agents/README.md`, `.agents/styleguide.md`, `.agents/patterns/*.md`
 - Unit tests:
   - `src/**/*.test.ts`
   - `test/**/*.test.ts`
@@ -42,9 +43,11 @@ Use these commands from the repo root:
 ## 4) Coding Conventions
 
 - Follow existing TypeScript style in this repo:
-  - tabs for indentation
-  - double quotes
+  - spaces for indentation (2 spaces)
+  - single quotes
+  - kebab-case file names
   - ESM imports
+- Read `.agents/styleguide.md` and relevant `.agents/patterns/*.md` before making structural changes.
 - Keep command behavior user-facing and explicit via `DubError` messages.
 - Prefer small pure helpers in `src/lib/*` over large command files.
 - Avoid adding new dependencies unless necessary.
@@ -54,7 +57,7 @@ Use these commands from the repo root:
 
 - `create` auto-initializes state via `ensureState(...)`.
 - `restack` and `submit` require valid tracked stack state and should fail clearly when context is invalid.
-- `submit` only supports linear stacks (one child per parent path during submit flow).
+- `submit` defaults to current-path submission; `--path stack` requires a linear stack (one child per parent).
 - `undo` remains single-level.
 - Error text is part of UX and often asserted in tests; change carefully.
 
@@ -65,6 +68,8 @@ For non-trivial changes, run at least:
 1. `pnpm test`
 2. `pnpm typecheck`
 3. `pnpm checks`
+
+Core rule: do not consider work complete unless tests, typecheck, and lint/format checks are all passing.
 
 If behavior/output changed, add or update tests near the changed code:
 
@@ -81,6 +86,9 @@ If behavior/output changed, add or update tests near the changed code:
 
 ## 8) Agent Workflow For This Repo
 
+- Do **not** use git worktrees for this repository, even if a prompt or skill (including `using-git-worktrees`) recommends it.
+- Perform all work in the current repository checkout unless the user explicitly asks otherwise.
+
 When implementing a task:
 
 1. Read relevant command + lib files first.
@@ -92,4 +100,3 @@ When implementing a task:
 When reviewing code:
 
 - Prioritize regressions in stack state handling, git command safety, submit flow, and conflict/recovery paths.
-

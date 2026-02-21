@@ -71,6 +71,9 @@ dub ss
 
 # preview only
 dub ss --dry-run
+
+# current-path submit (default behavior)
+dub ss --path current
 ```
 
 Open PR in browser:
@@ -118,10 +121,19 @@ Common sync variants:
 dub sync --all
 dub sync --no-interactive
 dub sync --force
-dub sync --no-restack
+dub sync --restack
 ```
 
-## 7) Handle Restack Conflicts
+## 7) Preflight And Cleanup
+
+```bash
+dub doctor
+dub ready
+dub prune         # preview stale tracked branches
+dub prune --apply # apply stale metadata cleanup
+```
+
+## 8) Handle Restack Conflicts
 
 ```bash
 dub restack
@@ -137,7 +149,24 @@ dub continue   # continue active restack/rebase
 dub abort      # abort active restack/rebase
 ```
 
-## 8) Repair Tracking Metadata
+## 9) Merge In Safe Order
+
+```bash
+# optional pre-check (helpful in CI too)
+dub merge-check --pr 123
+
+# safest merge flow (bottom-up + maintenance)
+dub merge-next
+dub merge-next
+```
+
+If merges happened manually:
+
+```bash
+dub post-merge
+```
+
+## 10) Repair Tracking Metadata
 
 If you created branches outside `dub create`:
 
@@ -165,7 +194,7 @@ dub delete feat/auth-login
 dub delete feat/auth-login --upstack --force --quiet
 ```
 
-## 9) Undo Last Stack Mutation
+## 11) Undo Last Stack Mutation
 
 ```bash
 dub undo
@@ -184,6 +213,12 @@ dub undo
 | `dub ss` | Submit stack PRs |
 | `dub pr` | Open PR in browser |
 | `dub sync` | Sync local state with remote |
+| `dub doctor` | Run stack health checks |
+| `dub ready` | Run pre-submit checklist |
+| `dub prune` | Preview/remove stale tracked metadata |
+| `dub merge-check` | Validate stack merge order |
+| `dub merge-next` / `dub land` | Merge next safe PR + maintenance |
+| `dub post-merge` | Repair state/retarget after manual merges |
 | `dub restack` | Rebase stack onto updated parents |
 | `dub track` | Track/re-parent branch metadata |
 | `dub untrack` | Remove branch metadata only |

@@ -1,21 +1,21 @@
-import { execa } from "execa";
-import { DubError } from "./errors";
+import { execa } from 'execa';
+import { DubError } from './errors';
 
 /**
  * Checks whether the given directory is inside a git repository.
  * @returns `true` if inside a git worktree, `false` otherwise. Never throws.
  */
 export async function isGitRepo(cwd: string): Promise<boolean> {
-	try {
-		const { stdout } = await execa(
-			"git",
-			["rev-parse", "--is-inside-work-tree"],
-			{ cwd },
-		);
-		return stdout.trim() === "true";
-	} catch {
-		return false;
-	}
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-parse', '--is-inside-work-tree'],
+      { cwd },
+    );
+    return stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -23,16 +23,16 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
  * @throws {DubError} If not inside a git repository.
  */
 export async function getRepoRoot(cwd: string): Promise<string> {
-	try {
-		const { stdout } = await execa("git", ["rev-parse", "--show-toplevel"], {
-			cwd,
-		});
-		return stdout.trim();
-	} catch {
-		throw new DubError(
-			"Not a git repository. Run this command inside a git repo.",
-		);
-	}
+  try {
+    const { stdout } = await execa('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+    });
+    return stdout.trim();
+  } catch {
+    throw new DubError(
+      'Not a git repository. Run this command inside a git repo.',
+    );
+  }
 }
 
 /**
@@ -40,25 +40,25 @@ export async function getRepoRoot(cwd: string): Promise<string> {
  * @throws {DubError} If HEAD is detached or the repo has no commits.
  */
 export async function getCurrentBranch(cwd: string): Promise<string> {
-	try {
-		const { stdout } = await execa(
-			"git",
-			["rev-parse", "--abbrev-ref", "HEAD"],
-			{ cwd },
-		);
-		const branch = stdout.trim();
-		if (branch === "HEAD") {
-			throw new DubError(
-				"HEAD is detached. Checkout a branch before running this command.",
-			);
-		}
-		return branch;
-	} catch (error) {
-		if (error instanceof DubError) throw error;
-		throw new DubError(
-			"Repository has no commits. Make at least one commit first.",
-		);
-	}
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-parse', '--abbrev-ref', 'HEAD'],
+      { cwd },
+    );
+    const branch = stdout.trim();
+    if (branch === 'HEAD') {
+      throw new DubError(
+        'HEAD is detached. Checkout a branch before running this command.',
+      );
+    }
+    return branch;
+  } catch (error) {
+    if (error instanceof DubError) throw error;
+    throw new DubError(
+      'Repository has no commits. Make at least one commit first.',
+    );
+  }
 }
 
 /**
@@ -66,17 +66,17 @@ export async function getCurrentBranch(cwd: string): Promise<string> {
  * @returns `true` if the branch exists, `false` otherwise. Never throws.
  */
 export async function branchExists(
-	name: string,
-	cwd: string,
+  name: string,
+  cwd: string,
 ): Promise<boolean> {
-	try {
-		await execa("git", ["rev-parse", "--verify", `refs/heads/${name}`], {
-			cwd,
-		});
-		return true;
-	} catch {
-		return false;
-	}
+  try {
+    await execa('git', ['rev-parse', '--verify', `refs/heads/${name}`], {
+      cwd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -84,10 +84,10 @@ export async function branchExists(
  * @throws {DubError} If a branch with that name already exists.
  */
 export async function createBranch(name: string, cwd: string): Promise<void> {
-	if (await branchExists(name, cwd)) {
-		throw new DubError(`Branch '${name}' already exists.`);
-	}
-	await execa("git", ["checkout", "-b", name], { cwd });
+  if (await branchExists(name, cwd)) {
+    throw new DubError(`Branch '${name}' already exists.`);
+  }
+  await execa('git', ['checkout', '-b', name], { cwd });
 }
 
 /**
@@ -95,11 +95,11 @@ export async function createBranch(name: string, cwd: string): Promise<void> {
  * @throws {DubError} If the branch does not exist.
  */
 export async function checkoutBranch(name: string, cwd: string): Promise<void> {
-	try {
-		await execa("git", ["checkout", name], { cwd });
-	} catch {
-		throw new DubError(`Branch '${name}' not found.`);
-	}
+  try {
+    await execa('git', ['checkout', name], { cwd });
+  } catch {
+    throw new DubError(`Branch '${name}' not found.`);
+  }
 }
 
 /**
@@ -107,33 +107,33 @@ export async function checkoutBranch(name: string, cwd: string): Promise<void> {
  * @throws {DubError} If the branch does not exist.
  */
 export async function deleteBranch(name: string, cwd: string): Promise<void> {
-	try {
-		await execa("git", ["branch", "-D", name], { cwd });
-	} catch {
-		throw new DubError(`Failed to delete branch '${name}'. It may not exist.`);
-	}
+  try {
+    await execa('git', ['branch', '-D', name], { cwd });
+  } catch {
+    throw new DubError(`Failed to delete branch '${name}'. It may not exist.`);
+  }
 }
 
 /**
  * Deletes a local branch using safe (`-d`) or force (`-D`) mode.
  */
 export async function deleteLocalBranch(
-	name: string,
-	cwd: string,
-	force = false,
+  name: string,
+  cwd: string,
+  force = false,
 ): Promise<void> {
-	try {
-		await execa("git", ["branch", force ? "-D" : "-d", name], { cwd });
-	} catch {
-		if (force) {
-			throw new DubError(
-				`Failed to delete branch '${name}'. It may not exist or be checked out.`,
-			);
-		}
-		throw new DubError(
-			`Branch '${name}' is not fully merged. Re-run with --force to delete it.`,
-		);
-	}
+  try {
+    await execa('git', ['branch', force ? '-D' : '-d', name], { cwd });
+  } catch {
+    if (force) {
+      throw new DubError(
+        `Failed to delete branch '${name}'. It may not exist or be checked out.`,
+      );
+    }
+    throw new DubError(
+      `Branch '${name}' is not fully merged. Re-run with --force to delete it.`,
+    );
+  }
 }
 
 /**
@@ -141,21 +141,21 @@ export async function deleteLocalBranch(
  * Used by undo to reset branches to their pre-operation tips.
  */
 export async function forceBranchTo(
-	name: string,
-	sha: string,
-	cwd: string,
+  name: string,
+  sha: string,
+  cwd: string,
 ): Promise<void> {
-	try {
-		const current = await getCurrentBranch(cwd).catch(() => null);
-		if (current === name) {
-			await execa("git", ["reset", "--hard", sha], { cwd });
-		} else {
-			await execa("git", ["branch", "-f", name, sha], { cwd });
-		}
-	} catch (error) {
-		if (error instanceof DubError) throw error;
-		throw new DubError(`Failed to reset branch '${name}' to ${sha}.`);
-	}
+  try {
+    const current = await getCurrentBranch(cwd).catch(() => null);
+    if (current === name) {
+      await execa('git', ['reset', '--hard', sha], { cwd });
+    } else {
+      await execa('git', ['branch', '-f', name, sha], { cwd });
+    }
+  } catch (error) {
+    if (error instanceof DubError) throw error;
+    throw new DubError(`Failed to reset branch '${name}' to ${sha}.`);
+  }
 }
 
 /**
@@ -163,8 +163,8 @@ export async function forceBranchTo(
  * @returns `true` if clean (no output from `git status --porcelain`).
  */
 export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
-	const { stdout } = await execa("git", ["status", "--porcelain"], { cwd });
-	return stdout.trim() === "";
+  const { stdout } = await execa('git', ['status', '--porcelain'], { cwd });
+  return stdout.trim() === '';
 }
 
 /**
@@ -176,19 +176,19 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
  * @throws {DubError} If a merge conflict occurs during rebase
  */
 export async function rebaseOnto(
-	newBase: string,
-	oldBase: string,
-	branch: string,
-	cwd: string,
+  newBase: string,
+  oldBase: string,
+  branch: string,
+  cwd: string,
 ): Promise<void> {
-	try {
-		await execa("git", ["rebase", "--onto", newBase, oldBase, branch], { cwd });
-	} catch {
-		throw new DubError(
-			`Conflict while restacking '${branch}'.\n` +
-				"  Resolve conflicts, stage changes, then run: dub restack --continue",
-		);
-	}
+  try {
+    await execa('git', ['rebase', '--onto', newBase, oldBase, branch], { cwd });
+  } catch {
+    throw new DubError(
+      `Conflict while restacking '${branch}'.\n` +
+        '  Resolve conflicts, stage changes, then run: dub restack --continue',
+    );
+  }
 }
 
 /**
@@ -196,45 +196,45 @@ export async function rebaseOnto(
  * @throws {DubError} If the rebase continue fails.
  */
 export async function rebaseContinue(cwd: string): Promise<void> {
-	try {
-		await execa("git", ["rebase", "--continue"], {
-			cwd,
-			env: { GIT_EDITOR: "true" },
-		});
-	} catch {
-		throw new DubError(
-			"Failed to continue rebase. Ensure all conflicts are resolved and staged.",
-		);
-	}
+  try {
+    await execa('git', ['rebase', '--continue'], {
+      cwd,
+      env: { GIT_EDITOR: 'true' },
+    });
+  } catch {
+    throw new DubError(
+      'Failed to continue rebase. Ensure all conflicts are resolved and staged.',
+    );
+  }
 }
 
 /**
  * Aborts an in-progress rebase operation.
  */
 export async function rebaseAbort(cwd: string): Promise<void> {
-	try {
-		await execa("git", ["rebase", "--abort"], { cwd });
-	} catch {
-		throw new DubError("Failed to abort rebase.");
-	}
+  try {
+    await execa('git', ['rebase', '--abort'], { cwd });
+  } catch {
+    throw new DubError('Failed to abort rebase.');
+  }
 }
 
 /**
  * Returns the merge-base (common ancestor) commit SHA of two branches.
  */
 export async function getMergeBase(
-	a: string,
-	b: string,
-	cwd: string,
+  a: string,
+  b: string,
+  cwd: string,
 ): Promise<string> {
-	try {
-		const { stdout } = await execa("git", ["merge-base", a, b], { cwd });
-		return stdout.trim();
-	} catch {
-		throw new DubError(
-			`Could not find common ancestor between '${a}' and '${b}'.`,
-		);
-	}
+  try {
+    const { stdout } = await execa('git', ['merge-base', a, b], { cwd });
+    return stdout.trim();
+  } catch {
+    throw new DubError(
+      `Could not find common ancestor between '${a}' and '${b}'.`,
+    );
+  }
 }
 
 /**
@@ -242,12 +242,12 @@ export async function getMergeBase(
  * @throws {DubError} If the branch does not exist.
  */
 export async function getBranchTip(name: string, cwd: string): Promise<string> {
-	try {
-		const { stdout } = await execa("git", ["rev-parse", name], { cwd });
-		return stdout.trim();
-	} catch {
-		throw new DubError(`Branch '${name}' not found.`);
-	}
+  try {
+    const { stdout } = await execa('git', ['rev-parse', name], { cwd });
+    return stdout.trim();
+  } catch {
+    throw new DubError(`Branch '${name}' not found.`);
+  }
 }
 
 /**
@@ -255,24 +255,24 @@ export async function getBranchTip(name: string, cwd: string): Promise<string> {
  * @throws {DubError} If the branch has no commits.
  */
 export async function getLastCommitMessage(
-	branch: string,
-	cwd: string,
+  branch: string,
+  cwd: string,
 ): Promise<string> {
-	try {
-		const { stdout } = await execa(
-			"git",
-			["log", "-1", "--format=%s", branch],
-			{ cwd },
-		);
-		const message = stdout.trim();
-		if (!message) {
-			throw new DubError(`Branch '${branch}' has no commits.`);
-		}
-		return message;
-	} catch (error) {
-		if (error instanceof DubError) throw error;
-		throw new DubError(`Failed to read commit message for '${branch}'.`);
-	}
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '-1', '--format=%s', branch],
+      { cwd },
+    );
+    const message = stdout.trim();
+    if (!message) {
+      throw new DubError(`Branch '${branch}' has no commits.`);
+    }
+    return message;
+  } catch (error) {
+    if (error instanceof DubError) throw error;
+    throw new DubError(`Failed to read commit message for '${branch}'.`);
+  }
 }
 
 /**
@@ -280,15 +280,15 @@ export async function getLastCommitMessage(
  * @throws {DubError} If the push fails.
  */
 export async function pushBranch(branch: string, cwd: string): Promise<void> {
-	try {
-		await execa("git", ["push", "--force-with-lease", "origin", branch], {
-			cwd,
-		});
-	} catch {
-		throw new DubError(
-			`Failed to push '${branch}'. The remote ref may have been updated by someone else.`,
-		);
-	}
+  try {
+    await execa('git', ['push', '--force-with-lease', 'origin', branch], {
+      cwd,
+    });
+  } catch {
+    throw new DubError(
+      `Failed to push '${branch}'. The remote ref may have been updated by someone else.`,
+    );
+  }
 }
 
 /**
@@ -296,11 +296,11 @@ export async function pushBranch(branch: string, cwd: string): Promise<void> {
  * @throws {DubError} If git add fails.
  */
 export async function stageAll(cwd: string): Promise<void> {
-	try {
-		await execa("git", ["add", "-A"], { cwd });
-	} catch {
-		throw new DubError("Failed to stage changes.");
-	}
+  try {
+    await execa('git', ['add', '-A'], { cwd });
+  } catch {
+    throw new DubError('Failed to stage changes.');
+  }
 }
 
 /**
@@ -310,14 +310,14 @@ export async function stageAll(cwd: string): Promise<void> {
  * and code 0 when there are none.
  */
 export async function hasStagedChanges(cwd: string): Promise<boolean> {
-	try {
-		await execa("git", ["diff", "--cached", "--quiet"], { cwd });
-		return false;
-	} catch (error: unknown) {
-		const exitCode = (error as { exitCode?: number }).exitCode;
-		if (exitCode === 1) return true;
-		throw new DubError("Failed to check staged changes.");
-	}
+  try {
+    await execa('git', ['diff', '--cached', '--quiet'], { cwd });
+    return false;
+  } catch (error: unknown) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    if (exitCode === 1) return true;
+    throw new DubError('Failed to check staged changes.');
+  }
 }
 
 /**
@@ -325,16 +325,16 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
  * @throws {DubError} If the commit fails (e.g., nothing staged, hook rejection).
  */
 export async function commitStaged(
-	message: string,
-	cwd: string,
+  message: string,
+  cwd: string,
 ): Promise<void> {
-	try {
-		await execa("git", ["commit", "-m", message], { cwd });
-	} catch {
-		throw new DubError(
-			`Commit failed. Ensure there are staged changes and git hooks pass.`,
-		);
-	}
+  try {
+    await execa('git', ['commit', '-m', message], { cwd });
+  } catch {
+    throw new DubError(
+      'Commit failed. Ensure there are staged changes and git hooks pass.',
+    );
+  }
 }
 
 /**
@@ -344,24 +344,24 @@ export async function commitStaged(
  * @throws {DubError} If the commit fails.
  */
 export async function commit(
-	cwd: string,
-	options?: { message?: string; noEdit?: boolean },
+  cwd: string,
+  options?: { message?: string; noEdit?: boolean },
 ): Promise<void> {
-	const args = ["commit"];
-	if (options?.message) {
-		args.push("-m", options.message);
-	}
-	if (options?.noEdit) {
-		args.push("--no-edit");
-	}
+  const args = ['commit'];
+  if (options?.message) {
+    args.push('-m', options.message);
+  }
+  if (options?.noEdit) {
+    args.push('--no-edit');
+  }
 
-	try {
-		await execa("git", args, { cwd, stdio: "inherit" });
-	} catch {
-		throw new DubError(
-			"Commit failed. Ensure there are staged changes and git hooks pass.",
-		);
-	}
+  try {
+    await execa('git', args, { cwd, stdio: 'inherit' });
+  } catch {
+    throw new DubError(
+      'Commit failed. Ensure there are staged changes and git hooks pass.',
+    );
+  }
 }
 
 /**
@@ -371,24 +371,24 @@ export async function commit(
  * @throws {DubError} If the amend fails.
  */
 export async function amendCommit(
-	cwd: string,
-	options?: { message?: string; noEdit?: boolean },
+  cwd: string,
+  options?: { message?: string; noEdit?: boolean },
 ): Promise<void> {
-	const args = ["commit", "--amend"];
-	if (options?.message) {
-		args.push("-m", options.message);
-	}
-	if (options?.noEdit) {
-		args.push("--no-edit");
-	}
+  const args = ['commit', '--amend'];
+  if (options?.message) {
+    args.push('-m', options.message);
+  }
+  if (options?.noEdit) {
+    args.push('--no-edit');
+  }
 
-	try {
-		await execa("git", args, { cwd, stdio: "inherit" });
-	} catch (e) {
-		throw new DubError(
-			`Amend failed: ${e instanceof Error ? e.message : String(e)}`,
-		);
-	}
+  try {
+    await execa('git', args, { cwd, stdio: 'inherit' });
+  } catch (e) {
+    throw new DubError(
+      `Amend failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 }
 
 /**
@@ -400,14 +400,14 @@ export async function amendCommit(
  * @throws {DubError} If rebase fails.
  */
 export async function interactiveRebase(
-	base: string,
-	cwd: string,
+  base: string,
+  cwd: string,
 ): Promise<void> {
-	try {
-		await execa("git", ["rebase", "-i", base], { cwd, stdio: "inherit" });
-	} catch {
-		throw new DubError("Interactive rebase failed or was cancelled.");
-	}
+  try {
+    await execa('git', ['rebase', '-i', base], { cwd, stdio: 'inherit' });
+  } catch {
+    throw new DubError('Interactive rebase failed or was cancelled.');
+  }
 }
 
 /**
@@ -418,11 +418,11 @@ export async function interactiveRebase(
  * @throws {DubError} If staging fails.
  */
 export async function interactiveStage(cwd: string): Promise<void> {
-	try {
-		await execa("git", ["add", "-p"], { cwd, stdio: "inherit" });
-	} catch {
-		throw new DubError("Interactive staging failed.");
-	}
+  try {
+    await execa('git', ['add', '-p'], { cwd, stdio: 'inherit' });
+  } catch {
+    throw new DubError('Interactive staging failed.');
+  }
 }
 
 /**
@@ -432,11 +432,11 @@ export async function interactiveStage(cwd: string): Promise<void> {
  * @throws {DubError} If staging fails.
  */
 export async function stageUpdate(cwd: string): Promise<void> {
-	try {
-		await execa("git", ["add", "-u"], { cwd });
-	} catch {
-		throw new DubError("Failed to stage updates.");
-	}
+  try {
+    await execa('git', ['add', '-u'], { cwd });
+  } catch {
+    throw new DubError('Failed to stage updates.');
+  }
 }
 
 /**
@@ -444,150 +444,150 @@ export async function stageUpdate(cwd: string): Promise<void> {
  * @param staged - If true, shows staged changes (cached). If false, shows unstaged changes.
  */
 export async function getDiff(cwd: string, staged: boolean): Promise<string> {
-	try {
-		const args = ["diff"];
-		if (staged) args.push("--cached");
-		const { stdout } = await execa("git", args, { cwd });
-		return stdout;
-	} catch {
-		return "";
-	}
+  try {
+    const args = ['diff'];
+    if (staged) args.push('--cached');
+    const { stdout } = await execa('git', args, { cwd });
+    return stdout;
+  } catch {
+    return '';
+  }
 }
 
 /**
  * Returns a list of all local branch names.
  */
 export async function listBranches(cwd: string): Promise<string[]> {
-	try {
-		const { stdout } = await execa(
-			"git",
-			["branch", "--format=%(refname:short)"],
-			{ cwd },
-		);
-		return stdout.trim().split("\n").filter(Boolean);
-	} catch {
-		throw new DubError("Failed to list branches.");
-	}
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['branch', '--format=%(refname:short)'],
+      { cwd },
+    );
+    return stdout.trim().split('\n').filter(Boolean);
+  } catch {
+    throw new DubError('Failed to list branches.');
+  }
 }
 
 /**
  * Fetches the provided branches from the remote.
  */
 export async function fetchBranches(
-	branches: string[],
-	cwd: string,
-	remote = "origin",
+  branches: string[],
+  cwd: string,
+  remote = 'origin',
 ): Promise<void> {
-	if (branches.length === 0) return;
-	for (const branch of branches) {
-		try {
-			await execa("git", ["fetch", remote, branch], { cwd });
-		} catch (error: unknown) {
-			const stderr =
-				typeof (error as { stderr?: unknown })?.stderr === "string"
-					? (error as { stderr: string }).stderr
-					: "";
-			const stdout =
-				typeof (error as { stdout?: unknown })?.stdout === "string"
-					? (error as { stdout: string }).stdout
-					: "";
-			const output = `${stderr}\n${stdout}`;
-			if (output.includes("couldn't find remote ref")) {
-				continue;
-			}
-			throw new DubError(`Failed to fetch branches from '${remote}'.`);
-		}
-	}
+  if (branches.length === 0) return;
+  for (const branch of branches) {
+    try {
+      await execa('git', ['fetch', remote, branch], { cwd });
+    } catch (error: unknown) {
+      const stderr =
+        typeof (error as { stderr?: unknown })?.stderr === 'string'
+          ? (error as { stderr: string }).stderr
+          : '';
+      const stdout =
+        typeof (error as { stdout?: unknown })?.stdout === 'string'
+          ? (error as { stdout: string }).stdout
+          : '';
+      const output = `${stderr}\n${stdout}`;
+      if (output.includes("couldn't find remote ref")) {
+        continue;
+      }
+      throw new DubError(`Failed to fetch branches from '${remote}'.`);
+    }
+  }
 }
 
 /**
  * Returns whether a remote branch exists.
  */
 export async function remoteBranchExists(
-	branch: string,
-	cwd: string,
-	remote = "origin",
+  branch: string,
+  cwd: string,
+  remote = 'origin',
 ): Promise<boolean> {
-	try {
-		await execa("git", ["rev-parse", "--verify", `${remote}/${branch}`], {
-			cwd,
-		});
-		return true;
-	} catch {
-		return false;
-	}
+  try {
+    await execa('git', ['rev-parse', '--verify', `${remote}/${branch}`], {
+      cwd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Reads a ref SHA.
  */
 export async function getRefSha(ref: string, cwd: string): Promise<string> {
-	try {
-		const { stdout } = await execa("git", ["rev-parse", ref], { cwd });
-		return stdout.trim();
-	} catch {
-		throw new DubError(`Failed to read ref '${ref}'.`);
-	}
+  try {
+    const { stdout } = await execa('git', ['rev-parse', ref], { cwd });
+    return stdout.trim();
+  } catch {
+    throw new DubError(`Failed to read ref '${ref}'.`);
+  }
 }
 
 /**
  * Returns true when `ancestor` is an ancestor of `descendant`.
  */
 export async function isAncestor(
-	ancestor: string,
-	descendant: string,
-	cwd: string,
+  ancestor: string,
+  descendant: string,
+  cwd: string,
 ): Promise<boolean> {
-	try {
-		await execa("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
-			cwd,
-		});
-		return true;
-	} catch (error: unknown) {
-		const exitCode = (error as { exitCode?: number }).exitCode;
-		if (exitCode === 1) return false;
-		throw new DubError(
-			`Failed to compare ancestry between '${ancestor}' and '${descendant}'.`,
-		);
-	}
+  try {
+    await execa('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
+      cwd,
+    });
+    return true;
+  } catch (error: unknown) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    if (exitCode === 1) return false;
+    throw new DubError(
+      `Failed to compare ancestry between '${ancestor}' and '${descendant}'.`,
+    );
+  }
 }
 
 /**
  * Creates or resets a local branch from a remote ref and checks it out.
  */
 export async function checkoutRemoteBranch(
-	branch: string,
-	cwd: string,
-	remote = "origin",
+  branch: string,
+  cwd: string,
+  remote = 'origin',
 ): Promise<void> {
-	try {
-		await execa("git", ["checkout", "-B", branch, `${remote}/${branch}`], {
-			cwd,
-		});
-	} catch {
-		throw new DubError(
-			`Failed to create local branch '${branch}' from '${remote}/${branch}'.`,
-		);
-	}
+  try {
+    await execa('git', ['checkout', '-B', branch, `${remote}/${branch}`], {
+      cwd,
+    });
+  } catch {
+    throw new DubError(
+      `Failed to create local branch '${branch}' from '${remote}/${branch}'.`,
+    );
+  }
 }
 
 /**
  * Resets a local branch hard to a ref.
  */
 export async function hardResetBranchToRef(
-	branch: string,
-	ref: string,
-	cwd: string,
+  branch: string,
+  ref: string,
+  cwd: string,
 ): Promise<void> {
-	try {
-		const current = await getCurrentBranch(cwd).catch(() => null);
-		if (current !== branch) {
-			await checkoutBranch(branch, cwd);
-		}
-		await execa("git", ["reset", "--hard", ref], { cwd });
-	} catch {
-		throw new DubError(`Failed to hard reset '${branch}' to '${ref}'.`);
-	}
+  try {
+    const current = await getCurrentBranch(cwd).catch(() => null);
+    if (current !== branch) {
+      await checkoutBranch(branch, cwd);
+    }
+    await execa('git', ['reset', '--hard', ref], { cwd });
+  } catch {
+    throw new DubError(`Failed to hard reset '${branch}' to '${ref}'.`);
+  }
 }
 
 /**
@@ -595,20 +595,20 @@ export async function hardResetBranchToRef(
  * Returns false when fast-forward is not possible.
  */
 export async function fastForwardBranchToRef(
-	branch: string,
-	ref: string,
-	cwd: string,
+  branch: string,
+  ref: string,
+  cwd: string,
 ): Promise<boolean> {
-	try {
-		const current = await getCurrentBranch(cwd).catch(() => null);
-		if (current !== branch) {
-			await checkoutBranch(branch, cwd);
-		}
-		await execa("git", ["merge", "--ff-only", ref], { cwd });
-		return true;
-	} catch {
-		return false;
-	}
+  try {
+    const current = await getCurrentBranch(cwd).catch(() => null);
+    if (current !== branch) {
+      await checkoutBranch(branch, cwd);
+    }
+    await execa('git', ['merge', '--ff-only', ref], { cwd });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -616,23 +616,23 @@ export async function fastForwardBranchToRef(
  * Returns false if conflicts occur.
  */
 export async function rebaseBranchOntoRef(
-	branch: string,
-	ref: string,
-	cwd: string,
+  branch: string,
+  ref: string,
+  cwd: string,
 ): Promise<boolean> {
-	try {
-		const current = await getCurrentBranch(cwd).catch(() => null);
-		if (current !== branch) {
-			await checkoutBranch(branch, cwd);
-		}
-		await execa("git", ["rebase", ref], { cwd });
-		return true;
-	} catch {
-		try {
-			await execa("git", ["rebase", "--abort"], { cwd });
-		} catch {
-			// no-op
-		}
-		return false;
-	}
+  try {
+    const current = await getCurrentBranch(cwd).catch(() => null);
+    if (current !== branch) {
+      await checkoutBranch(branch, cwd);
+    }
+    await execa('git', ['rebase', ref], { cwd });
+    return true;
+  } catch {
+    try {
+      await execa('git', ['rebase', '--abort'], { cwd });
+    } catch {
+      // no-op
+    }
+    return false;
+  }
 }
