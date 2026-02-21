@@ -76,6 +76,44 @@ export async function getPr(
 }
 
 /**
+ * Fetches PR info by number.
+ * @returns The PR info, or null if not found.
+ */
+export async function getPrByNumber(
+	prNumber: number,
+	cwd: string,
+): Promise<PrInfo | null> {
+	let stdout: string;
+	try {
+		const result = await execa(
+			"gh",
+			[
+				"pr",
+				"view",
+				String(prNumber),
+				"--json",
+				"number,url,title,body",
+				"--jq",
+				".",
+			],
+			{ cwd },
+		);
+		stdout = result.stdout;
+	} catch (error) {
+		if (isPrNotFoundError(error)) return null;
+		const message = error instanceof Error ? error.message : String(error);
+		throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`);
+	}
+	const trimmed = stdout.trim();
+	if (!trimmed || trimmed === "null") return null;
+	try {
+		return JSON.parse(trimmed) as PrInfo;
+	} catch {
+		throw new DubError(`Failed to parse PR #${prNumber}.`);
+	}
+}
+
+/**
  * Returns coarse lifecycle state of a PR associated with the branch head.
  */
 export async function getBranchPrLifecycleState(
@@ -145,6 +183,53 @@ export async function getBranchPrSyncInfo(
 			`Failed to parse PR lifecycle state for branch '${branch}'.`,
 		);
 	}
+}
+
+/**
+ * Returns coarse lifecycle state of a PR by number.
+ */
+export async function getPrStateByNumber(
+	prNumber: number,
+	cwd: string,
+): Promise<BranchPrLifecycleState> {
+	let stdout: string;
+	try {
+		const result = await execa(
+			"gh",
+			["pr", "view", String(prNumber), "--json", "state,mergedAt", "--jq", "."],
+			{ cwd },
+		);
+		stdout = result.stdout;
+	} catch (error) {
+		if (isPrNotFoundError(error)) return "NONE";
+		const message = error instanceof Error ? error.message : String(error);
+		throw new DubError(`Failed to fetch PR state for #${prNumber}: ${message}`);
+	}
+	const trimmed = stdout.trim();
+	if (!trimmed || trimmed === "null") return "NONE";
+	try {
+		const parsed = JSON.parse(trimmed) as {
+			state?: string;
+			mergedAt?: string | null;
+		};
+		if (parsed.mergedAt) return "MERGED";
+		if (parsed.state === "OPEN") return "OPEN";
+		if (parsed.state === "CLOSED") return "CLOSED";
+		return "NONE";
+	} catch {
+		throw new DubError(`Failed to parse PR state for #${prNumber}.`);
+	}
+}
+
+function isPrNotFoundError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error);
+	const normalized = message.toLowerCase();
+	return (
+		normalized.includes("could not resolve to a pull request") ||
+		normalized.includes("could not resolve to a pullrequest") ||
+		normalized.includes("no pull requests found") ||
+		normalized.includes("not found")
+	);
 }
 
 /**
@@ -232,6 +317,56 @@ export async function updatePrBody(
 			);
 		}
 		throw new DubError(`Failed to update PR #${prNumber}: ${message}`);
+	}
+}
+
+/**
+ * Retargets an existing PR to a new base branch.
+ */
+export async function retargetPrBase(
+	target: number | string,
+	baseBranch: string,
+	cwd: string,
+): Promise<void> {
+	try {
+		await execa("gh", ["pr", "edit", String(target), "--base", baseBranch], {
+			cwd,
+		});
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new DubError(
+			`Failed to retarget PR '${target}' to '${baseBranch}': ${message}`,
+		);
+	}
+}
+
+/**
+ * Merges a PR by number using the requested strategy.
+ */
+export async function mergePr(
+	prNumber: number,
+	cwd: string,
+	options: {
+		method?: "merge" | "squash" | "rebase";
+		deleteBranch?: boolean;
+	} = {},
+): Promise<void> {
+	const method = options.method ?? "merge";
+	const methodFlag =
+		method === "squash"
+			? "--squash"
+			: method === "rebase"
+				? "--rebase"
+				: "--merge";
+	const args = ["pr", "merge", String(prNumber), methodFlag];
+	if (options.deleteBranch ?? true) {
+		args.push("--delete-branch");
+	}
+	try {
+		await execa("gh", args, { cwd, stdio: "inherit" });
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new DubError(`Failed to merge PR #${prNumber}: ${message}`);
 	}
 }
 

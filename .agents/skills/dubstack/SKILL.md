@@ -29,6 +29,9 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Check stack health | `dub doctor` |
 | Pre-submit checklist | `dub ready` |
 | Prune stale tracked metadata | `dub prune [--apply]` |
+| Validate merge order | `dub merge-check --pr <number>` |
+| Merge next safe PR | `dub merge-next` / `dub land` |
+| Post-merge repair | `dub post-merge` |
 | Rebase stack | `dub restack` |
 | Continue interrupted op | `dub continue` |
 | Abort interrupted op | `dub abort` |
@@ -114,6 +117,9 @@ dub ss
 dub submit --dry-run
 dub submit --path current
 dub submit --path stack --fix
+dub merge-check --pr 123
+dub merge-next
+dub post-merge
 ```
 
 ```bash

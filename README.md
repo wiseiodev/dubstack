@@ -457,6 +457,45 @@ dub prune --apply
 dub prune --all --apply
 ```
 
+### `dub merge-check`
+
+Validate merge order for a stack PR.
+
+```bash
+# check current branch PR
+dub merge-check
+
+# check explicit PR number
+dub merge-check --pr 123
+```
+
+### `dub merge-next` / `dub land`
+
+Merge the next safe PR in your current stack path, then run post-merge maintenance.
+
+```bash
+dub merge-next
+# alias
+dub land
+
+# preview only
+dub merge-next --dry-run
+```
+
+### `dub post-merge`
+
+Repair stack metadata and retarget remaining PRs after manual merges.
+
+```bash
+dub post-merge
+
+# preview only
+dub post-merge --dry-run
+
+# include all stacks
+dub post-merge --all
+```
+
 ### `dub restack`
 
 Rebase stack branches onto updated parents.
@@ -520,6 +559,22 @@ dub sync
 dub sync --restack
 ```
 
+### Merge stacks safely (bottom-up)
+
+```bash
+# merge next safe PR in stack order
+dub merge-next
+
+# run again for the next layer
+dub merge-next
+```
+
+If you merged manually, normalize state and retarget remaining PRs:
+
+```bash
+dub post-merge
+```
+
 ### Recover from restack conflict
 
 ```bash
@@ -543,6 +598,8 @@ dub restack --continue
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
 | Wrong operation during create/restack | Use `dub undo` (single-level) |
+| PR merge blocked by order | Run `dub merge-check --pr <number>` and merge previous PR first |
+| Manual merge left stack inconsistent | Run `dub post-merge` |
 
 ### Stale Branch Recovery
 

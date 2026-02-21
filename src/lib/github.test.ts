@@ -19,7 +19,11 @@ import {
 	getBranchPrLifecycleState,
 	getBranchPrSyncInfo,
 	getPr,
+	getPrByNumber,
+	getPrStateByNumber,
+	mergePr,
 	openPrInBrowser,
+	retargetPrBase,
 	updatePrBody,
 } from "./github";
 
@@ -84,6 +88,32 @@ describe("getPr", () => {
 	});
 });
 
+describe("getPrByNumber", () => {
+	it("returns PrInfo by number", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				number: 12,
+				url: "https://github.com/o/r/pull/12",
+				title: "feat: b",
+				body: "body",
+			}),
+		});
+		await expect(getPrByNumber(12, "/repo")).resolves.toEqual({
+			number: 12,
+			url: "https://github.com/o/r/pull/12",
+			title: "feat: b",
+			body: "body",
+		});
+	});
+
+	it("returns null when PR number does not exist", async () => {
+		mockExeca.mockRejectedValueOnce(
+			new Error("GraphQL: Could not resolve to a PullRequest with the number"),
+		);
+		await expect(getPrByNumber(999999, "/repo")).resolves.toBeNull();
+	});
+});
+
 describe("getBranchPrLifecycleState", () => {
 	it("returns NONE when no PR exists", async () => {
 		mockExeca.mockResolvedValueOnce({ stdout: "null" });
@@ -118,6 +148,37 @@ describe("getBranchPrLifecycleState", () => {
 		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
 			"OPEN",
 		);
+	});
+});
+
+describe("getPrStateByNumber", () => {
+	it("returns MERGED when mergedAt is present", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				state: "CLOSED",
+				mergedAt: "2026-01-01T00:00:00Z",
+			}),
+		});
+		await expect(getPrStateByNumber(5, "/repo")).resolves.toBe("MERGED");
+	});
+
+	it("returns OPEN/CLOSED from state", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({ state: "OPEN", mergedAt: null }),
+		});
+		await expect(getPrStateByNumber(5, "/repo")).resolves.toBe("OPEN");
+
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({ state: "CLOSED", mergedAt: null }),
+		});
+		await expect(getPrStateByNumber(5, "/repo")).resolves.toBe("CLOSED");
+	});
+
+	it("returns NONE when PR number does not exist", async () => {
+		mockExeca.mockRejectedValueOnce(
+			new Error("GraphQL: Could not resolve to a PullRequest with the number"),
+		);
+		await expect(getPrStateByNumber(999999, "/repo")).resolves.toBe("NONE");
 	});
 });
 
@@ -190,6 +251,40 @@ describe("updatePrBody", () => {
 
 		await expect(updatePrBody(42, "/tmp/body.md", "/repo")).rejects.toThrow(
 			"permissions",
+		);
+	});
+});
+
+describe("retargetPrBase", () => {
+	it("calls gh pr edit --base", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "" });
+		await retargetPrBase("feat/a", "main", "/repo");
+		expect(mockExeca).toHaveBeenCalledWith(
+			"gh",
+			["pr", "edit", "feat/a", "--base", "main"],
+			{ cwd: "/repo" },
+		);
+	});
+});
+
+describe("mergePr", () => {
+	it("merges with default --merge and delete-branch", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "" });
+		await mergePr(44, "/repo");
+		expect(mockExeca).toHaveBeenCalledWith(
+			"gh",
+			["pr", "merge", "44", "--merge", "--delete-branch"],
+			{ cwd: "/repo", stdio: "inherit" },
+		);
+	});
+
+	it("supports squash strategy", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "" });
+		await mergePr(44, "/repo", { method: "squash", deleteBranch: false });
+		expect(mockExeca).toHaveBeenCalledWith(
+			"gh",
+			["pr", "merge", "44", "--squash"],
+			{ cwd: "/repo", stdio: "inherit" },
 		);
 	});
 });

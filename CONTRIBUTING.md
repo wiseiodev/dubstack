@@ -76,3 +76,5 @@ git config commit.template .github/commit-template.txt
 - Keep PRs focused and reviewable.
 - Include behavioral impact and risk in PR description.
 - If UX or command semantics change, update docs in the same PR (`README.md`, `QUICKSTART.md`, or `.agents/*` as needed).
+- For stacked PRs, merge bottom-up. Use `dub merge-next` to avoid out-of-order merges.
+- This repo includes a merge-order guard workflow; keep it enabled as a required status check in branch protection.

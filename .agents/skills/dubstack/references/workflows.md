@@ -69,7 +69,26 @@ dub prune
 dub prune --apply
 ```
 
-## 5) Conflict Recovery During Restack
+## 5) Merge Stack Safely (Bottom-Up)
+
+```bash
+# optional explicit guard
+dub merge-check --pr 123
+
+# merge next safe PR + run maintenance
+dub merge-next
+
+# repeat until complete
+dub merge-next
+```
+
+If manual merges happened:
+
+```bash
+dub post-merge
+```
+
+## 6) Conflict Recovery During Restack
 
 ```bash
 dub restack
@@ -89,7 +108,7 @@ dub continue
 dub abort
 ```
 
-## 6) Open PR Quickly
+## 7) Open PR Quickly
 
 ```bash
 dub pr
@@ -99,7 +118,7 @@ dub pr feat/top
 dub pr 123
 ```
 
-## 7) Recover from Mistakes
+## 8) Recover from Mistakes
 
 ```bash
 dub undo
@@ -109,7 +128,7 @@ Notes:
 - `undo` supports one level.
 - Intended for reverting last `create` or `restack`.
 
-## 8) Repair Untracked Branch Metadata
+## 9) Repair Untracked Branch Metadata
 
 ```bash
 # branch created outside dub create
@@ -122,7 +141,7 @@ dub parent feat/manual
 dub trunk feat/manual
 ```
 
-## 9) Remove Metadata or Delete Branches Safely
+## 10) Remove Metadata or Delete Branches Safely
 
 ```bash
 # metadata-only removal
@@ -138,7 +157,7 @@ dub delete feat/top
 dub delete feat/middle --upstack --force --quiet
 ```
 
-## 10) Stack Inspection Modes
+## 11) Stack Inspection Modes
 
 ```bash
 dub log --stack
@@ -146,7 +165,7 @@ dub log --all
 dub log --reverse
 ```
 
-## 11) Stack Navigation Patterns
+## 12) Stack Navigation Patterns
 
 ```bash
 dub up
@@ -157,7 +176,7 @@ dub top
 dub bottom
 ```
 
-## 12) Checkout Patterns
+## 13) Checkout Patterns
 
 ```bash
 # interactive

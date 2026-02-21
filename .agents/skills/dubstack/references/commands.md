@@ -87,6 +87,11 @@ This is a concise command reference for agents using `dub`.
 | `dub submit --path current` | Submit current linear path (default) |
 | `dub submit --path stack` | Submit full stack (requires linear stack) |
 | `dub submit --path stack --fix` | Auto-fallback to current path when safe |
+| `dub merge-check --pr <number>` | Validate DubStack merge-order dependencies |
+| `dub merge-next` / `dub land` | Merge next safe PR in current path |
+| `dub merge-next --dry-run` | Preview merge-next actions |
+| `dub post-merge` | Repair/retarget stack after merge |
+| `dub post-merge --dry-run` | Preview post-merge repair actions |
 | `dub pr` | Open current branch PR in browser |
 | `dub pr <branch-or-number>` | Open specific PR target |
 

@@ -35,8 +35,11 @@ import { deleteCommand } from "./commands/delete";
 import { doctor } from "./commands/doctor";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
+import { mergeCheck } from "./commands/merge-check";
+import { mergeNext } from "./commands/merge-next";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
 import { parent } from "./commands/parent";
+import { postMerge } from "./commands/post-merge";
 import { pr } from "./commands/pr";
 import { prune } from "./commands/prune";
 import { ready } from "./commands/ready";
@@ -566,6 +569,108 @@ program
 	.action(runSubmit);
 
 program
+	.command("merge-check")
+	.description("Validate DubStack merge order for a PR")
+	.option("--pr <number>", "PR number to validate", parsePositiveInt)
+	.option("--branch <name>", "Branch name to resolve PR from")
+	.action(async (options: { pr?: number; branch?: string }) => {
+		const result = await mergeCheck(process.cwd(), {
+			pr: options.pr,
+			branch: options.branch,
+		});
+		console.log(chalk.green(`✔ Merge check passed: ${result.reason}`));
+	});
+
+program
+	.command("post-merge")
+	.description("Repair stack metadata and retarget remaining PRs after a merge")
+	.option("-a, --all", "Process all tracked stacks")
+	.option("--dry-run", "Preview post-merge actions without mutating state")
+	.option(
+		"--restack",
+		"Restack remaining branches (disable with --no-restack)",
+		true,
+	)
+	.option(
+		"--submit",
+		"Submit refreshed stack updates (disable with --no-submit)",
+		true,
+	)
+	.action(
+		async (options: {
+			all?: boolean;
+			dryRun?: boolean;
+			restack?: boolean;
+			submit?: boolean;
+		}) => {
+			const result = await postMerge(process.cwd(), options);
+			const mode = result.dryRun ? "dry-run" : "applied";
+			console.log(chalk.green(`✔ Post-merge ${mode} complete.`));
+			if (result.cleaned.length > 0) {
+				console.log(chalk.dim(`  cleaned: ${result.cleaned.join(", ")}`));
+			}
+			if (result.retargeted.length > 0) {
+				console.log(chalk.dim(`  retargeted: ${result.retargeted.join(", ")}`));
+			}
+			if (result.restacked) {
+				console.log(chalk.dim("  restack: complete"));
+			}
+			if (result.submitted) {
+				console.log(
+					chalk.dim(
+						`  submit refreshed: ${result.submittedBranches.length} branch(es)`,
+					),
+				);
+			}
+		},
+	);
+
+program
+	.command("merge-next")
+	.alias("land")
+	.description("Merge the next safe PR in your current stack path")
+	.option("--dry-run", "Preview merge + post-merge actions")
+	.option(
+		"--method <method>",
+		"Merge strategy: merge|squash|rebase",
+		parseMergeMethod,
+		"merge",
+	)
+	.option(
+		"--restack",
+		"Run post-merge restack (disable with --no-restack)",
+		true,
+	)
+	.option(
+		"--submit",
+		"Run post-merge submit refresh (disable with --no-submit)",
+		true,
+	)
+	.action(
+		async (options: {
+			dryRun?: boolean;
+			method?: "merge" | "squash" | "rebase";
+			restack?: boolean;
+			submit?: boolean;
+		}) => {
+			const result = await mergeNext(process.cwd(), options);
+			if (result.dryRun) {
+				console.log(
+					chalk.green(
+						`✔ Dry-run: would merge '${result.mergedBranch}' (PR #${result.prNumber}).`,
+					),
+				);
+				return;
+			}
+			console.log(
+				chalk.green(
+					`✔ Merged '${result.mergedBranch}' (PR #${result.prNumber}) and ran post-merge maintenance.`,
+				),
+			);
+		},
+	);
+
+program
 	.command("doctor")
 	.description("Run stack health checks and print actionable remediation steps")
 	.option("-a, --all", "Check all stacks instead of only the current stack")
@@ -836,6 +941,21 @@ function parseSteps(positional?: string, option?: string): number {
 function parseSubmitPath(value: string): SubmitPathMode {
 	if (value === "current" || value === "stack") return value;
 	throw new DubError("Submit path must be either 'current' or 'stack'.");
+}
+
+function parsePositiveInt(value: string): number {
+	const parsed = Number.parseInt(value, 10);
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		throw new DubError("Expected a positive integer.");
+	}
+	return parsed;
+}
+
+function parseMergeMethod(value: string): "merge" | "squash" | "rebase" {
+	if (value === "merge" || value === "squash" || value === "rebase") {
+		return value;
+	}
+	throw new DubError("Merge method must be one of: merge, squash, rebase.");
 }
 
 async function main() {

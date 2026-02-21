@@ -10,6 +10,14 @@ const DUBSTACK_END = "<!-- dubstack:end -->";
 const METADATA_START = "<!-- dubstack-metadata";
 const METADATA_END = "-->";
 
+export interface DubstackMetadata {
+	stack_id: string;
+	pr_number: number;
+	prev_pr: number | null;
+	next_pr: number | null;
+	branch: string;
+}
+
 /**
  * Builds the visible stack navigation table wrapped in dubstack markers.
  *
@@ -103,4 +111,42 @@ export function composePrBody(
 	const userContent = stripDubstackSections(existingBody);
 	const parts = [userContent, stackTable, metadataBlock].filter(Boolean);
 	return parts.join("\n\n");
+}
+
+/**
+ * Parses hidden DubStack metadata from a PR body.
+ * Returns null when metadata markers are absent or malformed.
+ */
+export function parseDubstackMetadata(body: string): DubstackMetadata | null {
+	const start = body.indexOf(METADATA_START);
+	if (start === -1) return null;
+
+	const jsonStart = body.indexOf("\n", start);
+	if (jsonStart === -1) return null;
+
+	const end = body.indexOf(METADATA_END, jsonStart);
+	if (end === -1) return null;
+
+	const payload = body.slice(jsonStart, end).trim();
+	try {
+		const parsed = JSON.parse(payload) as Partial<DubstackMetadata>;
+		if (
+			typeof parsed.stack_id !== "string" ||
+			typeof parsed.pr_number !== "number" ||
+			(parsed.prev_pr !== null && typeof parsed.prev_pr !== "number") ||
+			(parsed.next_pr !== null && typeof parsed.next_pr !== "number") ||
+			typeof parsed.branch !== "string"
+		) {
+			return null;
+		}
+		return {
+			stack_id: parsed.stack_id,
+			pr_number: parsed.pr_number,
+			prev_pr: parsed.prev_pr,
+			next_pr: parsed.next_pr,
+			branch: parsed.branch,
+		};
+	} catch {
+		return null;
+	}
 }
