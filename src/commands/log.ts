@@ -1,6 +1,13 @@
 import { branchExists, getCurrentBranch } from "../lib/git";
+import { DubError } from "../lib/errors";
 import type { Branch, Stack } from "../lib/state";
-import { readState } from "../lib/state";
+import { findStackForBranch, readState } from "../lib/state";
+
+interface LogOptions {
+	stack?: boolean;
+	all?: boolean;
+	reverse?: boolean;
+}
 
 /**
  * Renders an ASCII tree view of all tracked stacks.
@@ -12,7 +19,7 @@ import { readState } from "../lib/state";
  * @returns Formatted ASCII tree string (no ANSI colors — caller adds chalk)
  * @throws {DubError} If not initialized
  */
-export async function log(cwd: string): Promise<string> {
+export async function log(cwd: string, options: LogOptions = {}): Promise<string> {
 	const state = await readState(cwd);
 
 	if (state.stacks.length === 0) {
@@ -26,10 +33,29 @@ export async function log(cwd: string): Promise<string> {
 		// Detached HEAD or empty repo — no branch highlighted
 	}
 
+	let stacksToRender = state.stacks;
+	if (options.stack && !options.all) {
+		if (!currentBranch) {
+			throw new DubError(
+				"Cannot determine current branch for --stack mode. Checkout a branch first.",
+			);
+		}
+		const currentStack = findStackForBranch(state, currentBranch);
+		if (!currentStack) {
+			throw new DubError(
+				`Current branch '${currentBranch}' is not tracked. Run 'dub track ${currentBranch} --parent <branch>' first.`,
+			);
+		}
+		stacksToRender = [currentStack];
+	}
+	if (options.reverse) {
+		stacksToRender = [...stacksToRender].reverse();
+	}
+
 	const sections: string[] = [];
 
-	for (const stack of state.stacks) {
-		const tree = await renderStack(stack, currentBranch, cwd);
+	for (const stack of stacksToRender) {
+		const tree = await renderStack(stack, currentBranch, cwd, options);
 		sections.push(tree);
 	}
 
@@ -40,6 +66,7 @@ async function renderStack(
 	stack: Stack,
 	currentBranch: string | null,
 	cwd: string,
+	options: LogOptions,
 ): Promise<string> {
 	const root = stack.branches.find((b) => b.type === "root");
 	if (!root) return "";
@@ -54,7 +81,17 @@ async function renderStack(
 	}
 
 	const lines: string[] = [];
-	await renderNode(root, currentBranch, childMap, "", true, true, lines, cwd);
+	await renderNode(
+		root,
+		currentBranch,
+		childMap,
+		"",
+		true,
+		true,
+		lines,
+		cwd,
+		options,
+	);
 	return lines.join("\n");
 }
 
@@ -67,6 +104,7 @@ async function renderNode(
 	isLast: boolean,
 	lines: string[],
 	cwd: string,
+	options: LogOptions,
 ): Promise<void> {
 	let label: string;
 	const exists = await branchExists(branch.name, cwd);
@@ -88,7 +126,9 @@ async function renderNode(
 		lines.push(`${prefix}${connector}${label}`);
 	}
 
-	const children = childMap.get(branch.name) ?? [];
+	const children = options.reverse
+		? [...(childMap.get(branch.name) ?? [])].reverse()
+		: (childMap.get(branch.name) ?? []);
 	const childPrefix = isRoot ? "  " : `${prefix}${isLast ? "     " : "│    "}`;
 
 	for (let i = 0; i < children.length; i++) {
@@ -102,6 +142,7 @@ async function renderNode(
 			isChildLast,
 			lines,
 			cwd,
+			options,
 		);
 	}
 }

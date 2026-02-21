@@ -118,4 +118,91 @@ describe("log", () => {
 		const output = await log(dir);
 		expect(output).toContain("feat/deleted ⚠ (missing)");
 	});
+
+	it("supports --stack mode to show only current stack", async () => {
+		await gitInRepo(dir, ["checkout", "-b", "feat/a"]);
+		await gitInRepo(dir, ["checkout", "main"]);
+		await gitInRepo(dir, ["checkout", "-b", "feat/b"]);
+
+		const state: DubState = {
+			stacks: [
+				{
+					id: "stack-1",
+					branches: [
+						{ name: "main", type: "root", parent: null, pr_link: null },
+						{ name: "feat/a", parent: "main", pr_link: null },
+					],
+				},
+				{
+					id: "stack-2",
+					branches: [
+						{ name: "main", type: "root", parent: null, pr_link: null },
+						{ name: "feat/b", parent: "main", pr_link: null },
+					],
+				},
+			],
+		};
+		await writeState(state, dir);
+		await gitInRepo(dir, ["checkout", "feat/b"]);
+
+		const output = await log(dir, { stack: true });
+		expect(output).toContain("feat/b");
+		expect(output).not.toContain("feat/a");
+	});
+
+	it("supports --all mode to show all stacks", async () => {
+		await gitInRepo(dir, ["checkout", "-b", "feat/a"]);
+		await gitInRepo(dir, ["checkout", "main"]);
+		await gitInRepo(dir, ["checkout", "-b", "feat/b"]);
+
+		const state: DubState = {
+			stacks: [
+				{
+					id: "stack-1",
+					branches: [
+						{ name: "main", type: "root", parent: null, pr_link: null },
+						{ name: "feat/a", parent: "main", pr_link: null },
+					],
+				},
+				{
+					id: "stack-2",
+					branches: [
+						{ name: "main", type: "root", parent: null, pr_link: null },
+						{ name: "feat/b", parent: "main", pr_link: null },
+					],
+				},
+			],
+		};
+		await writeState(state, dir);
+
+		const output = await log(dir, { all: true });
+		expect(output).toContain("feat/a");
+		expect(output).toContain("feat/b");
+	});
+
+	it("supports --reverse mode for child ordering", async () => {
+		await gitInRepo(dir, ["checkout", "-b", "feat/a"]);
+		await gitInRepo(dir, ["checkout", "main"]);
+		await gitInRepo(dir, ["checkout", "-b", "feat/b"]);
+		await gitInRepo(dir, ["checkout", "main"]);
+		await gitInRepo(dir, ["checkout", "-b", "feat/c"]);
+
+		const state: DubState = {
+			stacks: [
+				{
+					id: "stack-1",
+					branches: [
+						{ name: "main", type: "root", parent: null, pr_link: null },
+						{ name: "feat/a", parent: "main", pr_link: null },
+						{ name: "feat/b", parent: "main", pr_link: null },
+						{ name: "feat/c", parent: "main", pr_link: null },
+					],
+				},
+			],
+		};
+		await writeState(state, dir);
+
+		const output = await log(dir, { reverse: true });
+		expect(output.indexOf("feat/c")).toBeLessThan(output.indexOf("feat/a"));
+	});
 });

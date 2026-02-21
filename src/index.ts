@@ -129,21 +129,27 @@ program
 	.command("log")
 	.alias("l")
 	.description("Display an ASCII tree of the current stack")
+	.option("-s, --stack", "Only show the current stack")
+	.option("-a, --all", "Show all stacks (default)")
+	.option("-r, --reverse", "Reverse stack/child ordering")
 	.addHelpText(
 		"after",
 		`
 Examples:
   $ dub log    Show the branch tree with current branch highlighted`,
 	)
-	.action(async () => {
-		await printLog(process.cwd());
+	.action(async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+		await printLog(process.cwd(), options);
 	});
 
 program
 	.command("ls")
 	.description("Display an ASCII tree of the current stack")
-	.action(async () => {
-		await printLog(process.cwd());
+	.option("-s, --stack", "Only show the current stack")
+	.option("-a, --all", "Show all stacks (default)")
+	.option("-r, --reverse", "Reverse stack/child ordering")
+	.action(async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+		await printLog(process.cwd(), options);
 	});
 
 program
@@ -674,8 +680,11 @@ async function runSubmit(options: { dryRun?: boolean }) {
 	}
 }
 
-async function printLog(cwd: string) {
-	const output = await log(cwd);
+async function printLog(
+	cwd: string,
+	options: { stack?: boolean; all?: boolean; reverse?: boolean } = {},
+) {
+	const output = await log(cwd, options);
 	const styled = output
 		.replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan("$1 (Current)"))
 		.replace(/⚠ \(missing\)/g, chalk.yellow("⚠ (missing)"));

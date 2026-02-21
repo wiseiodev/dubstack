@@ -63,11 +63,19 @@ export async function submit(
 	const currentEntry = ordered.find((b) => b.name === currentBranch);
 	if (currentEntry?.type === "root") {
 		throw new DubError(
-			"Cannot submit from a root branch. Checkout a stack branch first.",
+			"Cannot submit from a root branch. Run 'dub up' or 'dub checkout <branch>' first.",
 		);
 	}
 
 	const nonRootBranches = ordered.filter((b) => b.type !== "root");
+	const rootBranch =
+		ordered.find((branch) => branch.type === "root")?.name ?? "(unknown)";
+	console.log(
+		`Submitting ${nonRootBranches.length} branch(es) from '${currentBranch}' onto trunk '${rootBranch}'.`,
+	);
+	if (dryRun) {
+		console.log("[dry-run] no branches will be pushed or mutated.");
+	}
 
 	validateLinearStack(ordered);
 
@@ -150,7 +158,8 @@ function validateLinearStack(ordered: Branch[]): void {
 			throw new DubError(
 				`Branch '${parent}' has ${count} children. ` +
 					"Branching stacks are not supported by submit. " +
-					"Ensure each branch has at most one child.",
+					"Ensure each branch has at most one child. " +
+					"Use 'dub move' to linearize the stack before submitting.",
 			);
 		}
 	}
