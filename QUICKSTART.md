@@ -253,7 +253,7 @@ dub undo
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
 | `dub config ai-assistant on` | Enable repo-local AI assistant |
-| `dub ai ask "..."` | Ask AI assistant (streaming + repo bash tool) |
+| `dub ai ask "..."` | Ask AI assistant (streaming + constrained read-only repo shell tool) |
 | `dub history` | Show recent Dub command history |
 
 ## Next Step

@@ -32,6 +32,23 @@ describe('createLocalBashSandbox', () => {
 
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain('blocked for safety');
+    expect(result.stderr).toContain('rm -rf');
+  });
+
+  it('blocks commands outside the read-only allow-list', async () => {
+    const sandbox = createLocalBashSandbox(dir);
+    const result = await sandbox.executeCommand('node -v');
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('allow-listed commands');
+  });
+
+  it('blocks shell operator chaining', async () => {
+    const sandbox = createLocalBashSandbox(dir);
+    const result = await sandbox.executeCommand('git status && ls');
+
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain("Shell operator '&&'");
   });
 
   it('reads and writes files only within the repository root', async () => {
@@ -39,10 +56,12 @@ describe('createLocalBashSandbox', () => {
     await sandbox.writeFiles([
       { path: 'notes/a.txt', content: 'hello' },
       { path: `${dir}/notes/b.txt`, content: 'world' },
+      { path: '..safe/inside.txt', content: 'ok' },
     ]);
 
     await expect(sandbox.readFile('notes/a.txt')).resolves.toBe('hello');
     await expect(sandbox.readFile(`${dir}/notes/b.txt`)).resolves.toBe('world');
+    await expect(sandbox.readFile('..safe/inside.txt')).resolves.toBe('ok');
     await expect(sandbox.readFile('../outside.txt')).rejects.toThrow(
       'outside the repository sandbox',
     );

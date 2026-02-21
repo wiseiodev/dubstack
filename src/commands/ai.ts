@@ -75,7 +75,7 @@ export async function askAi(
     destination: cwd,
     sandbox: createLocalBashSandbox(cwd),
     extraInstructions:
-      'Safety: use bash only when command output is needed. Avoid destructive commands (for example, rm -rf, git reset --hard, git clean -fd) unless the user explicitly asks.',
+      'Safety: use bash only when command output is needed. Do not run destructive commands (for example, rm -rf, git reset --hard, git clean -fd), even if the user explicitly asks. This sandbox only allows read-only command families. If the user insists on blocked actions, explain the command is blocked here and provide a manual command they can run themselves at their own risk.',
   });
 
   const result = deps.streamText({
