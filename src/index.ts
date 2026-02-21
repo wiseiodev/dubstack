@@ -55,6 +55,7 @@ import { DubError } from './lib/errors';
 import { getCurrentBranch } from './lib/git';
 import {
   appendHistoryEntry,
+  normalizeHistoryLine,
   redactSensitiveText,
   sanitizeCommandArgs,
 } from './lib/history';
@@ -1146,8 +1147,10 @@ function beginHistoryCapture(): void {
   const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
   const captureLine = (line: string) => {
+    const normalized = normalizeHistoryLine(line);
+    if (normalized.length === 0) return;
     if (output.length >= MAX_HISTORY_OUTPUT_LINES) return;
-    output.push(truncateHistoryLine(redactSensitiveText(line)));
+    output.push(truncateHistoryLine(redactSensitiveText(normalized)));
   };
 
   const captureChunk = (

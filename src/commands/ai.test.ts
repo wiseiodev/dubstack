@@ -21,20 +21,35 @@ afterEach(async () => {
 });
 
 function streamFrom(chunks: string[]) {
+  return fullStreamFrom(
+    chunks.map((chunk) => ({ type: 'text-delta' as const, text: chunk })),
+  );
+}
+
+function fullStreamFrom(
+  parts: Array<
+    | { type: 'text-delta'; text: string }
+    | { type: 'reasoning-start' }
+    | { type: 'reasoning-delta'; text: string }
+    | { type: 'reasoning-end' }
+    | { type: 'error'; error: unknown }
+  >,
+) {
   return {
     async *[Symbol.asyncIterator]() {
-      for (const chunk of chunks) {
-        yield chunk;
+      for (const part of parts) {
+        yield part;
       }
     },
   };
 }
 
-function createOutputCapture() {
+function createOutputCapture(options: { isTTY?: boolean } = {}) {
   const writes: string[] = [];
   return {
     writes,
     stream: {
+      isTTY: options.isTTY ?? false,
       write(value: string | Uint8Array) {
         writes.push(typeof value === 'string' ? value : value.toString());
         return true;
@@ -80,7 +95,7 @@ describe('askAi', () => {
     process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
 
     const streamText = vi.fn().mockReturnValue({
-      textStream: streamFrom(['hello']),
+      fullStream: streamFrom(['hello']),
     });
     const googleModel = vi.fn().mockReturnValue('google-model');
     const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
@@ -126,6 +141,7 @@ describe('askAi', () => {
           google: {
             thinkingConfig: {
               thinkingLevel: 'high',
+              includeThoughts: true,
             },
           },
         },
@@ -139,7 +155,7 @@ describe('askAi', () => {
     process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
 
     const streamText = vi.fn().mockReturnValue({
-      textStream: streamFrom(['gateway']),
+      fullStream: streamFrom(['gateway']),
     });
     const createGoogleGenerativeAI = vi.fn();
     const gatewayModel = vi.fn().mockReturnValue('gateway-model');
@@ -166,6 +182,72 @@ describe('askAi', () => {
     expect(gatewayModel).toHaveBeenCalledWith('google/gemini-3-flash');
     expect(result.provider).toBe('gateway');
     expect(output.writes.join('')).toBe('gateway\n');
+  });
+
+  it('streams a TTY thinking preview with spinner frames', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: fullStreamFrom([
+        { type: 'reasoning-start' },
+        { type: 'reasoning-delta', text: 'Planning edits' },
+        { type: 'reasoning-delta', text: ' and checks' },
+        { type: 'reasoning-end' },
+        { type: 'text-delta', text: 'Done.' },
+      ]),
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+    const output = createOutputCapture({ isTTY: true });
+
+    await askAi('Explain this stack', dir, {
+      output: output.stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    const rendered = output.writes.join('');
+    expect(rendered).toContain('thinking:');
+    expect(rendered).toContain('\r');
+    expect(rendered.endsWith('Done.\n')).toBe(true);
+  });
+
+  it('throws when the stream emits an error part', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: fullStreamFrom([{ type: 'error', error: new Error('boom') }]),
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+
+    await expect(
+      askAi('Explain this stack', dir, {
+        output: createOutputCapture().stream,
+        deps: {
+          streamText,
+          createGoogleGenerativeAI,
+          createGateway,
+          collectAiContext,
+          createBashTool,
+        },
+      }),
+    ).rejects.toThrow('boom');
   });
 
   it('requires at least one AI key environment variable', async () => {
