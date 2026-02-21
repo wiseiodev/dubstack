@@ -43,8 +43,9 @@ Use these commands from the repo root:
 ## 4) Coding Conventions
 
 - Follow existing TypeScript style in this repo:
-  - tabs for indentation
-  - double quotes
+  - spaces for indentation (2 spaces)
+  - single quotes
+  - kebab-case file names
   - ESM imports
 - Read `.agents/styleguide.md` and relevant `.agents/patterns/*.md` before making structural changes.
 - Keep command behavior user-facing and explicit via `DubError` messages.

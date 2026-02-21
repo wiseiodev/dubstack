@@ -1,21 +1,21 @@
-import type { Branch } from "./state";
+import type { Branch } from './state';
 
 interface StackEntry {
-	number: number;
-	title: string;
+  number: number;
+  title: string;
 }
 
-const DUBSTACK_START = "<!-- dubstack:start -->";
-const DUBSTACK_END = "<!-- dubstack:end -->";
-const METADATA_START = "<!-- dubstack-metadata";
-const METADATA_END = "-->";
+const DUBSTACK_START = '<!-- dubstack:start -->';
+const DUBSTACK_END = '<!-- dubstack:end -->';
+const METADATA_START = '<!-- dubstack-metadata';
+const METADATA_END = '-->';
 
 export interface DubstackMetadata {
-	stack_id: string;
-	pr_number: number;
-	prev_pr: number | null;
-	next_pr: number | null;
-	branch: string;
+  stack_id: string;
+  pr_number: number;
+  prev_pr: number | null;
+  next_pr: number | null;
+  branch: string;
 }
 
 /**
@@ -26,44 +26,44 @@ export interface DubstackMetadata {
  * @param currentBranch - The branch to mark with 👈
  */
 export function buildStackTable(
-	orderedBranches: Branch[],
-	prMap: Map<string, StackEntry>,
-	currentBranch: string,
+  orderedBranches: Branch[],
+  prMap: Map<string, StackEntry>,
+  currentBranch: string,
 ): string {
-	const lines = orderedBranches.map((branch) => {
-		const entry = prMap.get(branch.name);
-		if (!entry) return `- ${branch.name}`;
-		const marker = branch.name === currentBranch ? " 👈" : "";
-		return `- #${entry.number} ${entry.title}${marker}`;
-	});
+  const lines = orderedBranches.map((branch) => {
+    const entry = prMap.get(branch.name);
+    if (!entry) return `- ${branch.name}`;
+    const marker = branch.name === currentBranch ? ' 👈' : '';
+    return `- #${entry.number} ${entry.title}${marker}`;
+  });
 
-	return [
-		DUBSTACK_START,
-		"---",
-		"### 🥞 DubStack",
-		...lines,
-		DUBSTACK_END,
-	].join("\n");
+  return [
+    DUBSTACK_START,
+    '---',
+    '### 🥞 DubStack',
+    ...lines,
+    DUBSTACK_END,
+  ].join('\n');
 }
 
 /**
  * Builds the hidden metadata HTML comment block.
  */
 export function buildMetadataBlock(
-	stackId: string,
-	prNumber: number,
-	prevPr: number | null,
-	nextPr: number | null,
-	branch: string,
+  stackId: string,
+  prNumber: number,
+  prevPr: number | null,
+  nextPr: number | null,
+  branch: string,
 ): string {
-	const metadata = {
-		stack_id: stackId,
-		pr_number: prNumber,
-		prev_pr: prevPr,
-		next_pr: nextPr,
-		branch,
-	};
-	return `${METADATA_START}\n${JSON.stringify(metadata, null, 2)}\n${METADATA_END}`;
+  const metadata = {
+    stack_id: stackId,
+    pr_number: prNumber,
+    prev_pr: prevPr,
+    next_pr: nextPr,
+    branch,
+  };
+  return `${METADATA_START}\n${JSON.stringify(metadata, null, 2)}\n${METADATA_END}`;
 }
 
 /**
@@ -71,29 +71,29 @@ export function buildMetadataBlock(
  * Preserves user-written content. Returns body unchanged if no markers exist.
  */
 export function stripDubstackSections(body: string): string {
-	let result = body;
+  let result = body;
 
-	const startIdx = result.indexOf(DUBSTACK_START);
-	const endIdx = result.indexOf(DUBSTACK_END);
-	if (startIdx !== -1 && endIdx !== -1) {
-		result =
-			result.slice(0, startIdx) + result.slice(endIdx + DUBSTACK_END.length);
-	}
+  const startIdx = result.indexOf(DUBSTACK_START);
+  const endIdx = result.indexOf(DUBSTACK_END);
+  if (startIdx !== -1 && endIdx !== -1) {
+    result =
+      result.slice(0, startIdx) + result.slice(endIdx + DUBSTACK_END.length);
+  }
 
-	const metaStart = result.indexOf(METADATA_START);
-	if (metaStart !== -1) {
-		const metaEnd = result.indexOf(
-			METADATA_END,
-			metaStart + METADATA_START.length,
-		);
-		if (metaEnd !== -1) {
-			result =
-				result.slice(0, metaStart) +
-				result.slice(metaEnd + METADATA_END.length);
-		}
-	}
+  const metaStart = result.indexOf(METADATA_START);
+  if (metaStart !== -1) {
+    const metaEnd = result.indexOf(
+      METADATA_END,
+      metaStart + METADATA_START.length,
+    );
+    if (metaEnd !== -1) {
+      result =
+        result.slice(0, metaStart) +
+        result.slice(metaEnd + METADATA_END.length);
+    }
+  }
 
-	return result.trimEnd();
+  return result.trimEnd();
 }
 
 /**
@@ -104,13 +104,13 @@ export function stripDubstackSections(body: string): string {
  * @param metadataBlock - Output of `buildMetadataBlock`
  */
 export function composePrBody(
-	existingBody: string,
-	stackTable: string,
-	metadataBlock: string,
+  existingBody: string,
+  stackTable: string,
+  metadataBlock: string,
 ): string {
-	const userContent = stripDubstackSections(existingBody);
-	const parts = [userContent, stackTable, metadataBlock].filter(Boolean);
-	return parts.join("\n\n");
+  const userContent = stripDubstackSections(existingBody);
+  const parts = [userContent, stackTable, metadataBlock].filter(Boolean);
+  return parts.join('\n\n');
 }
 
 /**
@@ -118,35 +118,35 @@ export function composePrBody(
  * Returns null when metadata markers are absent or malformed.
  */
 export function parseDubstackMetadata(body: string): DubstackMetadata | null {
-	const start = body.indexOf(METADATA_START);
-	if (start === -1) return null;
+  const start = body.indexOf(METADATA_START);
+  if (start === -1) return null;
 
-	const jsonStart = body.indexOf("\n", start);
-	if (jsonStart === -1) return null;
+  const jsonStart = body.indexOf('\n', start);
+  if (jsonStart === -1) return null;
 
-	const end = body.indexOf(METADATA_END, jsonStart);
-	if (end === -1) return null;
+  const end = body.indexOf(METADATA_END, jsonStart);
+  if (end === -1) return null;
 
-	const payload = body.slice(jsonStart, end).trim();
-	try {
-		const parsed = JSON.parse(payload) as Partial<DubstackMetadata>;
-		if (
-			typeof parsed.stack_id !== "string" ||
-			typeof parsed.pr_number !== "number" ||
-			(parsed.prev_pr !== null && typeof parsed.prev_pr !== "number") ||
-			(parsed.next_pr !== null && typeof parsed.next_pr !== "number") ||
-			typeof parsed.branch !== "string"
-		) {
-			return null;
-		}
-		return {
-			stack_id: parsed.stack_id,
-			pr_number: parsed.pr_number,
-			prev_pr: parsed.prev_pr,
-			next_pr: parsed.next_pr,
-			branch: parsed.branch,
-		};
-	} catch {
-		return null;
-	}
+  const payload = body.slice(jsonStart, end).trim();
+  try {
+    const parsed = JSON.parse(payload) as Partial<DubstackMetadata>;
+    if (
+      typeof parsed.stack_id !== 'string' ||
+      typeof parsed.pr_number !== 'number' ||
+      (parsed.prev_pr !== null && typeof parsed.prev_pr !== 'number') ||
+      (parsed.next_pr !== null && typeof parsed.next_pr !== 'number') ||
+      typeof parsed.branch !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      stack_id: parsed.stack_id,
+      pr_number: parsed.pr_number,
+      prev_pr: parsed.prev_pr,
+      next_pr: parsed.next_pr,
+      branch: parsed.branch,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -1,179 +1,179 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTestRepo, gitInRepo } from "../../test/helpers";
-import { getCurrentBranch } from "../lib/git";
-import { readState } from "../lib/state";
-import { readUndoEntry } from "../lib/undo-log";
-import { create } from "./create";
-import { init } from "./init";
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createTestRepo, gitInRepo } from '../../test/helpers';
+import { getCurrentBranch } from '../lib/git';
+import { readState } from '../lib/state';
+import { readUndoEntry } from '../lib/undo-log';
+import { create } from './create';
+import { init } from './init';
 
 let dir: string;
 let cleanup: () => Promise<void>;
 
 beforeEach(async () => {
-	const repo = await createTestRepo();
-	dir = repo.dir;
-	cleanup = repo.cleanup;
-	await init(dir);
-	await gitInRepo(dir, ["add", "."]);
-	await gitInRepo(dir, ["commit", "-m", "init dubstack"]);
+  const repo = await createTestRepo();
+  dir = repo.dir;
+  cleanup = repo.cleanup;
+  await init(dir);
+  await gitInRepo(dir, ['add', '.']);
+  await gitInRepo(dir, ['commit', '-m', 'init dubstack']);
 });
 
 afterEach(async () => {
-	await cleanup();
+  await cleanup();
 });
 
-describe("create", () => {
-	it("creates a branch from main and updates state", async () => {
-		const result = await create("feat/first", dir);
+describe('create', () => {
+  it('creates a branch from main and updates state', async () => {
+    const result = await create('feat/first', dir);
 
-		expect(result.branch).toBe("feat/first");
-		expect(result.parent).toBe("main");
-		expect(result.committed).toBeUndefined();
-		expect(await getCurrentBranch(dir)).toBe("feat/first");
+    expect(result.branch).toBe('feat/first');
+    expect(result.parent).toBe('main');
+    expect(result.committed).toBeUndefined();
+    expect(await getCurrentBranch(dir)).toBe('feat/first');
 
-		const state = await readState(dir);
-		expect(state.stacks).toHaveLength(1);
-		expect(state.stacks[0].branches).toHaveLength(2);
-		expect(state.stacks[0].branches[0]).toMatchObject({
-			name: "main",
-			type: "root",
-		});
-		expect(state.stacks[0].branches[1]).toMatchObject({
-			name: "feat/first",
-			parent: "main",
-		});
-	});
+    const state = await readState(dir);
+    expect(state.stacks).toHaveLength(1);
+    expect(state.stacks[0].branches).toHaveLength(2);
+    expect(state.stacks[0].branches[0]).toMatchObject({
+      name: 'main',
+      type: 'root',
+    });
+    expect(state.stacks[0].branches[1]).toMatchObject({
+      name: 'feat/first',
+      parent: 'main',
+    });
+  });
 
-	it("creates a 3-deep chain in the same stack", async () => {
-		await create("feat/first", dir);
-		await create("feat/second", dir);
+  it('creates a 3-deep chain in the same stack', async () => {
+    await create('feat/first', dir);
+    await create('feat/second', dir);
 
-		const state = await readState(dir);
-		expect(state.stacks).toHaveLength(1);
-		expect(state.stacks[0].branches).toHaveLength(3);
-		expect(state.stacks[0].branches[2]).toMatchObject({
-			name: "feat/second",
-			parent: "feat/first",
-		});
-	});
+    const state = await readState(dir);
+    expect(state.stacks).toHaveLength(1);
+    expect(state.stacks[0].branches).toHaveLength(3);
+    expect(state.stacks[0].branches[2]).toMatchObject({
+      name: 'feat/second',
+      parent: 'feat/first',
+    });
+  });
 
-	it("throws when branch already exists in git", async () => {
-		await gitInRepo(dir, ["checkout", "-b", "existing"]);
-		await gitInRepo(dir, ["checkout", "main"]);
+  it('throws when branch already exists in git', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'existing']);
+    await gitInRepo(dir, ['checkout', 'main']);
 
-		await expect(create("existing", dir)).rejects.toThrow("already exists");
+    await expect(create('existing', dir)).rejects.toThrow('already exists');
 
-		const state = await readState(dir);
-		expect(state.stacks).toHaveLength(0);
-	});
+    const state = await readState(dir);
+    expect(state.stacks).toHaveLength(0);
+  });
 
-	it("auto-initializes when not initialized", async () => {
-		const repo2 = await createTestRepo();
-		try {
-			await gitInRepo(repo2.dir, ["commit", "--allow-empty", "-m", "seed"]);
-			const result = await create("feat/x", repo2.dir);
+  it('auto-initializes when not initialized', async () => {
+    const repo2 = await createTestRepo();
+    try {
+      await gitInRepo(repo2.dir, ['commit', '--allow-empty', '-m', 'seed']);
+      const result = await create('feat/x', repo2.dir);
 
-			expect(result.branch).toBe("feat/x");
-			const state = await readState(repo2.dir);
-			expect(state.stacks).toHaveLength(1);
-		} finally {
-			await repo2.cleanup();
-		}
-	});
+      expect(result.branch).toBe('feat/x');
+      const state = await readState(repo2.dir);
+      expect(state.stacks).toHaveLength(1);
+    } finally {
+      await repo2.cleanup();
+    }
+  });
 
-	it("saves an undo entry", async () => {
-		await create("feat/first", dir);
+  it('saves an undo entry', async () => {
+    await create('feat/first', dir);
 
-		const entry = await readUndoEntry(dir);
-		expect(entry.operation).toBe("create");
-		expect(entry.previousBranch).toBe("main");
-		expect(entry.createdBranches).toEqual(["feat/first"]);
-		expect(entry.previousState.stacks).toHaveLength(0);
-	});
+    const entry = await readUndoEntry(dir);
+    expect(entry.operation).toBe('create');
+    expect(entry.previousBranch).toBe('main');
+    expect(entry.createdBranches).toEqual(['feat/first']);
+    expect(entry.previousState.stacks).toHaveLength(0);
+  });
 });
 
-describe("create with -m", () => {
-	it("creates branch and commits staged changes", async () => {
-		fs.writeFileSync(path.join(dir, "feature.ts"), "export const x = 1;\n");
-		await gitInRepo(dir, ["add", "feature.ts"]);
+describe('create with -m', () => {
+  it('creates branch and commits staged changes', async () => {
+    fs.writeFileSync(path.join(dir, 'feature.ts'), 'export const x = 1;\n');
+    await gitInRepo(dir, ['add', 'feature.ts']);
 
-		const result = await create("feat/api", dir, {
-			message: "feat: add API",
-		});
+    const result = await create('feat/api', dir, {
+      message: 'feat: add API',
+    });
 
-		expect(result.branch).toBe("feat/api");
-		expect(result.committed).toBe("feat: add API");
-		expect(await getCurrentBranch(dir)).toBe("feat/api");
+    expect(result.branch).toBe('feat/api');
+    expect(result.committed).toBe('feat: add API');
+    expect(await getCurrentBranch(dir)).toBe('feat/api');
 
-		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
-		expect(stdout.trim()).toBe("feat: add API");
-	});
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('feat: add API');
+  });
 
-	it("throws when nothing is staged", async () => {
-		await expect(
-			create("feat/empty", dir, { message: "feat: nothing" }),
-		).rejects.toThrow("No staged changes");
-	});
+  it('throws when nothing is staged', async () => {
+    await expect(
+      create('feat/empty', dir, { message: 'feat: nothing' }),
+    ).rejects.toThrow('No staged changes');
+  });
 });
 
-describe("create with -a -m", () => {
-	it("stages all files, creates branch, and commits", async () => {
-		fs.writeFileSync(path.join(dir, "new-file.ts"), "export const y = 2;\n");
+describe('create with -a -m', () => {
+  it('stages all files, creates branch, and commits', async () => {
+    fs.writeFileSync(path.join(dir, 'new-file.ts'), 'export const y = 2;\n');
 
-		const result = await create("feat/ui", dir, {
-			message: "feat: add UI",
-			all: true,
-		});
+    const result = await create('feat/ui', dir, {
+      message: 'feat: add UI',
+      all: true,
+    });
 
-		expect(result.branch).toBe("feat/ui");
-		expect(result.committed).toBe("feat: add UI");
+    expect(result.branch).toBe('feat/ui');
+    expect(result.committed).toBe('feat: add UI');
 
-		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
-		expect(stdout.trim()).toBe("feat: add UI");
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('feat: add UI');
 
-		const { stdout: status } = await gitInRepo(dir, ["status", "--porcelain"]);
-		expect(status.trim()).toBe("");
-	});
+    const { stdout: status } = await gitInRepo(dir, ['status', '--porcelain']);
+    expect(status.trim()).toBe('');
+  });
 
-	it("throws when working tree is clean", async () => {
-		await expect(
-			create("feat/clean", dir, { message: "feat: noop", all: true }),
-		).rejects.toThrow("No changes to commit");
-	});
+  it('throws when working tree is clean', async () => {
+    await expect(
+      create('feat/clean', dir, { message: 'feat: noop', all: true }),
+    ).rejects.toThrow('No changes to commit');
+  });
 });
 
-describe("create with -a but no -m", () => {
-	it("throws requiring -m", async () => {
-		await expect(create("feat/bad", dir, { all: true })).rejects.toThrow(
-			"require '-m'",
-		);
-	});
+describe('create with -a but no -m', () => {
+  it('throws requiring -m', async () => {
+    await expect(create('feat/bad', dir, { all: true })).rejects.toThrow(
+      "require '-m'",
+    );
+  });
 });
 
-describe("create with -u -m", () => {
-	it("stages tracked updates, creates branch, and commits", async () => {
-		const trackedFile = path.join(dir, "tracked.txt");
-		fs.writeFileSync(trackedFile, "one\n");
-		await gitInRepo(dir, ["add", "tracked.txt"]);
-		await gitInRepo(dir, ["commit", "-m", "test: add tracked file"]);
-		fs.writeFileSync(trackedFile, "two\n");
+describe('create with -u -m', () => {
+  it('stages tracked updates, creates branch, and commits', async () => {
+    const trackedFile = path.join(dir, 'tracked.txt');
+    fs.writeFileSync(trackedFile, 'one\n');
+    await gitInRepo(dir, ['add', 'tracked.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'test: add tracked file']);
+    fs.writeFileSync(trackedFile, 'two\n');
 
-		const result = await create("feat/update", dir, {
-			message: "feat: update tracked files",
-			update: true,
-		});
+    const result = await create('feat/update', dir, {
+      message: 'feat: update tracked files',
+      update: true,
+    });
 
-		expect(result.branch).toBe("feat/update");
-		expect(result.committed).toBe("feat: update tracked files");
-		const { stdout } = await gitInRepo(dir, ["log", "-1", "--format=%s"]);
-		expect(stdout.trim()).toBe("feat: update tracked files");
-	});
+    expect(result.branch).toBe('feat/update');
+    expect(result.committed).toBe('feat: update tracked files');
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('feat: update tracked files');
+  });
 
-	it("requires -m when --update is passed", async () => {
-		await expect(
-			create("feat/update-only", dir, { update: true }),
-		).rejects.toThrow("require '-m'");
-	});
+  it('requires -m when --update is passed', async () => {
+    await expect(
+      create('feat/update-only', dir, { update: true }),
+    ).rejects.toThrow("require '-m'");
+  });
 });
