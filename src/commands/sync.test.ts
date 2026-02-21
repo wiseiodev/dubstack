@@ -295,6 +295,10 @@ describe("sync", () => {
 		expect(mockDeleteBranch).toHaveBeenCalledWith("feat/a", "/repo");
 		expect(result.cleaned).toContain("feat/a");
 		expect(result.branches).toHaveLength(0);
+		const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+		expect(
+			writtenState.stacks[0].branches.find((b) => b.name === "feat/a"),
+		).toBeUndefined();
 	});
 
 	it("handles parent-mismatch status in non-interactive mode by skipping", async () => {

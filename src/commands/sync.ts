@@ -198,6 +198,7 @@ export async function sync(
 		if (shouldDelete) {
 			await checkoutBranch(roots[0] ?? originalBranch, cwd);
 			await deleteBranch(branch, cwd);
+			removeBranchFromState(scopeStacks, branch);
 			result.cleaned.push(branch);
 		}
 	}
@@ -586,4 +587,21 @@ function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {
 		queue.push(...(childMap.get(next) ?? []));
 	}
 	return descendants;
+}
+
+function removeBranchFromState(
+	stacks: Array<{ branches: Branch[] }>,
+	branch: string,
+) {
+	for (const stack of stacks) {
+		const deleted = stack.branches.find((b) => b.name === branch);
+		if (!deleted) continue;
+		const newParent = deleted.parent;
+		for (const child of stack.branches) {
+			if (child.parent === branch) {
+				child.parent = newParent;
+			}
+		}
+		stack.branches = stack.branches.filter((b) => b.name !== branch);
+	}
 }
