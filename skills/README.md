@@ -1,31 +1,69 @@
-# DubStack Agent Skills
+# DubStack Skills (Packaged)
 
-This directory contains agent skills for developing with the DubStack CLI. These skills teach AI agents how to correctly use `dub` commands for stacked PR workflows.
+DubStack ships agent skills so coding assistants can use `dub` correctly for stacked PR workflows.
 
-## Available Skills
+## Included Skills
 
 ### `dubstack`
-**Reference & Command Guide**
-The core skill containing the full `dub` CLI reference, workflows, and troubleshooting. Agents use this to understand how to operate the tool generally (navigating stacks, restacking, checking logs).
+
+General CLI reference and workflow guidance for:
+- creating and navigating stacks
+- modifying branches and restacking
+- syncing with remote state
+- submitting PR stacks
+- recovering from common errors
+
+Install:
 
 ```bash
 npx skills add wiseiodev/dubstack/skills/dubstack
 ```
 
 ### `dub-flow`
-**PR Creation Workflow**
-A specialized workflow skill for analyzing staged changes, suggesting branch names/commit messages, and executing a "create branch + commit + submit PR" flow in one go.
+
+Task-oriented PR execution flow for agents that need to:
+- analyze staged changes
+- propose branch + commit naming
+- run `dub create` / `dub submit`
+- open and polish PR metadata
+
+Install:
 
 ```bash
 npx skills add wiseiodev/dubstack/skills/dub-flow
 ```
 
-## Usage
+## Install via Dub CLI
 
-Once installed, your agent will be able to:
+You can also install these directly from DubStack:
 
-- Create stacked branches with `dub create -am`
-- Visualize stacks with `dub log`
-- Handle restacking across multiple branches
-- Submit entire stacks to GitHub with `dub ss`
-- Recover from errors using `dub undo`
+```bash
+# install all packaged skills
+dub skills add
+
+# install specific skill
+dub skills add dubstack
+dub skills add dub-flow
+```
+
+## Remove Skills
+
+```bash
+dub skills remove dubstack
+dub skills remove dub-flow
+```
+
+## Dry Run
+
+```bash
+dub skills add --dry-run
+dub skills remove --dry-run
+```
+
+## What Agents Gain
+
+With these skills installed, agents are more reliable at:
+- using stack-safe commands (`create`, `modify`, `sync`, `restack`, `submit`)
+- choosing safer recovery paths after conflicts
+- avoiding destructive or non-stack-aware git flows
+- producing consistent PR workflow outputs

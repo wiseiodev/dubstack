@@ -1,362 +1,400 @@
 # DubStack
 
-A local-first CLI for managing **stacked diffs** — chains of dependent git branches that build on each other. Stop juggling complex rebase chains by hand.
+DubStack (`dub`) is a local-first CLI for stacked branch workflows.
 
-## Why Stacked Diffs?
+It is designed for the Graphite mental model: small, dependent PRs that are easy to review, update, and rebase.
 
-Stacked diffs let you break large features into small, reviewable PRs that depend on each other. Instead of one 2,000-line monster PR, you get a clean chain:
+## Why DubStack
 
-```
+Large PRs are hard to review and painful to keep up to date.
+
+Stacked branches let you split work into focused layers:
+
+```text
 (main)
-  └─ feat/api-models
-       └─ feat/api-endpoint
-            └─ feat/ui-component
+  └─ feat/auth-types
+       └─ feat/auth-login
+            └─ feat/auth-tests
 ```
 
-When `main` updates or you amend an earlier branch, `dub restack` cascades rebases through the entire chain for you.
+When a lower branch changes, `dub restack` propagates it upstack.
 
 ## Install
 
-**Homebrew (Recommended)**
+### Homebrew (recommended)
 
 ```bash
 brew tap wiseiodev/dubstack
 brew install dubstack
 ```
 
-To update to the latest version:
+Update:
 
 ```bash
 brew upgrade dubstack
 ```
 
-**npm**
+### npm
 
 ```bash
 npm install -g dubstack
 ```
 
-**From Source** (for contributors)
-
-> Requires **Node ≥ 22** and **pnpm**.
+### From source
 
 ```bash
-# Clone and install
-git clone https://github.com/wiseiodev/dubstack.git && cd dubstack
+git clone https://github.com/wiseiodev/dubstack.git
+cd dubstack
 pnpm install
-
-# Link globally so `dub` is available everywhere
 pnpm build
 pnpm link --global
 ```
 
+## Graphite Mental Model
+
+If you have `gt` muscle memory, use this as a fast map:
+
+| Graphite (`gt`) | DubStack (`dub`) |
+|---|---|
+| `gt create` | `dub create` |
+| `gt modify` | `dub modify` or `dub m` |
+| `gt submit` / `gt ss` | `dub submit` / `dub ss` |
+| `gt sync` | `dub sync` |
+| `gt checkout` / `gt co` | `dub checkout` / `dub co` |
+| `gt log` / `gt ls` | `dub log` / `dub ls` |
+| `gt up` / `gt down` | `dub up` / `dub down` |
+| `gt top` / `gt bottom` | `dub top` / `dub bottom` |
+| `gt info` | `dub info` |
+| `gt pr` | `dub pr` |
+| `gt restack` | `dub restack` |
+| `gt undo` | `dub undo` |
+
 ## Quick Start
 
 ```bash
-# 1. Initialize in any git repo
-cd my-project
-dub init
-
-# 2. Start stacking branches
+# 1) Start from trunk
 git checkout main
-dub create feat/api-models
-# hack hack hack, commit...
+git pull
 
-dub create feat/api-endpoint
-# hack hack hack, commit...
+# 2) Create stacked branches
+# Create + stage all + commit
+dub create feat/auth-types -am "feat: add auth types"
+dub create feat/auth-login -am "feat: add login flow"
+dub create feat/auth-tests -am "test: add auth tests"
 
-dub create feat/ui-component
-# hack hack hack, commit...
-
-# 3. See your stack
+# 3) View stack
 dub log
 
-# 4. Rebase the whole chain after main updates
-git checkout main && git pull
-dub restack
+# 4) Submit stack PRs
+dub ss
 
-# 4b. Sync local stack state with remote branches
-dub sync
-
-# 5. Made a mistake? Undo it
-# 5. Made a mistake? Undo it
-dub undo
+# 5) Open PR for current branch
+dub pr
 ```
 
-## Agent Skills
+For a more detailed walkthrough, see [`QUICKSTART.md`](./QUICKSTART.md).
 
-DubStack provides skills for AI coding agents (like Cursor, Windsurf, etc.) to use the CLI effectively.
-
-You can install them easily using the `dub skills` command:
-
-```bash
-# Install all skills
-dub skills add
-
-# Install specific skill
-dub skills add dub-flow
-```
-
-Alternatively, you can install them manually via `npx`:
-
-```bash
-# Core CLI reference & workflows
-npx skills add wiseiodev/dubstack/skills/dubstack
-
-# Specialized PR creation workflow
-npx skills add wiseiodev/dubstack/skills/dub-flow
-```
-
-## Commands
+## Command Reference
 
 ### `dub init`
 
-Initializes DubStack in the current git repository.
+Initialize DubStack state in the current git repository.
 
 ```bash
 dub init
 ```
 
-- Creates `.git/dubstack/state.json` with an empty state
-- Adds `.git/dubstack` to `.gitignore`
-- **Idempotent** — safe to run multiple times
+Notes:
+- `dub create` auto-initializes state if needed.
+- Running `dub init` manually is still useful for explicit setup.
 
-```
-✔ DubStack initialized            # first run
-⚠ DubStack already initialized    # subsequent runs
-```
+### `dub create <branch>`
 
----
-
-### `dub create <branch-name>`
-
-Creates a new branch stacked on top of the current branch.
+Create a branch stacked on top of the current branch.
 
 ```bash
-# On main
-dub create feat/api-models
+# branch only
+dub create feat/my-change
 
-# On feat/api-models
-dub create feat/api-endpoint
+# create + commit staged changes
+dub create feat/my-change -m "feat: ..."
+
+# stage all + create + commit
+dub create feat/my-change -am "feat: ..."
+
+# stage tracked-file updates + create + commit
+dub create feat/my-change -um "feat: ..."
+
+# interactive hunk staging + create + commit
+dub create feat/my-change -pm "feat: ..."
 ```
 
-- Checks out the new branch at the current HEAD
-- Records the parent → child relationship in state
-- Auto-creates a new stack if the parent isn't already tracked
-- Saves an undo snapshot before any mutation
+Flags:
+- `-m, --message <message>`: commit message
+- `-a, --all`: stage all changes before commit (requires `-m`)
+- `-u, --update`: stage tracked-file updates before commit (requires `-m`)
+- `-p, --patch`: select hunks interactively before commit (requires `-m`)
 
-**Errors:**
-| Condition | Message |
-|---|---|
-| Not initialized | `DubStack is not initialized. Run 'dub init' first.` |
-| Branch already exists | `Branch '<name>' already exists.` |
-| Detached HEAD | `HEAD is detached. Check out a branch first.` |
+### `dub modify` / `dub m`
 
----
+Amend or create commits on the current branch, then restack descendants.
 
-### `dub log`
+```bash
+# amend current commit
+dub modify
 
-Displays an ASCII tree of all tracked stacks.
+# create a new commit
+dub modify -c -m "fix: ..."
+
+# interactive staging
+dub modify -p
+
+# stage all tracked updates
+dub modify -u
+
+# show staged diff before modify
+dub modify -v
+
+# show staged + unstaged diff before modify
+dub modify -vv
+
+# interactive rebase of this branch's commits
+dub modify --interactive-rebase
+```
+
+Flags:
+- `-a, --all`
+- `-u, --update`
+- `-p, --patch`
+- `-c, --commit`
+- `-e, --edit`
+- `-m, --message <message>` (repeatable)
+- `-v, --verbose` (repeatable)
+- `--interactive-rebase`
+
+### `dub checkout` / `dub co`
+
+Checkout a branch directly or use interactive search.
+
+```bash
+# checkout explicit branch
+dub checkout feat/auth-login
+
+# interactive picker
+dub checkout
+
+# checkout trunk for current tracked stack
+dub checkout --trunk
+
+# interactive picker including non-tracked local branches
+dub checkout --show-untracked
+
+# interactive picker scoped to current stack
+dub checkout --stack
+```
+
+### `dub log` / `dub ls` / `dub l`
+
+Render tracked stacks as an ASCII tree.
 
 ```bash
 dub log
+dub ls
+dub l
 ```
 
-Example output:
-
-```
-(main)
-  ├─ feat/api-models
-  │    └─ feat/api-endpoint (Current)
-  └─ feat/auth
-       └─ feat/auth-ui ⚠ (missing)
-```
-
-- **Current branch** is highlighted and marked `(Current)`
-- **Root branches** are shown in parentheses, e.g. `(main)`
-- **Deleted branches** still tracked in state show `⚠ (missing)`
-- Multiple stacks are separated by blank lines
-
----
-
-### `dub restack`
-
-Rebases all branches in the current stack onto their updated parents.
+### Navigation: `dub up`, `dub down`, `dub top`, `dub bottom`
 
 ```bash
-dub restack
+# move one branch upstack
+dub up
+
+# move multiple levels upstack
+dub up 2
+# or: dub up --steps 2
+
+# move downstack
+dub down
+dub down 2
+
+# jump to tip branch in current path
+dub top
+
+# jump to first branch above root
+dub bottom
 ```
 
-**How it works:**
+### `dub info` and `dub branch info`
 
-1. Snapshots every branch tip _before_ starting
-2. Walks the tree in topological order (parents first)
-3. For each child branch, runs `git rebase --onto <parent_new_tip> <parent_old_tip> <child>`
-4. Skips branches whose parent hasn't moved
-5. Returns you to the branch you started on
-
-**Conflict handling:**
-
-If a rebase hits a conflict, DubStack pauses and tells you:
-
-```
-⚠ Conflict while restacking 'feat/api-endpoint'
-  Resolve conflicts, stage changes, then run: dub restack --continue
-```
-
-After resolving:
+Show tracked metadata for a branch.
 
 ```bash
-# Fix the conflicting files
-git add .
-dub restack --continue
+# current branch
+dub info
+
+# explicit branch
+dub info feat/auth-login
+
+# equivalent legacy style
+dub branch info
 ```
 
-Progress is saved to `.git/dubstack/restack-progress.json`, so the resume picks up exactly where it left off.
+### `dub submit` / `dub ss`
 
-**Output examples:**
+Push stack branches and create or update PRs.
 
+```bash
+dub submit
+dub ss
+
+# preview only
+dub submit --dry-run
 ```
-✔ Stack is already up to date
 
-✔ Restacked 2 branch(es)
-  ↳ feat/api-models
-  ↳ feat/api-endpoint
+### `dub pr [branch-or-number]`
+
+Open a PR in browser via `gh`.
+
+```bash
+# current branch PR
+dub pr
+
+# explicit branch / PR target
+dub pr feat/auth-login
+dub pr 123
 ```
-
-**Errors:**
-| Condition | Message |
-|---|---|
-| Uncommitted changes | `Working tree has uncommitted changes. Commit or stash them before restacking.` |
-| Branch not in a stack | `Branch '<name>' is not part of any stack.` |
-| Tracked branch deleted | `Branch '<name>' is tracked in state but no longer exists in git.` |
-
----
 
 ### `dub sync`
 
-Synchronizes tracked stack branches with remote refs and optionally restacks.
+Synchronize tracked branches with remote refs, then optionally restack.
 
 ```bash
+# sync current stack
 dub sync
-```
 
-Useful flags:
-
-```bash
-# Sync all stacks across trunks
+# sync all tracked stacks
 dub sync --all
 
-# Non-interactive safe mode (skip destructive operations)
+# non-interactive mode
 dub sync --no-interactive
 
-# Force overwrite/delete decisions during sync
+# force destructive sync decisions
 dub sync --force
 
-# Skip post-sync restack
+# skip post-sync restack
 dub sync --no-restack
 ```
 
-Current behavior:
-- Fetches tracked roots and branches from `origin`
-- Attempts fast-forward trunk updates (or overwrite with `--force`)
-- Cleans local branches whose PRs are `MERGED`/`CLOSED` and whose commits are
-  confirmed in trunk (interactive/force), while keeping non-cleanable stacks
-  excluded from destructive sync actions
-- Reconciles each tracked branch:
-  - restores missing local branches from remote
-  - fast-forwards branches that are safely behind remote
-  - keeps local-ahead branches
-  - prompts/skips/forces on diverged branches
-- Runs post-sync restack by default
+Current sync behavior includes:
+- fetch tracked refs from `origin`
+- attempt trunk fast-forward (or overwrite with `--force`)
+- cleanup for merged/closed PR branches whose commits are confirmed in trunk
+- reconcile local/remote divergence states per branch
+- restack by default after sync
 
----
+### `dub restack`
+
+Rebase stack branches onto updated parents.
+
+```bash
+dub restack
+
+# continue after resolving conflicts
+dub restack --continue
+```
 
 ### `dub undo`
 
-Rolls back the last `dub create` or `dub restack` operation.
+Undo last `dub create` or `dub restack` operation.
 
 ```bash
 dub undo
 ```
 
-**Undo strategies:**
+### `dub skills`
 
-- **After `create`:** Deletes the created branch, restores state, checks out the previous branch
-- **After `restack`:** Force-resets every rebased branch to its pre-rebase commit, restores state
-
-Only **one level** of undo is supported. After undo, the undo entry is cleared.
-
-```
-✔ Undid 'create': Deleted branch 'feat/api-endpoint'
-✔ Undid 'restack': Reset 3 branches to pre-restack state
-```
-
-**Errors:**
-| Condition | Message |
-|---|---|
-| Nothing to undo | `Nothing to undo.` |
-| Uncommitted changes | `Working tree has uncommitted changes. Commit or stash them before undoing.` |
-
----
-
-## Typical Workflow
+Install or remove packaged agent skills.
 
 ```bash
-# Start a feature stack off main
+# install all bundled skills
+dub skills add
+
+# install one skill
+dub skills add dubstack
+
+# remove one skill
+dub skills remove dub-flow
+
+# preview without changing anything
+dub skills add --dry-run
+dub skills remove --dry-run
+```
+
+## Typical Workflows
+
+### Add review feedback to a middle branch
+
+```bash
+# jump to branch needing edits
+dub co feat/auth-login
+
+# edit + amend + restack descendants
+dub m -a -m "fix: address feedback"
+
+# resubmit stack
+dub ss
+```
+
+### Sync after trunk moves
+
+```bash
 git checkout main
-dub create feat/data-layer
-# write code, commit
+git pull
+dub sync
+```
 
-dub create feat/api-routes
-# write code, commit
+### Recover from restack conflict
 
-dub create feat/frontend
-# write code, commit
-
-# View the stack
-dub log
-# (main)
-#   └─ feat/data-layer
-#        └─ feat/api-routes
-#             └─ feat/frontend (Current)
-
-# Later: main gets updated, or you amend feat/data-layer
-git checkout feat/data-layer
-# amend your commits...
+```bash
 dub restack
-# ✔ Restacked 2 branch(es)
-#   ↳ feat/api-routes
-#   ↳ feat/frontend
-
-# Oops, that restack went wrong
-dub undo
-# ✔ Undid 'restack': Reset 3 branches to pre-restack state
+# resolve conflicts
+git add <resolved-files>
+dub restack --continue
 ```
 
-## How State Works
+## Troubleshooting
 
-DubStack stores all state locally inside your git repo:
+| Problem | What to do |
+|---|---|
+| `gh CLI not found` | Install GitHub CLI: https://cli.github.com |
+| `Not authenticated with GitHub` | Run `gh auth login` |
+| Branch not part of stack | Create via `dub create` or run from tracked branch |
+| Restack conflict | Resolve files, `git add`, `dub restack --continue` |
+| Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
+| Wrong operation during create/restack | Use `dub undo` (single-level) |
 
-```
+## State Files
+
+DubStack stores local state in your repo:
+
+```text
 .git/dubstack/
-├── state.json               # branch relationships and stack metadata
-├── undo.json                 # snapshot for single-level undo
-└── restack-progress.json     # in-flight restack state (temporary)
+├── state.json
+├── undo.json
+└── restack-progress.json
 ```
 
-Nothing is pushed to your remote. State is per-repo and git-ignored.
+Nothing is pushed to your remote from these files.
 
 ## Development
 
 ```bash
-pnpm install          # install deps
-pnpm dev              # run via tsx (no build step)
-pnpm build            # compile TypeScript to dist/
-pnpm test             # run tests (vitest)
-pnpm typecheck        # type-check without emitting
-pnpm checks           # lint + format check (biome)
-pnpm checks:fix       # auto-fix lint + format issues
+pnpm install
+pnpm test
+pnpm typecheck
+pnpm checks
+pnpm checks:fix
+pnpm build
 ```
 
 ## License

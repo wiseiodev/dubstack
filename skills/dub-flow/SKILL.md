@@ -1,114 +1,138 @@
 ---
 name: dub-flow
-description: Create DubStack stacked PRs from staged git changes. Use when user wants to commit and create a pull request using DubStack, or says "create a PR", "submit PR". Optionally accepts a Linear issue ID to auto-close issues on merge.
+description: Use when turning staged changes into a DubStack branch, commit, and submitted PR stack with clear naming and user confirmation.
 ---
 
-Analyze staged changes and create a DubStack stacked PR with user confirmation.
+# DubStack PR Flow
 
-**Usage:** User requests to create/submit a PR, optionally providing a Linear issue ID (e.g., "submit this for A-35")
+Use this skill when a user asks to "create a PR" or "submit this" from staged changes.
 
-## 1. Analysis Phase
-1. **Check for Linear Issue ID**: If user provided an issue ID argument (e.g., A-35):
-   - Validate format matches `A-\d+` pattern
-   - Store for use in commit message and PR description
-   - Prepare "Completes [ISSUE_ID]" phrase
-2. **Check Prerequisites**: Verify git staged changes exist, if not prompt user to stage changes first
-3. **Analyze Staged Changes**: Use `git status`, `git diff --cached --stat`, and `git diff --cached` to understand:
-   - Files modified, added, deleted
-   - Lines added/removed
-   - Nature of changes (features, fixes, refactoring, etc.)
-4. **Review Recent Commits**: Check `git log --oneline -5` for context and commit message patterns
+## Goal
 
-## 2. Suggestion Generation
-Generate and present to user:
+Produce a clean, reviewable stack operation with:
+1. suggested branch name
+2. suggested commit message
+3. optional issue linkage
+4. execution via `dub create` and `dub submit`
 
-### **Suggested Branch Name:**
-`[type]/[brief-kebab-case-description]`
-- Use conventional prefixes: `feat/`, `fix/`, `chore/`, `refactor/`, `docs/`
-- Keep under 50 characters
-- Be descriptive but concise
+## Preconditions
 
-### **Suggested Commit Message:**
-Follow conventional commits format:
-```
-[type]([scope]): [description]
+- Current directory is a git repo.
+- Staged changes exist (or user explicitly wants help staging).
+- `gh` auth is configured for PR operations.
 
-[optional body with more details]
+## Phase 1: Analyze Changes
 
-[If Linear Issue ID provided: Completes ISSUE_ID]
+Run:
+
+```bash
+git status --short
+git diff --cached --stat
+git diff --cached
+git log --oneline -5
 ```
 
-### **Suggested PR Description:**
-Format strictly using this template:
+Capture:
+- change scope (feature/fix/refactor/docs/test/chore)
+- files and line impact
+- likely branch scope and commit intent
 
-**Detailed Summary:**
-[Summary of changes]
+If nothing is staged, stop and suggest one of:
+- `git add <files>`
+- `git add -A`
+- use `dub create <name> -pm "..."` to stage interactively
 
-**Impact Metrics:**
-- **Files Changed:** [Count]
-- **Lines Added:** [Count]
-- **Lines Removed:** [Count]
+## Phase 2: Propose Naming and Metadata
 
-**Change Categories:**
-- [ ] New Feature
-- [ ] Bug Fix
-- [ ] Refactor
-- [ ] Tests
-- [ ] Documentation
+### Branch naming
 
-**Testing Instructions:**
-[Instructions]
+Prefer:
 
-[If Issue ID provided]: Completes [ISSUE_ID]
-
-## 3. User Confirmation
-Present all suggestions clearly and ask:
-```
-Review the suggestions above. Would you like to:
-1. Proceed with these suggestions
-2. Modify any suggestions (specify which)
-3. Cancel the operation
+```text
+<type>/<short-kebab-scope>
 ```
 
-## 4. Execution Phase (Only after user confirms)
+Examples:
+- `feat/auth-login`
+- `fix/sync-parent-mismatch`
+- `refactor/submit-body-builder`
 
-**IMPORTANT**: Follow these CLI commands exactly.
+### Commit message
 
-1. **Create DubStack Branch & Commit**:
-   ```bash
-   dub create [BRANCH_NAME] -am "[COMMIT_MESSAGE]"
-   ```
+Use conventional commits:
 
-2. **Submit Stacked PR**:
-   ```bash
-   dub ss
-   ```
-   *Note: `dub ss` automatically pushes branches and creates/updates PRs for the entire stack.*
+```text
+type(scope): summary
 
-3. **Update PR Description via GitHub CLI**:
-   The `dub ss` command handles the PR body structure, but to populate the *user content* part (description), use:
-   ```bash
-   gh pr edit [PR_NUMBER] --title "[PR_TITLE]" --body "[PR_DESCRIPTION]"
-   ```
-   *Note: DubStack preserves user content in PR bodies during updates.*
+optional body
 
-## 5. Error Handling
-- If DubStack commands fail, provide clear error messages and suggested fixes
-- Handle common issues: no staged changes, auth problems (ensure `gh auth login` is done), or branch name conflicts
-
-## 6. Success Reporting
+optional issue link
 ```
-## Success Report:
 
-✅ DubStack stacked PR created successfully!
+If user provided issue ID (for example `A-35`), append:
 
-- **Branch:** `[BRANCH_NAME]`
-- **Commit:** `[COMMIT_HASH]`
-- **PR #[NUMBER]:** [GITHUB_URL]
-[If Issue ID provided: - **Linear Issue:** [ISSUE_ID]]
+```text
+Completes A-35
+```
 
-**Next steps:**
-- Review the PR in GitHub
-- `dub log` to view stack status
-- `dub restack` if needed after changes
+### PR title/body guidance
+
+Since `dub ss` manages stack submission, focus on high-quality commit messages and branch names first. If user asks to polish PR text, prepare concise title/body recommendations after submission.
+
+## Phase 3: Confirm Before Execution
+
+Present:
+- suggested branch name
+- suggested commit message
+- what command you plan to run
+
+Ask user to choose:
+1. proceed
+2. edit branch/message
+3. cancel
+
+## Phase 4: Execute
+
+### Default path (stage all)
+
+```bash
+dub create <branch-name> -am "<commit-message>"
+dub ss
+```
+
+### If user requested tracked-only staging
+
+```bash
+dub create <branch-name> -um "<commit-message>"
+dub ss
+```
+
+### If user requested patch/hunk selection
+
+```bash
+dub create <branch-name> -pm "<commit-message>"
+dub ss
+```
+
+### Optional: open resulting PR
+
+```bash
+dub pr
+```
+
+## Error Handling
+
+- **No staged changes**: ask user to stage files or choose `-a/-u/-p` flow.
+- **Branch exists already**: suggest alternate name.
+- **GitHub auth errors**: prompt `gh auth login`.
+- **Submit conflicts/restack issues**: run `dub restack`, resolve conflicts, then rerun `dub ss`.
+
+## Success Output Template
+
+```text
+✅ DubStack submission complete
+- Branch: <branch-name>
+- Commit message: <message>
+- Command(s): dub create ..., dub ss
+- Next: dub pr (to open PR), dub log (to inspect stack)
 ```

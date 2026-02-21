@@ -1,125 +1,157 @@
 # DubStack Quick Start
 
-A walkthrough from zero to stacked PRs.
+This guide gets you from zero to a working stacked PR flow fast.
 
-## 1. Setup
+## Prerequisites
 
-```bash
-npm install -g dubstack   # or: pnpm add -g dubstack
-```
+- `git`
+- `gh` CLI authenticated (`gh auth login`)
+- `dub` installed (`brew install dubstack` or `npm i -g dubstack`)
 
-No `dub init` needed — DubStack auto-initializes on first use.
-
-## 2. Create Your First Stack
-
-You're on `main` with some code changes ready to go:
-
-```bash
-# Stage all + create branch + commit in one shot
-dub create feat/auth-types -am "feat: add auth types and interfaces"
-# ✔ Created 'feat/auth-types' on 'main' • feat: add auth types and interfaces
-```
-
-Now make more changes and stack another branch:
-
-```bash
-# Write login logic...
-dub create feat/auth-login -am "feat: add login flow"
-# ✔ Created 'feat/auth-login' on 'feat/auth-types' • feat: add login flow
-```
-
-And a third:
-
-```bash
-# Write tests...
-dub create feat/auth-tests -am "test: add auth test suite"
-# ✔ Created 'feat/auth-tests' on 'feat/auth-login' • test: add auth test suite
-```
-
-Your stack is now: `main → feat/auth-types → feat/auth-login → feat/auth-tests`
-
-## 3. View the Stack
-
-```bash
-dub log
-```
-
-```
-main
-  └─ feat/auth-types
-       └─ feat/auth-login
-            └─ *feat/auth-tests (Current)*
-```
-
-## 4. Submit PRs
-
-Push all branches and create GitHub PRs for the entire stack:
-
-```bash
-dub ss
-# ✔ Pushed 3 branch(es), created 3 PR(s), updated 0 PR(s)
-#   ↳ feat/auth-types
-#   ↳ feat/auth-login
-#   ↳ feat/auth-tests
-```
-
-Each PR targets its parent branch, so reviewers see only the diff for that layer.
-
-> **Tip:** Preview what would happen without acting: `dub ss --dry-run`
-
-## 5. Iterate on Review Feedback
-
-Reviewer asks for changes on `feat/auth-login`:
-
-```bash
-git checkout feat/auth-login
-# Make your edits...
-git add -A && git commit -m "fix: address review feedback"
-
-# Restack the branches above (so feat/auth-tests picks up the change)
-dub restack
-
-# Push everything again
-dub ss
-
-# Optionally sync local branch graph with remote before submitting
-dub sync
-```
-
-## 6. After a PR Merges
-
-When `feat/auth-types` gets merged into `main`:
+## 1) Start from Trunk
 
 ```bash
 git checkout main
 git pull
+```
 
-# Restack: feat/auth-login now targets main directly
-dub restack
+## 2) Create a Stack
 
-# Update the remaining PRs
+Create three stacked branches with commits:
+
+```bash
+# Layer 1
+dub create feat/auth-types -am "feat: add auth types"
+
+# Layer 2 (parent: feat/auth-types)
+dub create feat/auth-login -am "feat: add login flow"
+
+# Layer 3 (parent: feat/auth-login)
+dub create feat/auth-tests -am "test: add auth tests"
+```
+
+Useful `create` patterns:
+
+```bash
+# branch only
+dub create feat/new-layer
+
+# use tracked-file-only staging
+dub create feat/new-layer -um "feat: ..."
+
+# pick hunks
+dub create feat/new-layer -pm "feat: ..."
+```
+
+## 3) Inspect and Navigate
+
+```bash
+# view stack tree
+dub log
+
+# interactive checkout
+dub co
+
+# move around current path
+dub up
+dub down
+dub top
+dub bottom
+
+# multi-step traversal
+dub up 2
+dub down --steps 2
+```
+
+## 4) Submit Stack PRs
+
+```bash
+# submit stack
+dub ss
+
+# preview only
+dub ss --dry-run
+```
+
+Open PR in browser:
+
+```bash
+dub pr          # current branch PR
+dub pr 123      # explicit PR
+dub pr feat/x   # explicit branch
+```
+
+## 5) Respond to Feedback
+
+When feedback lands on a middle branch:
+
+```bash
+dub co feat/auth-login
+
+# amend current commit
+dub m -a -m "fix: address review feedback"
+
+# or create a new commit
+dub m -c -a -m "fix: follow-up"
+
+# optional: inspect diffs before modifying
+dub m -v
+dub m -vv
+
+# push updates
 dub ss
 ```
 
-## 7. Undo Mistakes
+## 6) Keep Stack in Sync
 
-Created the wrong branch? DubStack remembers:
+After trunk changes:
+
+```bash
+git checkout main
+git pull
+dub sync
+```
+
+Common sync variants:
+
+```bash
+dub sync --all
+dub sync --no-interactive
+dub sync --force
+dub sync --no-restack
+```
+
+## 7) Handle Restack Conflicts
+
+```bash
+dub restack
+# resolve conflicts in files
+git add <resolved-files>
+dub restack --continue
+```
+
+## 8) Undo Last Stack Mutation
 
 ```bash
 dub undo
-# ✔ Undid 'create': Deleted branch 'feat/oops', restored state
 ```
 
-## Command Reference
+`dub undo` supports one level for `create` and `restack` operations.
 
-| Command | Description |
-|---------|-------------|
-| `dub create <name>` | Create branch only |
-| `dub create <name> -m "msg"` | Create branch + commit staged |
+## Fast Command List
+
+| Command | Purpose |
+|---|---|
 | `dub create <name> -am "msg"` | Stage all + create + commit |
-| `dub log` | Show stack tree |
-| `dub ss` | Push + create/update all PRs |
-| `dub submit --dry-run` | Preview submit |
-| `dub restack` | Rebase all branches onto parents |
-| `dub sync` | Sync tracked branches with remote and reconcile divergence |
-| `dub undo` | Reverse last operation |
+| `dub m` | Modify current branch commit(s) |
+| `dub log` | Show stack graph |
+| `dub co` | Interactive checkout |
+| `dub ss` | Submit stack PRs |
+| `dub pr` | Open PR in browser |
+| `dub sync` | Sync local state with remote |
+| `dub restack` | Rebase stack onto updated parents |
+| `dub undo` | Undo last create/restack |
+
+## Next Step
+
+Read [`README.md`](./README.md) for full command details, sync behavior, and troubleshooting.
