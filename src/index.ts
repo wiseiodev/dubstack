@@ -28,6 +28,7 @@ import {
 	resolveCheckoutTrunk,
 } from "./commands/checkout";
 import { create } from "./commands/create";
+import { deleteCommand } from "./commands/delete";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
@@ -296,6 +297,59 @@ Examples:
 			console.log(
 				chalk.green(
 					`✔ Untracked ${result.removed.length} branch(es): ${result.removed.join(", ")}`,
+				),
+			);
+			for (const entry of result.reparented) {
+				console.log(
+					chalk.dim(
+						`  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? "(none)"}'`,
+					),
+				);
+			}
+		},
+	);
+
+program
+	.command("delete")
+	.argument("[branch]", "Branch to delete (defaults to current branch)")
+	.option("--upstack", "Also delete descendants of the target branch")
+	.option("--downstack", "Also delete ancestors toward trunk")
+	.option("-f, --force", "Delete branches even when not merged")
+	.option("-q, --quiet", "Skip confirmation prompts")
+	.option("--no-interactive", "Disable prompts and require explicit flags")
+	.description("Delete local branches and update DubStack metadata")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub delete feat/a
+  $ dub delete feat/a --upstack -f -q`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: {
+				upstack?: boolean;
+				downstack?: boolean;
+				force?: boolean;
+				quiet?: boolean;
+				interactive?: boolean;
+			},
+		) => {
+			const result = await deleteCommand(process.cwd(), branch, {
+				upstack: options.upstack,
+				downstack: options.downstack,
+				force: options.force,
+				quiet: options.quiet,
+				interactive: options.interactive,
+			});
+			if (result.cancelled) {
+				console.log(chalk.yellow("⚠ Delete cancelled."));
+				return;
+			}
+			console.log(
+				chalk.green(
+					`✔ Deleted ${result.deleted.length} branch(es): ${result.deleted.join(", ")}`,
 				),
 			);
 			for (const entry of result.reparented) {
