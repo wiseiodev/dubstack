@@ -1257,7 +1257,7 @@ function truncateHistoryLine(line: string): string {
   return `${line.slice(0, MAX_HISTORY_OUTPUT_LINE_LENGTH)}...`;
 }
 
-function normalizeHistoryLine(line: string): string {
+function _normalizeHistoryLine(line: string): string {
   const visible = line.split('\r').pop() ?? '';
   return visible.trim().length === 0 ? '' : visible;
 }
