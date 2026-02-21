@@ -106,6 +106,7 @@ describe("submit", () => {
 		await expect(submit("/repo", false)).rejects.toThrow(
 			"Cannot submit from a root branch",
 		);
+		await expect(submit("/repo", false)).rejects.toThrow("dub up");
 	});
 
 	it("throws when stack has branching children", async () => {
@@ -120,9 +121,11 @@ describe("submit", () => {
 		);
 
 		await expect(submit("/repo", false)).rejects.toThrow("Branching stacks");
+		await expect(submit("/repo", false)).rejects.toThrow("dub track");
 	});
 
 	it("dry-run does not call push or gh commands", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 		mockGetCurrentBranch.mockResolvedValue("feat/a");
 		mockReadState.mockResolvedValue(
 			makeState([
@@ -138,6 +141,10 @@ describe("submit", () => {
 		expect(mockCreatePr).not.toHaveBeenCalled();
 		expect(mockUpdatePrBody).not.toHaveBeenCalled();
 		expect(mockWriteState).not.toHaveBeenCalled();
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Submitting 1 branch"),
+		);
+		logSpy.mockRestore();
 	});
 
 	it("creates new PRs for branches without existing PRs", async () => {

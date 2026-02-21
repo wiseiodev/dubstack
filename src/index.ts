@@ -21,21 +21,29 @@
 import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
+import { abortCommand } from "./commands/abort";
 import { branchInfo, formatBranchInfo } from "./commands/branch";
 import {
 	checkout,
 	interactiveCheckout,
 	resolveCheckoutTrunk,
 } from "./commands/checkout";
+import { children } from "./commands/children";
+import { continueCommand } from "./commands/continue";
 import { create } from "./commands/create";
+import { deleteCommand } from "./commands/delete";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
+import { parent } from "./commands/parent";
 import { pr } from "./commands/pr";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
+import { track } from "./commands/track";
+import { trunk } from "./commands/trunk";
 import { undo } from "./commands/undo";
+import { untrack } from "./commands/untrack";
 import { DubError } from "./lib/errors";
 
 const require = createRequire(import.meta.url);
@@ -121,22 +129,32 @@ program
 	.command("log")
 	.alias("l")
 	.description("Display an ASCII tree of the current stack")
+	.option("-s, --stack", "Only show the current stack")
+	.option("-a, --all", "Show all stacks (default)")
+	.option("-r, --reverse", "Reverse stack/child ordering")
 	.addHelpText(
 		"after",
 		`
 Examples:
   $ dub log    Show the branch tree with current branch highlighted`,
 	)
-	.action(async () => {
-		await printLog(process.cwd());
-	});
+	.action(
+		async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+			await printLog(process.cwd(), options);
+		},
+	);
 
 program
 	.command("ls")
 	.description("Display an ASCII tree of the current stack")
-	.action(async () => {
-		await printLog(process.cwd());
-	});
+	.option("-s, --stack", "Only show the current stack")
+	.option("-a, --all", "Show all stacks (default)")
+	.option("-r, --reverse", "Reverse stack/child ordering")
+	.action(
+		async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+			await printLog(process.cwd(), options);
+		},
+	);
 
 program
 	.command("up")
@@ -223,6 +241,183 @@ program
 	});
 
 program
+	.command("track")
+	.argument("[branch]", "Branch to track (defaults to current branch)")
+	.option("-p, --parent <branch>", "Parent branch for tracking")
+	.option(
+		"--no-interactive",
+		"Disable parent prompt and require deterministic behavior",
+	)
+	.description("Track a branch or update its parent relationship")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub track
+  $ dub track feat/a --parent main`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: { parent?: string; interactive?: boolean },
+		) => {
+			const result = await track(process.cwd(), branch, {
+				parent: options.parent,
+				interactive: options.interactive,
+			});
+			if (result.status === "tracked") {
+				console.log(
+					chalk.green(`✔ Tracking '${result.branch}' on '${result.parent}'`),
+				);
+				return;
+			}
+			if (result.status === "reparented") {
+				console.log(
+					chalk.green(
+						`✔ Re-parented '${result.branch}' onto '${result.parent}'`,
+					),
+				);
+				console.log(
+					chalk.dim(
+						"  Run 'dub restack' if descendant branches now need rebasing.",
+					),
+				);
+				return;
+			}
+			console.log(
+				chalk.yellow(
+					`⚠ '${result.branch}' is already tracked on '${result.parent}'.`,
+				),
+			);
+		},
+	);
+
+program
+	.command("untrack")
+	.argument("[branch]", "Branch to untrack (defaults to current branch)")
+	.option("--downstack", "Also untrack descendants recursively")
+	.option("--no-interactive", "Disable prompts and require explicit flags")
+	.description(
+		"Remove branch metadata from DubStack without deleting git branches",
+	)
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub untrack
+  $ dub untrack feat/a --downstack`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: { downstack?: boolean; interactive?: boolean },
+		) => {
+			const result = await untrack(process.cwd(), branch, {
+				downstack: options.downstack,
+				interactive: options.interactive,
+			});
+			console.log(
+				chalk.green(
+					`✔ Untracked ${result.removed.length} branch(es): ${result.removed.join(", ")}`,
+				),
+			);
+			for (const entry of result.reparented) {
+				console.log(
+					chalk.dim(
+						`  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? "(none)"}'`,
+					),
+				);
+			}
+		},
+	);
+
+program
+	.command("delete")
+	.argument("[branch]", "Branch to delete (defaults to current branch)")
+	.option("--upstack", "Also delete descendants of the target branch")
+	.option("--downstack", "Also delete ancestors toward trunk")
+	.option("-f, --force", "Delete branches even when not merged")
+	.option("-q, --quiet", "Skip confirmation prompts")
+	.option("--no-interactive", "Disable prompts and require explicit flags")
+	.description("Delete local branches and update DubStack metadata")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub delete feat/a
+  $ dub delete feat/a --upstack -f -q`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: {
+				upstack?: boolean;
+				downstack?: boolean;
+				force?: boolean;
+				quiet?: boolean;
+				interactive?: boolean;
+			},
+		) => {
+			const result = await deleteCommand(process.cwd(), branch, {
+				upstack: options.upstack,
+				downstack: options.downstack,
+				force: options.force,
+				quiet: options.quiet,
+				interactive: options.interactive,
+			});
+			if (result.cancelled) {
+				console.log(chalk.yellow("⚠ Delete cancelled."));
+				return;
+			}
+			console.log(
+				chalk.green(
+					`✔ Deleted ${result.deleted.length} branch(es): ${result.deleted.join(", ")}`,
+				),
+			);
+			for (const entry of result.reparented) {
+				console.log(
+					chalk.dim(
+						`  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? "(none)"}'`,
+					),
+				);
+			}
+		},
+	);
+
+program
+	.command("parent")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show the direct parent branch")
+	.action(async (branch?: string) => {
+		const result = await parent(process.cwd(), branch);
+		console.log(result.parent);
+	});
+
+program
+	.command("children")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show direct child branches")
+	.action(async (branch?: string) => {
+		const result = await children(process.cwd(), branch);
+		if (result.children.length === 0) {
+			console.log("(none)");
+			return;
+		}
+		for (const child of result.children) {
+			console.log(child);
+		}
+	});
+
+program
+	.command("trunk")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show trunk/root branch for the active stack")
+	.action(async (branch?: string) => {
+		const result = await trunk(process.cwd(), branch);
+		console.log(result.trunk);
+	});
+
+program
 	.command("sync")
 	.description("Sync tracked branches with remote and reconcile divergence")
 	.option(
@@ -279,6 +474,45 @@ Examples:
 				console.log(chalk.dim(`  ↳ ${branch}`));
 			}
 		}
+	});
+
+program
+	.command("continue")
+	.description("Continue the active restack or git rebase operation")
+	.action(async () => {
+		const result = await continueCommand(process.cwd());
+		if (result.continued === "rebase") {
+			console.log(chalk.green("✔ Continued git rebase."));
+			return;
+		}
+		if (result.restackResult?.status === "conflict") {
+			console.log(
+				chalk.yellow(
+					`⚠ Conflict while restacking '${result.restackResult.conflictBranch}'`,
+				),
+			);
+			console.log(
+				chalk.dim("  Resolve conflicts, stage changes, then run: dub continue"),
+			);
+			return;
+		}
+		if (result.restackResult?.status === "up-to-date") {
+			console.log(chalk.green("✔ Stack is already up to date."));
+			return;
+		}
+		console.log(chalk.green("✔ Continued restack."));
+	});
+
+program
+	.command("abort")
+	.description("Abort the active restack or git rebase operation")
+	.action(async () => {
+		const result = await abortCommand(process.cwd());
+		if (result.aborted === "restack") {
+			console.log(chalk.green("✔ Aborted restack and cleared progress."));
+			return;
+		}
+		console.log(chalk.green("✔ Aborted git rebase."));
 	});
 
 program
@@ -455,8 +689,11 @@ async function runSubmit(options: { dryRun?: boolean }) {
 	}
 }
 
-async function printLog(cwd: string) {
-	const output = await log(cwd);
+async function printLog(
+	cwd: string,
+	options: { stack?: boolean; all?: boolean; reverse?: boolean } = {},
+) {
+	const output = await log(cwd, options);
 	const styled = output
 		.replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan("$1 (Current)"))
 		.replace(/⚠ \(missing\)/g, chalk.yellow("⚠ (missing)"));

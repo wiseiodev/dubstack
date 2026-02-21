@@ -67,6 +67,14 @@ If you have `gt` muscle memory, use this as a fast map:
 | `gt info` | `dub info` |
 | `gt pr` | `dub pr` |
 | `gt restack` | `dub restack` |
+| `gt continue` | `dub continue` |
+| `gt abort` | `dub abort` |
+| `gt track --parent` | `dub track --parent` |
+| `gt untrack` | `dub untrack` |
+| `gt delete` | `dub delete` |
+| `gt parent` | `dub parent` |
+| `gt children` | `dub children` |
+| `gt trunk` | `dub trunk` |
 | `gt undo` | `dub undo` |
 
 ## Quick Start
@@ -201,6 +209,15 @@ Render tracked stacks as an ASCII tree.
 dub log
 dub ls
 dub l
+
+# show only current stack
+dub log --stack
+
+# show all stacks explicitly
+dub log --all
+
+# reverse branch ordering for quick top-down scan
+dub log --reverse
 ```
 
 ### Navigation: `dub up`, `dub down`, `dub top`, `dub bottom`
@@ -238,6 +255,98 @@ dub info feat/auth-login
 # equivalent legacy style
 dub branch info
 ```
+
+### Orientation: `dub parent`, `dub children`, `dub trunk`
+
+Quickly inspect where the current branch sits in its tracked stack.
+
+```bash
+dub parent     # direct parent of current branch
+dub children   # direct children
+dub trunk      # stack root/trunk branch
+```
+
+All three commands accept an optional branch argument:
+
+```bash
+dub parent feat/auth-login
+dub children feat/auth-types
+dub trunk feat/auth-tests
+```
+
+If branch metadata is missing, these commands print a remediation path using `dub track`.
+
+### `dub track [branch] [--parent <branch>]`
+
+Track an existing local branch or re-parent a tracked branch.
+
+```bash
+# track current branch
+dub track
+
+# track explicit branch
+dub track feat/auth-login --parent feat/auth-types
+
+# repair parent metadata
+dub track feat/auth-login --parent main
+```
+
+Notes:
+- If `--parent` is omitted, DubStack tries to infer a safe default.
+- In interactive shells, DubStack prompts when parent choice is ambiguous.
+- Re-parenting can require follow-up rebasing via `dub restack`.
+
+### `dub untrack [branch] [--downstack]`
+
+Remove branch metadata from DubStack without deleting local git branches.
+
+```bash
+# untrack current branch only
+dub untrack
+
+# untrack explicit branch and descendants
+dub untrack feat/auth-login --downstack
+```
+
+Use this when branch exists locally but should no longer participate in stack operations.
+
+### `dub delete [branch] [--upstack|--downstack] [--force] [--quiet]`
+
+Delete local branches with stack-aware expansion and metadata repair.
+
+```bash
+# delete one branch (with confirmation)
+dub delete feat/auth-login
+
+# delete branch and descendants
+dub delete feat/auth-login --upstack
+
+# delete branch and ancestors toward trunk
+dub delete feat/auth-login --downstack
+
+# fully non-interactive destructive delete
+dub delete feat/auth-login --upstack --force --quiet
+```
+
+Flags:
+- `--upstack`: include descendants
+- `--downstack`: include ancestors (excluding root)
+- `-f, --force`: force delete unmerged branches
+- `-q, --quiet`: skip confirmation prompt
+
+### `dub continue` / `dub abort`
+
+Unified recovery pair for interrupted restacks and rebases.
+
+```bash
+# continue active restack/rebase
+dub continue
+
+# abort active restack/rebase
+dub abort
+```
+
+Use these when the CLI reports conflicts or an in-progress operation.
 
 ### `dub submit` / `dub ss`
 
@@ -370,6 +479,10 @@ dub restack --continue
 | `Not authenticated with GitHub` | Run `gh auth login` |
 | Branch not part of stack | Create via `dub create` or run from tracked branch |
 | Restack conflict | Resolve files, `git add`, `dub restack --continue` |
+| Rebase/restack interrupted | Use `dub continue` to resume, `dub abort` to cancel |
+| Branch not tracked | Run `dub track <branch> --parent <parent>` |
+| Need metadata-only removal | Use `dub untrack` (or `--downstack`) |
+| Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
 | Wrong operation during create/restack | Use `dub undo` (single-level) |
 

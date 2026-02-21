@@ -115,6 +115,28 @@ export async function deleteBranch(name: string, cwd: string): Promise<void> {
 }
 
 /**
+ * Deletes a local branch using safe (`-d`) or force (`-D`) mode.
+ */
+export async function deleteLocalBranch(
+	name: string,
+	cwd: string,
+	force = false,
+): Promise<void> {
+	try {
+		await execa("git", ["branch", force ? "-D" : "-d", name], { cwd });
+	} catch {
+		if (force) {
+			throw new DubError(
+				`Failed to delete branch '${name}'. It may not exist or be checked out.`,
+			);
+		}
+		throw new DubError(
+			`Branch '${name}' is not fully merged. Re-run with --force to delete it.`,
+		);
+	}
+}
+
+/**
  * Force-moves a branch pointer to a specific commit SHA.
  * Used by undo to reset branches to their pre-operation tips.
  */
@@ -183,6 +205,17 @@ export async function rebaseContinue(cwd: string): Promise<void> {
 		throw new DubError(
 			"Failed to continue rebase. Ensure all conflicts are resolved and staged.",
 		);
+	}
+}
+
+/**
+ * Aborts an in-progress rebase operation.
+ */
+export async function rebaseAbort(cwd: string): Promise<void> {
+	try {
+		await execa("git", ["rebase", "--abort"], { cwd });
+	} catch {
+		throw new DubError("Failed to abort rebase.");
 	}
 }
 
