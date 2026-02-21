@@ -35,6 +35,7 @@ import { pr } from "./commands/pr";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
+import { track } from "./commands/track";
 import { undo } from "./commands/undo";
 import { DubError } from "./lib/errors";
 
@@ -221,6 +222,53 @@ program
 		const info = await branchInfo(process.cwd(), branch);
 		console.log(formatBranchInfo(info));
 	});
+
+program
+	.command("track")
+	.argument("[branch]", "Branch to track (defaults to current branch)")
+	.option("-p, --parent <branch>", "Parent branch for tracking")
+	.option("--no-interactive", "Disable parent prompt and require deterministic behavior")
+	.description("Track a branch or update its parent relationship")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub track
+  $ dub track feat/a --parent main`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: { parent?: string; interactive?: boolean },
+		) => {
+			const result = await track(process.cwd(), branch, {
+				parent: options.parent,
+				interactive: options.interactive,
+			});
+			if (result.status === "tracked") {
+				console.log(
+					chalk.green(`✔ Tracking '${result.branch}' on '${result.parent}'`),
+				);
+				return;
+			}
+			if (result.status === "reparented") {
+				console.log(
+					chalk.green(
+						`✔ Re-parented '${result.branch}' onto '${result.parent}'`,
+					),
+				);
+				console.log(
+					chalk.dim("  Run 'dub restack' if descendant branches now need rebasing."),
+				);
+				return;
+			}
+			console.log(
+				chalk.yellow(
+					`⚠ '${result.branch}' is already tracked on '${result.parent}'.`,
+				),
+			);
+		},
+	);
 
 program
 	.command("sync")
