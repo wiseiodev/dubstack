@@ -15,7 +15,12 @@ import {
 	rebaseBranchOntoRef,
 	remoteBranchExists,
 } from "../lib/git";
-import { getBranchPrLifecycleState, getBranchPrSyncInfo } from "../lib/github";
+import {
+	checkGhAuth,
+	ensureGhInstalled,
+	getBranchPrLifecycleState,
+	getBranchPrSyncInfo,
+} from "../lib/github";
 import {
 	type Branch,
 	findStackForBranch,
@@ -78,6 +83,9 @@ export async function sync(
 		interactive?: boolean;
 	} = {},
 ): Promise<SyncResult> {
+	await ensureGhInstalled();
+	await checkGhAuth();
+
 	const options: SyncOptions = {
 		restack: rawOptions.restack ?? true,
 		force: rawOptions.force ?? false,
@@ -127,6 +135,7 @@ export async function sync(
 		branches: [],
 		restacked: false,
 	};
+	const rootHasRemote = new Map<string, boolean>();
 
 	console.log("🌲 Fetching branches from remote...");
 	const toFetch = [...new Set([...roots, ...stackBranches])];
@@ -137,7 +146,9 @@ export async function sync(
 
 	for (const root of roots) {
 		const remoteRef = `origin/${root}`;
-		if (!(await remoteBranchExists(root, cwd))) continue;
+		const hasRemoteRoot = await remoteBranchExists(root, cwd);
+		rootHasRemote.set(root, hasRemoteRoot);
+		if (!hasRemoteRoot) continue;
 
 		const ff = await fastForwardBranchToRef(root, remoteRef, cwd);
 		if (ff) {
@@ -173,7 +184,8 @@ export async function sync(
 		getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
 		isMergedIntoAnyRoot: async (branch) => {
 			for (const root of roots) {
-				if (await isAncestor(branch, root, cwd)) return true;
+				const compareRef = rootHasRemote.get(root) ? `origin/${root}` : root;
+				if (await isAncestor(branch, compareRef, cwd)) return true;
 			}
 			return false;
 		},
@@ -276,6 +288,11 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
+			const restoredSha = await getRefSha(branch, cwd);
+			await markBranchSynced(stateBranchMap, branch, restoredSha, cwd, {
+				source: "sync",
+				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			});
 			continue;
 		}
 
@@ -288,10 +305,16 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
-			markBranchSynced(stateBranchMap, branch, localSha ?? remoteSha ?? null, {
-				source: "sync",
-				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
-			});
+			await markBranchSynced(
+				stateBranchMap,
+				branch,
+				localSha ?? remoteSha ?? null,
+				cwd,
+				{
+					source: "sync",
+					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+				},
+			);
 			continue;
 		}
 
@@ -304,10 +327,16 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
-			markBranchSynced(stateBranchMap, branch, localSha ?? remoteSha ?? null, {
-				source: "imported",
-				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
-			});
+			await markBranchSynced(
+				stateBranchMap,
+				branch,
+				localSha ?? remoteSha ?? null,
+				cwd,
+				{
+					source: "imported",
+					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+				},
+			);
 			continue;
 		}
 
@@ -321,7 +350,7 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
-			markBranchSynced(stateBranchMap, branch, remoteSha, {
+			await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 				source: "sync",
 				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
 			});
@@ -349,7 +378,7 @@ export async function sync(
 					action: "synced",
 					message: `✔ Synced unsubmitted branch '${branch}' to remote with --force.`,
 				};
-				markBranchSynced(stateBranchMap, branch, remoteSha, {
+				await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 					source: "sync",
 					baseBranch: localParent,
 				});
@@ -372,7 +401,7 @@ export async function sync(
 						action: "synced",
 						message: `✔ Synced unsubmitted branch '${branch}' to remote.`,
 					};
-					markBranchSynced(stateBranchMap, branch, remoteSha, {
+					await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 						source: "sync",
 						baseBranch: localParent,
 					});
@@ -403,7 +432,7 @@ export async function sync(
 					action: "synced",
 					message: `✔ Synced '${branch}' to remote and adopted remote parent '${prSyncInfo.baseRefName ?? "unknown"}'.`,
 				};
-				markBranchSynced(stateBranchMap, branch, remoteSha, {
+				await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 					source: "sync",
 					baseBranch: prSyncInfo.baseRefName ?? localParent,
 				});
@@ -435,7 +464,7 @@ export async function sync(
 						action: "synced",
 						message: `✔ Synced '${branch}' to remote and adopted remote parent.`,
 					};
-					markBranchSynced(stateBranchMap, branch, remoteSha, {
+					await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 						source: "sync",
 						baseBranch: prSyncInfo.baseRefName ?? localParent,
 					});
@@ -490,7 +519,7 @@ export async function sync(
 				action: "synced",
 				message: `✔ Synced '${branch}' to remote version.`,
 			};
-			markBranchSynced(stateBranchMap, branch, remoteSha, {
+			await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 				source: "sync",
 				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
 			});
@@ -513,7 +542,7 @@ export async function sync(
 			};
 			if (reconciled) {
 				const newSha = await getRefSha(branch, cwd);
-				markBranchSynced(stateBranchMap, branch, newSha, {
+				await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
 					source: "sync",
 					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
 				});
@@ -548,20 +577,33 @@ export async function sync(
 	return result;
 }
 
-function markBranchSynced(
+async function markBranchSynced(
 	branchMap: Map<string, Branch>,
 	branchName: string,
 	headSha: string | null,
+	cwd: string,
 	options: { source: "sync" | "imported"; baseBranch: string | null },
-) {
+): Promise<void> {
 	if (!headSha) return;
 	const entry = branchMap.get(branchName);
 	if (!entry) return;
+	const priorBaseline = entry.last_submitted_version;
+	const resolvedBaseBranch =
+		options.baseBranch ?? priorBaseline?.base_branch ?? null;
+	let resolvedBaseSha = priorBaseline?.base_sha ?? null;
+	if (resolvedBaseBranch) {
+		try {
+			resolvedBaseSha = await getRefSha(resolvedBaseBranch, cwd);
+		} catch {
+			// Keep existing baseline SHA if base ref isn't currently resolvable.
+		}
+	}
+	if (!resolvedBaseBranch || !resolvedBaseSha) return;
 	entry.last_submitted_version = {
 		head_sha: headSha,
-		base_sha: entry.last_submitted_version?.base_sha ?? "",
-		base_branch: options.baseBranch ?? "",
-		version_number: entry.last_submitted_version?.version_number ?? null,
+		base_sha: resolvedBaseSha,
+		base_branch: resolvedBaseBranch,
+		version_number: priorBaseline?.version_number ?? null,
 		source: options.source,
 	};
 	entry.last_synced_at = new Date().toISOString();

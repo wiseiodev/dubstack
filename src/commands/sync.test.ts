@@ -28,6 +28,8 @@ vi.mock("./restack.js", () => ({
 }));
 
 vi.mock("../lib/github.js", () => ({
+	checkGhAuth: vi.fn(),
+	ensureGhInstalled: vi.fn(),
 	getBranchPrLifecycleState: vi.fn(),
 	getBranchPrSyncInfo: vi.fn(),
 }));
@@ -45,7 +47,12 @@ import {
 	isAncestor,
 	remoteBranchExists,
 } from "../lib/git";
-import { getBranchPrLifecycleState, getBranchPrSyncInfo } from "../lib/github";
+import {
+	checkGhAuth,
+	ensureGhInstalled,
+	getBranchPrLifecycleState,
+	getBranchPrSyncInfo,
+} from "../lib/github";
 import type { DubState } from "../lib/state";
 import { readState, writeState } from "../lib/state";
 import { restack } from "./restack";
@@ -75,6 +82,8 @@ const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
 	typeof vi.fn
 >;
 const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as ReturnType<typeof vi.fn>;
+const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
+const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 
 function makeState(
 	branches: { name: string; parent: string | null; type?: "root" }[],
@@ -124,6 +133,8 @@ beforeEach(() => {
 		state: "OPEN",
 		baseRefName: "main",
 	});
+	mockEnsureGhInstalled.mockResolvedValue(undefined);
+	mockCheckGhAuth.mockResolvedValue(undefined);
 	mockWriteState.mockResolvedValue(undefined);
 });
 
@@ -146,6 +157,8 @@ describe("sync", () => {
 
 		const result = await sync("/repo", { interactive: false, restack: false });
 
+		expect(mockEnsureGhInstalled).toHaveBeenCalledTimes(1);
+		expect(mockCheckGhAuth).toHaveBeenCalledTimes(1);
 		expect(mockFetchBranches).toHaveBeenCalledWith(["main", "feat/a"], "/repo");
 		expect(result.fetched).toEqual(["main", "feat/a"]);
 		expect(result.branches[0].status).toBe("up-to-date");
@@ -168,6 +181,11 @@ describe("sync", () => {
 
 		expect(mockCheckoutRemoteBranch).toHaveBeenCalledWith("feat/a", "/repo");
 		expect(result.branches[0].status).toBe("missing-local");
+		const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+		expect(
+			writtenState.stacks[0].branches.find((b) => b.name === "feat/a")
+				?.last_submitted_version?.base_branch,
+		).toBe("main");
 	});
 
 	it("hard-resets branch when local is safely behind remote", async () => {
@@ -293,6 +311,11 @@ describe("sync", () => {
 		});
 
 		expect(mockDeleteBranch).toHaveBeenCalledWith("feat/a", "/repo");
+		expect(mockIsAncestor).toHaveBeenCalledWith(
+			"feat/a",
+			"origin/main",
+			"/repo",
+		);
 		expect(result.cleaned).toContain("feat/a");
 		expect(result.branches).toHaveLength(0);
 		const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;

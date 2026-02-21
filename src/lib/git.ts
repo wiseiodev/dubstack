@@ -446,10 +446,24 @@ export async function fetchBranches(
 	remote = "origin",
 ): Promise<void> {
 	if (branches.length === 0) return;
-	try {
-		await execa("git", ["fetch", remote, ...branches], { cwd });
-	} catch {
-		throw new DubError(`Failed to fetch branches from '${remote}'.`);
+	for (const branch of branches) {
+		try {
+			await execa("git", ["fetch", remote, branch], { cwd });
+		} catch (error: unknown) {
+			const stderr =
+				typeof (error as { stderr?: unknown })?.stderr === "string"
+					? (error as { stderr: string }).stderr
+					: "";
+			const stdout =
+				typeof (error as { stdout?: unknown })?.stdout === "string"
+					? (error as { stdout: string }).stdout
+					: "";
+			const output = `${stderr}\n${stdout}`;
+			if (output.includes("couldn't find remote ref")) {
+				continue;
+			}
+			throw new DubError(`Failed to fetch branches from '${remote}'.`);
+		}
 	}
 }
 

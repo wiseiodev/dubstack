@@ -260,7 +260,9 @@ dub sync --no-restack
 Current behavior:
 - Fetches tracked roots and branches from `origin`
 - Attempts fast-forward trunk updates (or overwrite with `--force`)
-- Cleans local branches missing from remote (interactive/force)
+- Cleans local branches whose PRs are `MERGED`/`CLOSED` and whose commits are
+  confirmed in trunk (interactive/force), while keeping non-cleanable stacks
+  excluded from destructive sync actions
 - Reconciles each tracked branch:
   - restores missing local branches from remote
   - fast-forwards branches that are safely behind remote
