@@ -36,6 +36,7 @@ import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
 import { track } from "./commands/track";
+import { untrack } from "./commands/untrack";
 import { undo } from "./commands/undo";
 import { DubError } from "./lib/errors";
 
@@ -267,6 +268,43 @@ Examples:
 					`⚠ '${result.branch}' is already tracked on '${result.parent}'.`,
 				),
 			);
+		},
+	);
+
+program
+	.command("untrack")
+	.argument("[branch]", "Branch to untrack (defaults to current branch)")
+	.option("--downstack", "Also untrack descendants recursively")
+	.option("--no-interactive", "Disable prompts and require explicit flags")
+	.description("Remove branch metadata from DubStack without deleting git branches")
+	.addHelpText(
+		"after",
+		`
+Examples:
+  $ dub untrack
+  $ dub untrack feat/a --downstack`,
+	)
+	.action(
+		async (
+			branch: string | undefined,
+			options: { downstack?: boolean; interactive?: boolean },
+		) => {
+			const result = await untrack(process.cwd(), branch, {
+				downstack: options.downstack,
+				interactive: options.interactive,
+			});
+			console.log(
+				chalk.green(
+					`✔ Untracked ${result.removed.length} branch(es): ${result.removed.join(", ")}`,
+				),
+			);
+			for (const entry of result.reparented) {
+				console.log(
+					chalk.dim(
+						`  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? "(none)"}'`,
+					),
+				);
+			}
 		},
 	);
 
