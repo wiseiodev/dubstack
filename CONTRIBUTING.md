@@ -83,6 +83,8 @@ git config commit.template .github/commit-template.txt
 - Keep PRs focused and reviewable.
 - Include behavioral impact and risk in PR description.
 - If UX or command semantics change, update docs in the same PR (`README.md`, `QUICKSTART.md`, or `.agents/*` as needed).
-- For stacked PRs, merge bottom-up. Use `dub merge-next` to avoid out-of-order merges.
+- `main` is configured for clean history: squash merge only + linear history + required checks.
+- For stacked PRs, merge in order and prefer `dub merge-next` to avoid out-of-order merges.
+- If PRs in the stack target intermediate branches (not `main`), merge the top stack branch into `main` after lower layers land so all stack commits are actually delivered.
 - This repo includes a merge-order guard workflow; keep it enabled as a required status check in branch protection.
 - This repo also runs a Biome autofix workflow on PRs from branches in this repository and applies unsafe autofixes (which include safe fixes) automatically.

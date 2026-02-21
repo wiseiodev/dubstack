@@ -160,6 +160,11 @@ dub merge-next
 dub merge-next
 ```
 
+History note:
+
+- `main` is configured for linear, squash-style merges.
+- For stacks that target intermediate base branches, merge the top stack branch into `main` after lower layers merge so the full stack lands on `main`.
+
 If merges happened manually:
 
 ```bash
