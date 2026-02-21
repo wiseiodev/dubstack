@@ -62,6 +62,12 @@ dub create feat/new-layer -um "feat: ..."
 
 # pick hunks
 dub create feat/new-layer -pm "feat: ..."
+
+# AI-generate branch + commit from staged changes
+dub create --ai
+
+# stage all, then AI-generate branch + commit (supports -ai shorthand)
+dub create -ai
 ```
 
 ## 3) Inspect and Navigate

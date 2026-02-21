@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import { writeConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { readState } from '../lib/state';
 import { readUndoEntry } from '../lib/undo-log';
@@ -10,17 +11,20 @@ import { init } from './init';
 
 let dir: string;
 let cleanup: () => Promise<void>;
+let envSnapshot: NodeJS.ProcessEnv;
 
 beforeEach(async () => {
   const repo = await createTestRepo();
   dir = repo.dir;
   cleanup = repo.cleanup;
+  envSnapshot = { ...process.env };
   await init(dir);
   await gitInRepo(dir, ['add', '.']);
   await gitInRepo(dir, ['commit', '-m', 'init dubstack']);
 });
 
 afterEach(async () => {
+  process.env = envSnapshot;
   await cleanup();
 });
 
@@ -175,5 +179,67 @@ describe('create with -u -m', () => {
     await expect(
       create('feat/update-only', dir, { update: true }),
     ).rejects.toThrow("require '-m'");
+  });
+});
+
+describe('create with --ai', () => {
+  it('creates branch and commit from AI output using staged changes', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    fs.writeFileSync(path.join(dir, 'ai-feature.ts'), 'export const ai = 1;\n');
+    await gitInRepo(dir, ['add', 'ai-feature.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/ai-created-branch","message":"feat: add ai create mode"}',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    const result = await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(result.branch).toBe('feat/ai-created-branch');
+    expect(result.committed).toBe('feat: add ai create mode');
+
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('feat: add ai create mode');
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'google-model',
+      }),
+    );
+  });
+
+  it('requires ai assistant to be enabled in config', async () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    fs.writeFileSync(path.join(dir, 'ai-off.ts'), 'export const off = true;\n');
+    await gitInRepo(dir, ['add', 'ai-off.ts']);
+
+    const generateText = vi.fn();
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    await expect(
+      create(
+        undefined as unknown as string,
+        dir,
+        { ai: true },
+        {
+          generateText,
+          createGoogleGenerativeAI,
+          createGateway,
+        },
+      ),
+    ).rejects.toThrow("Enable it with 'dub config ai-assistant on'.");
   });
 });

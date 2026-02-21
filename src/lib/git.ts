@@ -80,6 +80,22 @@ export async function branchExists(
 }
 
 /**
+ * Checks whether a branch name is valid according to git ref rules.
+ * @returns `true` when valid, `false` when invalid. Never throws.
+ */
+export async function isValidBranchName(
+  name: string,
+  cwd: string,
+): Promise<boolean> {
+  try {
+    await execa('git', ['check-ref-format', '--branch', name], { cwd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Creates a new branch and switches to it.
  * @throws {DubError} If a branch with that name already exists.
  */
