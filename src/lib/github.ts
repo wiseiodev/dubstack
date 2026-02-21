@@ -9,6 +9,8 @@ export interface PrInfo {
 	body: string;
 }
 
+export type BranchPrLifecycleState = "OPEN" | "CLOSED" | "MERGED" | "NONE";
+
 /**
  * Ensures the `gh` CLI is installed and available in PATH.
  * @throws {DubError} If `gh` is not found.
@@ -65,6 +67,49 @@ export async function getPr(
 		return JSON.parse(trimmed) as PrInfo;
 	} catch {
 		throw new DubError(`Failed to parse PR info for branch '${branch}'.`);
+	}
+}
+
+/**
+ * Returns coarse lifecycle state of a PR associated with the branch head.
+ */
+export async function getBranchPrLifecycleState(
+	branch: string,
+	cwd: string,
+): Promise<BranchPrLifecycleState> {
+	const { stdout } = await execa(
+		"gh",
+		[
+			"pr",
+			"list",
+			"--head",
+			branch,
+			"--state",
+			"all",
+			"--json",
+			"state,mergedAt",
+			"--jq",
+			".[0]",
+		],
+		{ cwd },
+	);
+
+	const trimmed = stdout.trim();
+	if (!trimmed || trimmed === "null") return "NONE";
+
+	try {
+		const parsed = JSON.parse(trimmed) as {
+			state?: string;
+			mergedAt?: string | null;
+		};
+		if (parsed.mergedAt) return "MERGED";
+		if (parsed.state === "CLOSED") return "CLOSED";
+		if (parsed.state === "OPEN") return "OPEN";
+		return "NONE";
+	} catch {
+		throw new DubError(
+			`Failed to parse PR lifecycle state for branch '${branch}'.`,
+		);
 	}
 }
 

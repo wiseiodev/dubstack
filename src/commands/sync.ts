@@ -14,7 +14,10 @@ import {
 	isAncestor,
 	remoteBranchExists,
 } from "../lib/git";
+import { getBranchPrLifecycleState } from "../lib/github";
 import { findStackForBranch, readState } from "../lib/state";
+import { classifyBranchSyncStatus } from "../lib/sync/branch-status";
+import { buildCleanupPlan } from "../lib/sync/cleanup";
 import { printBranchOutcome, printSyncSummary } from "../lib/sync/report";
 import type {
 	BranchSyncOutcome,
@@ -150,15 +153,31 @@ export async function sync(
 	}
 
 	console.log("🧹 Cleaning up branches with missing remote refs...");
+	const missingRemoteLocals: string[] = [];
 	for (const branch of stackBranches) {
-		const hasRemote = await remoteBranchExists(branch, cwd);
-		const hasLocal = await branchExists(branch, cwd);
-		if (!hasLocal || hasRemote) continue;
-
+		const [hasRemote, hasLocal] = await Promise.all([
+			remoteBranchExists(branch, cwd),
+			branchExists(branch, cwd),
+		]);
+		if (!hasRemote && hasLocal) {
+			missingRemoteLocals.push(branch);
+		}
+	}
+	const cleanupPlan = await buildCleanupPlan({
+		branches: missingRemoteLocals,
+		getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
+		isMergedIntoAnyRoot: async (branch) => {
+			for (const root of roots) {
+				if (await isAncestor(branch, root, cwd)) return true;
+			}
+			return false;
+		},
+	});
+	for (const branch of cleanupPlan.toDelete) {
 		let shouldDelete = options.force;
 		if (!shouldDelete && options.interactive) {
 			shouldDelete = await confirm(
-				`Branch '${branch}' is missing on remote. Delete local branch?`,
+				`Branch '${branch}' has merged/closed PR and is in trunk. Delete local branch?`,
 			);
 		}
 		if (shouldDelete) {
@@ -167,6 +186,11 @@ export async function sync(
 			result.cleaned.push(branch);
 		}
 	}
+	for (const skipped of cleanupPlan.skipped) {
+		console.log(
+			`• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
+		);
+	}
 
 	console.log("🔄 Syncing branches...");
 	for (const branch of stackBranches) {
@@ -174,13 +198,28 @@ export async function sync(
 
 		const hasRemote = await remoteBranchExists(branch, cwd);
 		const hasLocal = await branchExists(branch, cwd);
-		const remoteRef = `origin/${branch}`;
 		let outcome: BranchSyncOutcome;
 
-		if (!hasRemote) {
+		const remoteRef = `origin/${branch}`;
+		const localSha = hasLocal ? await getRefSha(branch, cwd) : null;
+		const remoteSha = hasRemote ? await getRefSha(remoteRef, cwd) : null;
+		const localBehind =
+			hasLocal && hasRemote ? await isAncestor(branch, remoteRef, cwd) : false;
+		const remoteBehind =
+			hasLocal && hasRemote ? await isAncestor(remoteRef, branch, cwd) : false;
+		const status = classifyBranchSyncStatus({
+			hasRemote,
+			hasLocal,
+			localSha,
+			remoteSha,
+			localBehind,
+			remoteBehind,
+		});
+
+		if (status === "missing-remote") {
 			outcome = {
 				branch,
-				status: "missing-remote",
+				status,
 				action: "skipped",
 				message: `⚠ Skipped '${branch}' (missing on remote).`,
 			};
@@ -189,11 +228,11 @@ export async function sync(
 			continue;
 		}
 
-		if (!hasLocal) {
+		if (status === "missing-local") {
 			await checkoutRemoteBranch(branch, cwd);
 			outcome = {
 				branch,
-				status: "missing-local",
+				status,
 				action: "synced",
 				message: `✔ Restored '${branch}' from remote.`,
 			};
@@ -202,12 +241,10 @@ export async function sync(
 			continue;
 		}
 
-		const localSha = await getRefSha(branch, cwd);
-		const remoteSha = await getRefSha(remoteRef, cwd);
-		if (localSha === remoteSha) {
+		if (status === "up-to-date") {
 			outcome = {
 				branch,
-				status: "up-to-date",
+				status,
 				action: "none",
 				message: `• '${branch}' is up to date.`,
 			};
@@ -216,13 +253,11 @@ export async function sync(
 			continue;
 		}
 
-		const localBehind = await isAncestor(branch, remoteRef, cwd);
-		const remoteBehind = await isAncestor(remoteRef, branch, cwd);
-		if (localBehind) {
+		if (status === "needs-remote-sync-safe") {
 			await hardResetBranchToRef(branch, remoteRef, cwd);
 			outcome = {
 				branch,
-				status: "needs-remote-sync-safe",
+				status,
 				action: "synced",
 				message: `✔ Synced '${branch}' to remote head.`,
 			};
@@ -231,10 +266,10 @@ export async function sync(
 			continue;
 		}
 
-		if (remoteBehind) {
+		if (status === "local-ahead") {
 			outcome = {
 				branch,
-				status: "local-ahead",
+				status,
 				action: "kept-local",
 				message: `• Kept local '${branch}' (local commits ahead of remote).`,
 			};

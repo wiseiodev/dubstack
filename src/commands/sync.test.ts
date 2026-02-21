@@ -26,6 +26,10 @@ vi.mock("./restack.js", () => ({
 	restack: vi.fn(),
 }));
 
+vi.mock("../lib/github.js", () => ({
+	getBranchPrLifecycleState: vi.fn(),
+}));
+
 import {
 	branchExists,
 	checkoutBranch,
@@ -39,6 +43,7 @@ import {
 	isAncestor,
 	remoteBranchExists,
 } from "../lib/git";
+import { getBranchPrLifecycleState } from "../lib/github";
 import type { DubState } from "../lib/state";
 import { readState } from "../lib/state";
 import { restack } from "./restack";
@@ -63,6 +68,9 @@ const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockRestack = restack as ReturnType<typeof vi.fn>;
+const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
+	typeof vi.fn
+>;
 
 function makeState(
 	branches: { name: string; parent: string | null; type?: "root" }[],
@@ -95,6 +103,7 @@ beforeEach(() => {
 	mockCheckoutBranch.mockResolvedValue(undefined);
 	mockDeleteBranch.mockResolvedValue(undefined);
 	mockRestack.mockResolvedValue({ status: "up-to-date", rebased: [] });
+	mockGetBranchPrLifecycleState.mockResolvedValue("OPEN");
 });
 
 describe("sync", () => {
