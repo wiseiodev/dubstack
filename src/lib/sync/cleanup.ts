@@ -16,7 +16,6 @@ export async function buildCleanupPlan(input: {
 	for (const branch of input.branches) {
 		const prState = await input.getPrStatus(branch);
 		if (prState !== "MERGED" && prState !== "CLOSED") {
-			skipped.push({ branch, reason: "pr-not-merged-or-closed" });
 			continue;
 		}
 

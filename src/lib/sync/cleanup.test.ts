@@ -37,11 +37,6 @@ describe("buildCleanupPlan", () => {
 		});
 
 		expect(result.toDelete).toEqual([]);
-		expect(result.skipped).toEqual([
-			{
-				branch: "feat/a",
-				reason: "pr-not-merged-or-closed",
-			},
-		]);
+		expect(result.skipped).toEqual([]);
 	});
 });

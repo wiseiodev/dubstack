@@ -162,19 +162,14 @@ export async function sync(
 		}
 	}
 
-	console.log("🧹 Cleaning up branches with missing remote refs...");
-	const missingRemoteLocals: string[] = [];
+	console.log("🧹 Cleaning up branches with merged/closed PRs...");
+	const localTrackedBranches: string[] = [];
 	for (const branch of stackBranches) {
-		const [hasRemote, hasLocal] = await Promise.all([
-			remoteBranchExists(branch, cwd),
-			branchExists(branch, cwd),
-		]);
-		if (!hasRemote && hasLocal) {
-			missingRemoteLocals.push(branch);
-		}
+		const hasLocal = await branchExists(branch, cwd);
+		if (hasLocal) localTrackedBranches.push(branch);
 	}
 	const cleanupPlan = await buildCleanupPlan({
-		branches: missingRemoteLocals,
+		branches: localTrackedBranches,
 		getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
 		isMergedIntoAnyRoot: async (branch) => {
 			for (const root of roots) {
@@ -183,7 +178,17 @@ export async function sync(
 			return false;
 		},
 	});
+	const excludedFromSync = new Set<string>();
+	for (const skipped of cleanupPlan.skipped) {
+		if (skipped.reason === "commits-not-in-trunk") {
+			excludedFromSync.add(skipped.branch);
+			for (const child of getDescendants(scopeStacks, skipped.branch)) {
+				excludedFromSync.add(child);
+			}
+		}
+	}
 	for (const branch of cleanupPlan.toDelete) {
+		if (excludedFromSync.has(branch)) continue;
 		let shouldDelete = options.force;
 		if (!shouldDelete && options.interactive) {
 			shouldDelete = await confirm(
@@ -201,10 +206,16 @@ export async function sync(
 			`• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
 		);
 	}
+	for (const excluded of excludedFromSync) {
+		console.log(
+			`• Excluding '${excluded}' from sync because its stack is not cleanable yet.`,
+		);
+	}
 
 	console.log("🔄 Syncing branches...");
 	for (const branch of stackBranches) {
-		if (result.cleaned.includes(branch)) continue;
+		if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
+			continue;
 
 		const hasRemote = await remoteBranchExists(branch, cwd);
 		const hasLocal = await branchExists(branch, cwd);
@@ -420,4 +431,25 @@ function markBranchSynced(
 	};
 	entry.last_synced_at = new Date().toISOString();
 	entry.sync_source = options.source;
+}
+
+function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {
+	const descendants: string[] = [];
+	const childMap = new Map<string, string[]>();
+	for (const stack of stacks) {
+		for (const node of stack.branches) {
+			if (!node.parent) continue;
+			const children = childMap.get(node.parent) ?? [];
+			children.push(node.name);
+			childMap.set(node.parent, children);
+		}
+	}
+	const queue = [...(childMap.get(branch) ?? [])];
+	while (queue.length > 0) {
+		const next = queue.shift();
+		if (!next) break;
+		descendants.push(next);
+		queue.push(...(childMap.get(next) ?? []));
+	}
+	return descendants;
 }

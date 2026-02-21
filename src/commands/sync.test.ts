@@ -269,4 +269,25 @@ describe("sync", () => {
 			"updated-outside-dubstack-but-up-to-date",
 		);
 	});
+
+	it("cleans merged branch that is already contained in trunk", async () => {
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "main" },
+			]),
+		);
+		mockGetBranchPrLifecycleState.mockResolvedValue("MERGED");
+		mockIsAncestor.mockResolvedValue(true);
+
+		const result = await sync("/repo", {
+			interactive: false,
+			force: true,
+			restack: false,
+		});
+
+		expect(mockDeleteBranch).toHaveBeenCalledWith("feat/a", "/repo");
+		expect(result.cleaned).toContain("feat/a");
+		expect(result.branches).toHaveLength(0);
+	});
 });
