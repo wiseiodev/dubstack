@@ -8,6 +8,27 @@ This guide gets you from zero to a working stacked PR flow fast.
 - `gh` CLI authenticated (`gh auth login`)
 - `dub` installed (`brew install dubstack` or `npm i -g dubstack`)
 
+## Optional: Enable AI Assistant
+
+```bash
+# 1) add one API key to your shell profile
+dub ai env --gemini-key "<your-gemini-key>"
+# or:
+dub ai env --gateway-key "<your-ai-gateway-key>"
+
+# 2) reload your shell
+source ~/.zshrc
+
+# 3) enable assistant for this repo
+dub config ai-assistant on
+
+# 4) ask a question
+dub ai ask "Summarize this stack from trunk to current branch"
+
+# optional: inspect recent dub command history/context
+dub history --limit 20
+```
+
 ## 1) Start from Trunk
 
 ```bash
@@ -231,6 +252,9 @@ dub undo
 | `dub delete` | Stack-aware branch deletion |
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
+| `dub config ai-assistant on` | Enable repo-local AI assistant |
+| `dub ai ask "..."` | Ask AI assistant (streaming) |
+| `dub history` | Show recent Dub command history |
 
 ## Next Step
 

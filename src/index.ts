@@ -52,6 +52,13 @@ import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
 import { untrack } from './commands/untrack';
 import { DubError } from './lib/errors';
+import { getCurrentBranch } from './lib/git';
+import {
+  appendHistoryEntry,
+  redactSensitiveText,
+  sanitizeCommandArgs,
+} from './lib/history';
+import { detectActiveOperation } from './lib/operation-state';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -854,6 +861,120 @@ program
   );
 
 program
+  .command('config')
+  .description('Manage DubStack configuration')
+  .addCommand(
+    new Command('ai-assistant')
+      .argument('[state]', 'Set to on/off (omit to inspect current value)')
+      .description('Enable or disable the repo-local AI assistant')
+      .action(async (state?: string) => {
+        const { configAiAssistant } = await import('./commands/config');
+        const result = await configAiAssistant(process.cwd(), state);
+
+        if (!state) {
+          console.log(
+            chalk.blue(
+              `AI assistant is ${result.enabled ? 'enabled' : 'disabled'} for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(
+              `✔ AI assistant ${result.enabled ? 'enabled' : 'disabled'}`,
+            ),
+          );
+        } else {
+          console.log(
+            chalk.yellow(
+              `⚠ AI assistant is already ${result.enabled ? 'enabled' : 'disabled'}`,
+            ),
+          );
+        }
+      }),
+  );
+
+program
+  .command('ai')
+  .description('Use DubStack AI assistant utilities')
+  .addCommand(
+    new Command('ask')
+      .argument('<prompt...>', 'Prompt text to send to the AI assistant')
+      .description('Ask DubStack AI assistant a question')
+      .action(async (promptParts: string[]) => {
+        const { askAi } = await import('./commands/ai');
+        await askAi(promptParts.join(' '), process.cwd());
+      }),
+  )
+  .addCommand(
+    new Command('env')
+      .description(
+        'Write DubStack AI API keys to your shell profile (macOS/Linux)',
+      )
+      .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
+      .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
+      .option(
+        '--profile <path>',
+        'Override target profile path (recommended for custom shells)',
+      )
+      .option(
+        '--shell <shell>',
+        'Shell name used for profile detection (zsh or bash)',
+      )
+      .action(
+        async (options: {
+          geminiKey?: string;
+          gatewayKey?: string;
+          profile?: string;
+          shell?: string;
+        }) => {
+          const { configureAiEnv } = await import('./commands/ai-env');
+          const result = await configureAiEnv({
+            geminiKey: options.geminiKey,
+            gatewayKey: options.gatewayKey,
+            profile: options.profile,
+            shell: options.shell,
+          });
+
+          console.log(chalk.green(`✔ Updated ${result.profilePath}`));
+          for (const key of result.updated) {
+            console.log(chalk.dim(`  ↳ exported ${key}`));
+          }
+          console.log(
+            chalk.dim(
+              `Run: source ${result.profilePath} (or open a new shell)`,
+            ),
+          );
+        },
+      ),
+  );
+
+program
+  .command('history')
+  .description('Show recent Dub command history')
+  .option(
+    '-n, --limit <count>',
+    'Number of history entries to show',
+    parsePositiveInt,
+  )
+  .option('--json', 'Output history as JSON')
+  .action(async (options: { limit?: number; json?: boolean }) => {
+    const { formatHistory, history } = await import('./commands/history');
+    const result = await history(process.cwd(), {
+      limit: options.limit ?? 20,
+    });
+
+    if (options.json) {
+      console.log(JSON.stringify(result.entries, null, 2));
+      return;
+    }
+
+    console.log(formatHistory(result));
+  });
+
+program
   .command('modify')
   .alias('m')
   .description(
@@ -975,16 +1096,149 @@ function parseMergeMethod(value: string): 'merge' | 'squash' | 'rebase' {
   throw new DubError('Merge method must be one of: merge, squash, rebase.');
 }
 
+interface HistoryCaptureState {
+  startedAt: number;
+  command: string;
+  output: string[];
+  restore: () => void;
+}
+
+const MAX_HISTORY_OUTPUT_LINES = 120;
+const MAX_HISTORY_OUTPUT_LINE_LENGTH = 500;
+let historyCapture: HistoryCaptureState | null = null;
+
+program.hook('preAction', () => {
+  beginHistoryCapture();
+});
+
+program.hook('postAction', async () => {
+  await finalizeHistoryCapture('success');
+});
+
 async function main() {
   try {
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof DubError) {
       console.error(chalk.red(`✖ ${error.message}`));
+      await finalizeHistoryCapture('error', error.message);
       process.exit(1);
     }
+
+    await finalizeHistoryCapture(
+      'error',
+      error instanceof Error ? error.message : 'Unknown error',
+    );
     throw error;
   }
+}
+
+function beginHistoryCapture(): void {
+  if (historyCapture) return;
+
+  const sanitizedArgs = sanitizeCommandArgs(process.argv.slice(2));
+  if (sanitizedArgs.length === 0) return;
+
+  const output: string[] = [];
+  let stdoutBuffer = '';
+  let stderrBuffer = '';
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+
+  const captureLine = (line: string) => {
+    if (output.length >= MAX_HISTORY_OUTPUT_LINES) return;
+    output.push(truncateHistoryLine(redactSensitiveText(line)));
+  };
+
+  const captureChunk = (
+    chunk: string | Uint8Array,
+    stream: 'stdout' | 'stderr',
+  ) => {
+    const value =
+      typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    const next = `${stream === 'stdout' ? stdoutBuffer : stderrBuffer}${value}`;
+    const lines = next.split('\n');
+    const remainder = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (line.length > 0) {
+        captureLine(line);
+      }
+    }
+
+    if (stream === 'stdout') {
+      stdoutBuffer = remainder;
+    } else {
+      stderrBuffer = remainder;
+    }
+  };
+
+  process.stdout.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    captureChunk(chunk, 'stdout');
+    return (originalStdoutWrite as (...innerArgs: unknown[]) => boolean)(
+      chunk,
+      ...args,
+    );
+  }) as unknown as typeof process.stdout.write;
+
+  process.stderr.write = ((chunk: string | Uint8Array, ...args: unknown[]) => {
+    captureChunk(chunk, 'stderr');
+    return (originalStderrWrite as (...innerArgs: unknown[]) => boolean)(
+      chunk,
+      ...args,
+    );
+  }) as unknown as typeof process.stderr.write;
+
+  historyCapture = {
+    startedAt: Date.now(),
+    command: `dub ${sanitizedArgs.join(' ')}`,
+    output,
+    restore: () => {
+      if (stdoutBuffer.length > 0) {
+        captureLine(stdoutBuffer);
+      }
+      if (stderrBuffer.length > 0) {
+        captureLine(stderrBuffer);
+      }
+      process.stdout.write = originalStdoutWrite;
+      process.stderr.write = originalStderrWrite;
+    },
+  };
+}
+
+async function finalizeHistoryCapture(
+  status: 'success' | 'error',
+  errorMessage?: string,
+): Promise<void> {
+  if (!historyCapture) return;
+
+  const capture = historyCapture;
+  historyCapture = null;
+  capture.restore();
+
+  const cwd = process.cwd();
+  const currentBranch = await getCurrentBranch(cwd).catch(() => undefined);
+  const operation = await detectActiveOperation(cwd).catch(() => undefined);
+
+  await appendHistoryEntry(cwd, {
+    timestamp: new Date(capture.startedAt).toISOString(),
+    command: capture.command,
+    status,
+    durationMs: Date.now() - capture.startedAt,
+    output: capture.output,
+    errorMessage,
+    context: {
+      currentBranch,
+      operation,
+    },
+  }).catch(() => {
+    // Do not block command execution if history append fails.
+  });
+}
+
+function truncateHistoryLine(line: string): string {
+  if (line.length <= MAX_HISTORY_OUTPUT_LINE_LENGTH) return line;
+  return `${line.slice(0, MAX_HISTORY_OUTPUT_LINE_LENGTH)}...`;
 }
 
 main();
