@@ -81,6 +81,7 @@ If behavior/output changed, add or update tests near the changed code:
 
 - Use conventional commit style where possible (`feat:`, `fix:`, `docs:`, etc.).
 - Keep commits scoped and readable.
+- Preserve clean history expectations on `main`: linear history, squash-style landing, and required checks passing before merge.
 - If command UX changes, update docs (`README.md`, `QUICKSTART.md`) in the same PR.
 - If skill workflows change, update corresponding files under `skills/`.
 
