@@ -21,6 +21,7 @@ import {
 	getBranchPrLifecycleState,
 	getBranchPrSyncInfo,
 } from "../lib/github";
+import { detectActiveOperation } from "../lib/operation-state";
 import {
 	type Branch,
 	findStackForBranch,
@@ -87,7 +88,7 @@ export async function sync(
 	await checkGhAuth();
 
 	const options: SyncOptions = {
-		restack: rawOptions.restack ?? true,
+		restack: rawOptions.restack ?? false,
 		force: rawOptions.force ?? false,
 		all: rawOptions.all ?? false,
 		interactive: rawOptions.interactive ?? isInteractiveShell(),
@@ -136,445 +137,504 @@ export async function sync(
 		restacked: false,
 	};
 	const rootHasRemote = new Map<string, boolean>();
+	let pendingError: Error | null = null;
 
-	console.log("🌲 Fetching branches from remote...");
-	const toFetch = [...new Set([...roots, ...stackBranches])];
-	if (toFetch.length > 0) {
-		await fetchBranches(toFetch, cwd);
-		result.fetched = toFetch;
-	}
-
-	for (const root of roots) {
-		const remoteRef = `origin/${root}`;
-		const hasRemoteRoot = await remoteBranchExists(root, cwd);
-		rootHasRemote.set(root, hasRemoteRoot);
-		if (!hasRemoteRoot) continue;
-
-		const ff = await fastForwardBranchToRef(root, remoteRef, cwd);
-		if (ff) {
-			result.trunksSynced.push(root);
-			continue;
+	try {
+		console.log("🌲 Fetching branches from remote...");
+		const toFetch = [...new Set([...roots, ...stackBranches])];
+		if (toFetch.length > 0) {
+			await fetchBranches(toFetch, cwd);
+			result.fetched = toFetch;
 		}
 
-		if (options.force) {
-			await hardResetBranchToRef(root, remoteRef, cwd);
-			result.trunksSynced.push(root);
-			continue;
-		}
+		for (const root of roots) {
+			const remoteRef = `origin/${root}`;
+			const hasRemoteRoot = await remoteBranchExists(root, cwd);
+			rootHasRemote.set(root, hasRemoteRoot);
+			if (!hasRemoteRoot) continue;
 
-		if (options.interactive) {
-			const takeRemote = await confirm(
-				`Trunk '${root}' cannot be fast-forwarded. Overwrite local trunk with '${remoteRef}'?`,
-			);
-			if (takeRemote) {
+			const ff = await fastForwardBranchToRef(root, remoteRef, cwd);
+			if (ff) {
+				result.trunksSynced.push(root);
+				continue;
+			}
+
+			if (options.force) {
 				await hardResetBranchToRef(root, remoteRef, cwd);
 				result.trunksSynced.push(root);
+				continue;
 			}
-		}
-	}
 
-	console.log("🧹 Cleaning up branches with merged/closed PRs...");
-	const localTrackedBranches: string[] = [];
-	for (const branch of stackBranches) {
-		const hasLocal = await branchExists(branch, cwd);
-		if (hasLocal) localTrackedBranches.push(branch);
-	}
-	const cleanupPlan = await buildCleanupPlan({
-		branches: localTrackedBranches,
-		getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
-		isMergedIntoAnyRoot: async (branch) => {
-			for (const root of roots) {
-				const compareRef = rootHasRemote.get(root) ? `origin/${root}` : root;
-				if (await isAncestor(branch, compareRef, cwd)) return true;
-			}
-			return false;
-		},
-	});
-	const excludedFromSync = new Set<string>();
-	for (const skipped of cleanupPlan.skipped) {
-		if (skipped.reason === "commits-not-in-trunk") {
-			excludedFromSync.add(skipped.branch);
-			for (const child of getDescendants(scopeStacks, skipped.branch)) {
-				excludedFromSync.add(child);
+			if (options.interactive) {
+				const takeRemote = await confirm(
+					`Trunk '${root}' cannot be fast-forwarded. Overwrite local trunk with '${remoteRef}'?`,
+				);
+				if (takeRemote) {
+					await hardResetBranchToRef(root, remoteRef, cwd);
+					result.trunksSynced.push(root);
+				}
 			}
 		}
-	}
-	for (const branch of cleanupPlan.toDelete) {
-		if (excludedFromSync.has(branch)) continue;
-		let shouldDelete = options.force;
-		if (!shouldDelete && options.interactive) {
-			shouldDelete = await confirm(
-				`Branch '${branch}' has merged/closed PR and is in trunk. Delete local branch?`,
+
+		console.log("🧹 Cleaning up branches with merged/closed PRs...");
+		const localTrackedBranches: string[] = [];
+		for (const branch of stackBranches) {
+			const hasLocal = await branchExists(branch, cwd);
+			if (hasLocal) localTrackedBranches.push(branch);
+		}
+		const cleanupPlan = await buildCleanupPlan({
+			branches: localTrackedBranches,
+			getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
+			isMergedIntoAnyRoot: async (branch) => {
+				for (const root of roots) {
+					const compareRef = rootHasRemote.get(root) ? `origin/${root}` : root;
+					if (await isAncestor(branch, compareRef, cwd)) return true;
+				}
+				return false;
+			},
+		});
+		const excludedFromSync = new Set<string>();
+		for (const skipped of cleanupPlan.skipped) {
+			if (skipped.reason === "commits-not-in-trunk") {
+				excludedFromSync.add(skipped.branch);
+				for (const child of getDescendants(scopeStacks, skipped.branch)) {
+					excludedFromSync.add(child);
+				}
+			}
+		}
+		for (const branch of cleanupPlan.toDelete) {
+			if (excludedFromSync.has(branch)) continue;
+			let shouldDelete = options.force;
+			if (!shouldDelete && options.interactive) {
+				shouldDelete = await confirm(
+					`Branch '${branch}' has merged/closed PR and is in trunk. Delete local branch?`,
+				);
+			}
+			if (shouldDelete) {
+				await checkoutBranch(roots[0] ?? originalBranch, cwd);
+				await deleteBranch(branch, cwd);
+				removeBranchFromState(scopeStacks, branch);
+				result.cleaned.push(branch);
+			}
+		}
+		for (const skipped of cleanupPlan.skipped) {
+			console.log(
+				`• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
 			);
 		}
-		if (shouldDelete) {
-			await checkoutBranch(roots[0] ?? originalBranch, cwd);
-			await deleteBranch(branch, cwd);
-			removeBranchFromState(scopeStacks, branch);
-			result.cleaned.push(branch);
-		}
-	}
-	for (const skipped of cleanupPlan.skipped) {
-		console.log(
-			`• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
-		);
-	}
-	for (const excluded of excludedFromSync) {
-		console.log(
-			`• Excluding '${excluded}' from sync because its stack is not cleanable yet.`,
-		);
-	}
-
-	console.log("🔄 Syncing branches...");
-	for (const branch of stackBranches) {
-		if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
-			continue;
-
-		const hasRemote = await remoteBranchExists(branch, cwd);
-		const hasLocal = await branchExists(branch, cwd);
-		let outcome: BranchSyncOutcome;
-
-		const remoteRef = `origin/${branch}`;
-		const localSha = hasLocal ? await getRefSha(branch, cwd) : null;
-		const remoteSha = hasRemote ? await getRefSha(remoteRef, cwd) : null;
-		const localBehind =
-			hasLocal && hasRemote ? await isAncestor(branch, remoteRef, cwd) : false;
-		const remoteBehind =
-			hasLocal && hasRemote ? await isAncestor(remoteRef, branch, cwd) : false;
-		let status = classifyBranchSyncStatus({
-			hasRemote,
-			hasLocal,
-			localSha,
-			remoteSha,
-			localBehind,
-			remoteBehind,
-			hasSubmittedBaseline:
-				stateBranchMap.get(branch)?.last_submitted_version != null,
-		});
-		const prSyncInfo = hasRemote
-			? await getBranchPrSyncInfo(branch, cwd)
-			: { state: "NONE" as const, baseRefName: null };
-		const localParent = stateBranchMap.get(branch)?.parent ?? null;
-		if (
-			hasRemote &&
-			hasLocal &&
-			localSha !== remoteSha &&
-			prSyncInfo.baseRefName &&
-			localParent &&
-			prSyncInfo.baseRefName !== localParent
-		) {
-			status = "needs-remote-sync";
+		for (const excluded of excludedFromSync) {
+			console.log(
+				`• Excluding '${excluded}' from sync because its stack is not cleanable yet.`,
+			);
 		}
 
-		if (status === "missing-remote") {
-			outcome = {
-				branch,
-				status,
-				action: "skipped",
-				message: `⚠ Skipped '${branch}' (missing on remote).`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
+		console.log("🔄 Syncing branches...");
+		for (const branch of stackBranches) {
+			if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
+				continue;
 
-		if (status === "missing-local") {
-			await checkoutRemoteBranch(branch, cwd);
-			outcome = {
-				branch,
-				status,
-				action: "synced",
-				message: `✔ Restored '${branch}' from remote.`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			const restoredSha = await getRefSha(branch, cwd);
-			await markBranchSynced(stateBranchMap, branch, restoredSha, cwd, {
-				source: "sync",
-				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			const hasRemote = await remoteBranchExists(branch, cwd);
+			const hasLocal = await branchExists(branch, cwd);
+			let outcome: BranchSyncOutcome;
+
+			const remoteRef = `origin/${branch}`;
+			const localSha = hasLocal ? await getRefSha(branch, cwd) : null;
+			const remoteSha = hasRemote ? await getRefSha(remoteRef, cwd) : null;
+			const localBehind =
+				hasLocal && hasRemote
+					? await isAncestor(branch, remoteRef, cwd)
+					: false;
+			const remoteBehind =
+				hasLocal && hasRemote
+					? await isAncestor(remoteRef, branch, cwd)
+					: false;
+			let status = classifyBranchSyncStatus({
+				hasRemote,
+				hasLocal,
+				localSha,
+				remoteSha,
+				localBehind,
+				remoteBehind,
+				hasSubmittedBaseline:
+					stateBranchMap.get(branch)?.last_submitted_version != null,
 			});
-			continue;
-		}
+			const prSyncInfo = hasRemote
+				? await getBranchPrSyncInfo(branch, cwd)
+				: { state: "NONE" as const, baseRefName: null };
+			const localParent = stateBranchMap.get(branch)?.parent ?? null;
+			if (
+				hasRemote &&
+				hasLocal &&
+				localSha !== remoteSha &&
+				prSyncInfo.baseRefName &&
+				localParent &&
+				prSyncInfo.baseRefName !== localParent
+			) {
+				status = "needs-remote-sync";
+			}
 
-		if (status === "up-to-date") {
-			outcome = {
-				branch,
-				status,
-				action: "none",
-				message: `• '${branch}' is up to date.`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			await markBranchSynced(
-				stateBranchMap,
-				branch,
-				localSha ?? remoteSha ?? null,
-				cwd,
-				{
+			if (status === "missing-remote") {
+				outcome = {
+					branch,
+					status,
+					action: "skipped",
+					message: `⚠ Skipped '${branch}' (missing on remote).`,
+				};
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				continue;
+			}
+
+			if (status === "missing-local") {
+				await checkoutRemoteBranch(branch, cwd);
+				outcome = {
+					branch,
+					status,
+					action: "synced",
+					message: `✔ Restored '${branch}' from remote.`,
+				};
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				const restoredSha = await getRefSha(branch, cwd);
+				await markBranchSynced(stateBranchMap, branch, restoredSha, cwd, {
 					source: "sync",
 					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
-				},
-			);
-			continue;
-		}
+				});
+				continue;
+			}
 
-		if (status === "updated-outside-dubstack-but-up-to-date") {
-			outcome = {
-				branch,
-				status,
-				action: "none",
-				message: `• '${branch}' is up to date but was previously unmanaged by DubStack sync metadata.`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			await markBranchSynced(
-				stateBranchMap,
-				branch,
-				localSha ?? remoteSha ?? null,
-				cwd,
-				{
-					source: "imported",
-					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
-				},
-			);
-			continue;
-		}
+			if (status === "up-to-date") {
+				outcome = {
+					branch,
+					status,
+					action: "none",
+					message: `• '${branch}' is up to date.`,
+				};
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				await markBranchSynced(
+					stateBranchMap,
+					branch,
+					localSha ?? remoteSha ?? null,
+					cwd,
+					{
+						source: "sync",
+						baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+					},
+				);
+				continue;
+			}
 
-		if (status === "needs-remote-sync-safe") {
-			await hardResetBranchToRef(branch, remoteRef, cwd);
-			outcome = {
-				branch,
-				status,
-				action: "synced",
-				message: `✔ Synced '${branch}' to remote head.`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-				source: "sync",
-				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
-			});
-			continue;
-		}
+			if (status === "updated-outside-dubstack-but-up-to-date") {
+				outcome = {
+					branch,
+					status,
+					action: "none",
+					message: `• '${branch}' is up to date but was previously unmanaged by DubStack sync metadata.`,
+				};
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				await markBranchSynced(
+					stateBranchMap,
+					branch,
+					localSha ?? remoteSha ?? null,
+					cwd,
+					{
+						source: "imported",
+						baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+					},
+				);
+				continue;
+			}
 
-		if (status === "local-ahead") {
-			outcome = {
-				branch,
-				status,
-				action: "kept-local",
-				message: `• Kept local '${branch}' (local commits ahead of remote).`,
-			};
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
-
-		if (status === "unsubmitted") {
-			if (options.force) {
+			if (status === "needs-remote-sync-safe") {
 				await hardResetBranchToRef(branch, remoteRef, cwd);
 				outcome = {
 					branch,
 					status,
 					action: "synced",
-					message: `✔ Synced unsubmitted branch '${branch}' to remote with --force.`,
+					message: `✔ Synced '${branch}' to remote head.`,
 				};
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
 				await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 					source: "sync",
-					baseBranch: localParent,
+					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
 				});
-			} else if (!options.interactive) {
+				continue;
+			}
+
+			if (status === "local-ahead") {
 				outcome = {
 					branch,
 					status,
-					action: "skipped",
-					message: `⚠ Skipped unsubmitted branch '${branch}' (use --force or interactive mode).`,
+					action: "kept-local",
+					message: `• Kept local '${branch}' (local commits ahead of remote).`,
 				};
-			} else {
-				const takeRemote = await confirm(
-					`Branch '${branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
-				);
-				if (takeRemote) {
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				continue;
+			}
+
+			if (status === "unsubmitted") {
+				if (options.force) {
 					await hardResetBranchToRef(branch, remoteRef, cwd);
 					outcome = {
 						branch,
 						status,
 						action: "synced",
-						message: `✔ Synced unsubmitted branch '${branch}' to remote.`,
+						message: `✔ Synced unsubmitted branch '${branch}' to remote with --force.`,
 					};
 					await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 						source: "sync",
 						baseBranch: localParent,
 					});
-				} else {
+				} else if (!options.interactive) {
 					outcome = {
 						branch,
 						status,
-						action: "kept-local",
-						message: `• Kept local unsubmitted branch '${branch}'.`,
+						action: "skipped",
+						message: `⚠ Skipped unsubmitted branch '${branch}' (use --force or interactive mode).`,
 					};
+				} else {
+					const takeRemote = await confirm(
+						`Branch '${branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
+					);
+					if (takeRemote) {
+						await hardResetBranchToRef(branch, remoteRef, cwd);
+						outcome = {
+							branch,
+							status,
+							action: "synced",
+							message: `✔ Synced unsubmitted branch '${branch}' to remote.`,
+						};
+						await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
+							source: "sync",
+							baseBranch: localParent,
+						});
+					} else {
+						outcome = {
+							branch,
+							status,
+							action: "kept-local",
+							message: `• Kept local unsubmitted branch '${branch}'.`,
+						};
+					}
 				}
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				continue;
 			}
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
 
-		if (status === "needs-remote-sync") {
-			if (options.force) {
-				await hardResetBranchToRef(branch, remoteRef, cwd);
-				if (prSyncInfo.baseRefName && localParent !== prSyncInfo.baseRefName) {
-					const stateBranch = stateBranchMap.get(branch);
-					if (stateBranch) stateBranch.parent = prSyncInfo.baseRefName;
-				}
-				outcome = {
-					branch,
-					status,
-					action: "synced",
-					message: `✔ Synced '${branch}' to remote and adopted remote parent '${prSyncInfo.baseRefName ?? "unknown"}'.`,
-				};
-				await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-					source: "sync",
-					baseBranch: prSyncInfo.baseRefName ?? localParent,
-				});
-			} else if (!options.interactive) {
-				outcome = {
-					branch,
-					status,
-					action: "skipped",
-					message: `⚠ Skipped '${branch}' parent-mismatch sync (run interactively or with --force).`,
-				};
-			} else {
-				const parentDecision = await choose(
-					`Branch '${branch}' parent differs locally ('${localParent}') vs remote ('${prSyncInfo.baseRefName}').`,
-					[
-						{ label: "Take remote version and remote parent", value: "remote" },
-						{ label: "Keep local branch and parent", value: "local" },
-						{ label: "Skip for now", value: "skip" },
-					],
-				);
-				if (parentDecision === "remote") {
+			if (status === "needs-remote-sync") {
+				if (options.force) {
 					await hardResetBranchToRef(branch, remoteRef, cwd);
-					const stateBranch = stateBranchMap.get(branch);
-					if (stateBranch && prSyncInfo.baseRefName) {
-						stateBranch.parent = prSyncInfo.baseRefName;
+					if (
+						prSyncInfo.baseRefName &&
+						localParent !== prSyncInfo.baseRefName
+					) {
+						const stateBranch = stateBranchMap.get(branch);
+						if (stateBranch) stateBranch.parent = prSyncInfo.baseRefName;
 					}
 					outcome = {
 						branch,
 						status,
 						action: "synced",
-						message: `✔ Synced '${branch}' to remote and adopted remote parent.`,
+						message: `✔ Synced '${branch}' to remote and adopted remote parent '${prSyncInfo.baseRefName ?? "unknown"}'.`,
 					};
 					await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 						source: "sync",
 						baseBranch: prSyncInfo.baseRefName ?? localParent,
 					});
-				} else if (parentDecision === "local") {
-					outcome = {
-						branch,
-						status,
-						action: "kept-local",
-						message: `• Kept local parent and local state for '${branch}'.`,
-					};
-				} else {
+				} else if (!options.interactive) {
 					outcome = {
 						branch,
 						status,
 						action: "skipped",
-						message: `⚠ Skipped '${branch}' parent-mismatch sync by user choice.`,
+						message: `⚠ Skipped '${branch}' parent-mismatch sync (run interactively or with --force).`,
 					};
+				} else {
+					const parentDecision = await choose(
+						`Branch '${branch}' parent differs locally ('${localParent}') vs remote ('${prSyncInfo.baseRefName}').`,
+						[
+							{
+								label: "Take remote version and remote parent",
+								value: "remote",
+							},
+							{ label: "Keep local branch and parent", value: "local" },
+							{ label: "Skip for now", value: "skip" },
+						],
+					);
+					if (parentDecision === "remote") {
+						await hardResetBranchToRef(branch, remoteRef, cwd);
+						const stateBranch = stateBranchMap.get(branch);
+						if (stateBranch && prSyncInfo.baseRefName) {
+							stateBranch.parent = prSyncInfo.baseRefName;
+						}
+						outcome = {
+							branch,
+							status,
+							action: "synced",
+							message: `✔ Synced '${branch}' to remote and adopted remote parent.`,
+						};
+						await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
+							source: "sync",
+							baseBranch: prSyncInfo.baseRefName ?? localParent,
+						});
+					} else if (parentDecision === "local") {
+						outcome = {
+							branch,
+							status,
+							action: "kept-local",
+							message: `• Kept local parent and local state for '${branch}'.`,
+						};
+					} else {
+						outcome = {
+							branch,
+							status,
+							action: "skipped",
+							message: `⚠ Skipped '${branch}' parent-mismatch sync by user choice.`,
+						};
+					}
 				}
+				result.branches.push(outcome);
+				printBranchOutcome(outcome);
+				continue;
 			}
-			result.branches.push(outcome);
-			printBranchOutcome(outcome);
-			continue;
-		}
 
-		const decision = await resolveReconcileDecision({
-			branch,
-			force: options.force,
-			interactive: options.interactive,
-			promptChoice: () =>
-				choose(
-					`Branch '${branch}' diverged from remote. How should sync proceed?`,
-					[
-						{
-							label: "Take remote version (discard local divergence)",
-							value: "take-remote",
-						},
-						{ label: "Keep local version", value: "keep-local" },
-						{
-							label: "Attempt reconciliation and keep local commits",
-							value: "reconcile",
-						},
-						{ label: "Skip this branch", value: "skip" },
-					],
-				),
-		});
-
-		if (decision === "take-remote") {
-			await hardResetBranchToRef(branch, remoteRef, cwd);
-			outcome = {
+			const decision = await resolveReconcileDecision({
 				branch,
-				status: "reconcile-needed",
-				action: "synced",
-				message: `✔ Synced '${branch}' to remote version.`,
-			};
-			await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-				source: "sync",
-				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+				force: options.force,
+				interactive: options.interactive,
+				promptChoice: () =>
+					choose(
+						`Branch '${branch}' diverged from remote. How should sync proceed?`,
+						[
+							{
+								label: "Take remote version (discard local divergence)",
+								value: "take-remote",
+							},
+							{ label: "Keep local version", value: "keep-local" },
+							{
+								label: "Attempt reconciliation and keep local commits",
+								value: "reconcile",
+							},
+							{ label: "Skip this branch", value: "skip" },
+						],
+					),
 			});
-		} else if (decision === "keep-local") {
-			outcome = {
-				branch,
-				status: "reconcile-needed",
-				action: "kept-local",
-				message: `• Kept local '${branch}' (remote divergence ignored).`,
-			};
-		} else if (decision === "reconcile") {
-			const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
-			outcome = {
-				branch,
-				status: "reconcile-needed",
-				action: reconciled ? "synced" : "kept-local",
-				message: reconciled
-					? `✔ Reconciled '${branch}' by rebasing local commits onto remote.`
-					: `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
-			};
-			if (reconciled) {
-				const newSha = await getRefSha(branch, cwd);
-				await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
+
+			if (decision === "take-remote") {
+				await hardResetBranchToRef(branch, remoteRef, cwd);
+				outcome = {
+					branch,
+					status: "reconcile-needed",
+					action: "synced",
+					message: `✔ Synced '${branch}' to remote version.`,
+				};
+				await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
 					source: "sync",
 					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
 				});
+			} else if (decision === "keep-local") {
+				outcome = {
+					branch,
+					status: "reconcile-needed",
+					action: "kept-local",
+					message: `• Kept local '${branch}' (remote divergence ignored).`,
+				};
+			} else if (decision === "reconcile") {
+				const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
+				outcome = {
+					branch,
+					status: "reconcile-needed",
+					action: reconciled ? "synced" : "kept-local",
+					message: reconciled
+						? `✔ Reconciled '${branch}' by rebasing local commits onto remote.`
+						: `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
+				};
+				if (reconciled) {
+					const newSha = await getRefSha(branch, cwd);
+					await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
+						source: "sync",
+						baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+					});
+				}
+			} else {
+				outcome = {
+					branch,
+					status: "reconcile-needed",
+					action: "skipped",
+					message: options.interactive
+						? `⚠ Skipped '${branch}' by user choice.`
+						: `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
+				};
 			}
-		} else {
-			outcome = {
-				branch,
-				status: "reconcile-needed",
-				action: "skipped",
-				message: options.interactive
-					? `⚠ Skipped '${branch}' by user choice.`
-					: `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
-			};
+			result.branches.push(outcome);
+			printBranchOutcome(outcome);
 		}
-		result.branches.push(outcome);
-		printBranchOutcome(outcome);
+
+		await writeState(state, cwd);
+
+		if (options.restack) {
+			console.log("🥞 Restacking branches...");
+			const rootsToRestack = options.all ? roots : [roots[0]].filter(Boolean);
+			for (const root of rootsToRestack) {
+				await checkoutBranch(root, cwd);
+				const restackResult = await restack(cwd);
+				if (restackResult.status === "conflict") {
+					throw new DubError(
+						`Sync paused: conflict while restacking '${restackResult.conflictBranch ?? "unknown"}'.\n` +
+							"Recovery:\n" +
+							"  1. Resolve conflicts and stage files.\n" +
+							"  2. Run 'dub continue' to resume.\n" +
+							"  3. Run 'dub abort' to cancel recovery and roll back progress.",
+					);
+				}
+			}
+			result.restacked = true;
+		}
+	} catch (error) {
+		pendingError = await wrapSyncError(error, cwd);
 	}
 
-	if (options.restack) {
-		console.log("🥞 Restacking branches...");
-		const rootsToRestack = options.all ? roots : [roots[0]].filter(Boolean);
-		for (const root of rootsToRestack) {
-			await checkoutBranch(root, cwd);
-			await restack(cwd);
+	const activeOperation = await detectActiveOperation(cwd).catch(() => "none");
+	if (activeOperation === "none") {
+		try {
+			await checkoutBranch(originalBranch, cwd);
+		} catch {
+			if (!pendingError) {
+				pendingError = new DubError(
+					`Sync completed but could not restore original branch '${originalBranch}'.\n` +
+						`Run 'git checkout ${originalBranch}' to return to your original context.`,
+				);
+			}
 		}
-		result.restacked = true;
 	}
-
-	await writeState(state, cwd);
-	await checkoutBranch(originalBranch, cwd);
+	if (pendingError) {
+		throw pendingError;
+	}
 	printSyncSummary(result);
 	return result;
+}
+
+async function wrapSyncError(error: unknown, cwd: string): Promise<Error> {
+	const baseError =
+		error instanceof DubError
+			? error
+			: new DubError(
+					error instanceof Error ? error.message : "Sync failed unexpectedly.",
+				);
+	const activeOperation = await detectActiveOperation(cwd).catch(() => "none");
+	if (activeOperation === "none") {
+		return baseError;
+	}
+	return new DubError(
+		`${baseError.message}\n` +
+			"Recovery:\n" +
+			"  1. Run 'dub continue' after resolving conflicts.\n" +
+			"  2. Run 'dub abort' to exit the in-progress operation safely.",
+	);
 }
 
 async function markBranchSynced(

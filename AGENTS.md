@@ -56,7 +56,7 @@ Use these commands from the repo root:
 
 - `create` auto-initializes state via `ensureState(...)`.
 - `restack` and `submit` require valid tracked stack state and should fail clearly when context is invalid.
-- `submit` only supports linear stacks (one child per parent path during submit flow).
+- `submit` defaults to current-path submission; `--path stack` requires a linear stack (one child per parent).
 - `undo` remains single-level.
 - Error text is part of UX and often asserted in tests; change carefully.
 

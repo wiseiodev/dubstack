@@ -115,13 +115,50 @@ describe("submit", () => {
 			makeState([
 				{ name: "main", parent: null, type: "root" },
 				{ name: "feat/a", parent: "main" },
-				{ name: "feat/b", parent: "feat/a" },
-				{ name: "feat/c", parent: "feat/a" },
+				{ name: "feat/b", parent: "main" },
 			]),
 		);
 
-		await expect(submit("/repo", false)).rejects.toThrow("Branching stacks");
-		await expect(submit("/repo", false)).rejects.toThrow("dub track");
+		await expect(submit("/repo", false, { path: "stack" })).rejects.toThrow(
+			"Branching stacks are not supported by submit",
+		);
+		await expect(submit("/repo", false, { path: "stack" })).rejects.toThrow(
+			"main -> feat/a, feat/b",
+		);
+		await expect(submit("/repo", false, { path: "stack" })).rejects.toThrow(
+			"dub submit --path current",
+		);
+		await expect(submit("/repo", false, { path: "stack" })).rejects.toThrow(
+			"dub track",
+		);
+	});
+
+	it("defaults to current path and ignores sibling submit blockers", async () => {
+		mockGetCurrentBranch.mockResolvedValue("feat/a");
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "main" },
+				{ name: "feat/b", parent: "main" },
+			]),
+		);
+
+		const result = await submit("/repo", true);
+		expect(result.pushed).toEqual(["feat/a"]);
+	});
+
+	it("falls back to current path with --fix when stack mode is blocked", async () => {
+		mockGetCurrentBranch.mockResolvedValue("feat/a");
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "main" },
+				{ name: "feat/b", parent: "main" },
+			]),
+		);
+
+		const result = await submit("/repo", true, { path: "stack", fix: true });
+		expect(result.pushed).toEqual(["feat/a"]);
 	});
 
 	it("dry-run does not call push or gh commands", async () => {

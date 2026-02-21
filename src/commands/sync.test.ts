@@ -27,6 +27,10 @@ vi.mock("./restack.js", () => ({
 	restack: vi.fn(),
 }));
 
+vi.mock("../lib/operation-state.js", () => ({
+	detectActiveOperation: vi.fn(),
+}));
+
 vi.mock("../lib/github.js", () => ({
 	checkGhAuth: vi.fn(),
 	ensureGhInstalled: vi.fn(),
@@ -53,6 +57,7 @@ import {
 	getBranchPrLifecycleState,
 	getBranchPrSyncInfo,
 } from "../lib/github";
+import { detectActiveOperation } from "../lib/operation-state";
 import type { DubState } from "../lib/state";
 import { readState, writeState } from "../lib/state";
 import { restack } from "./restack";
@@ -78,6 +83,9 @@ const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockRestack = restack as ReturnType<typeof vi.fn>;
+const mockDetectActiveOperation = detectActiveOperation as ReturnType<
+	typeof vi.fn
+>;
 const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
 	typeof vi.fn
 >;
@@ -133,6 +141,7 @@ beforeEach(() => {
 		state: "OPEN",
 		baseRefName: "main",
 	});
+	mockDetectActiveOperation.mockResolvedValue("none");
 	mockEnsureGhInstalled.mockResolvedValue(undefined);
 	mockCheckGhAuth.mockResolvedValue(undefined);
 	mockWriteState.mockResolvedValue(undefined);
@@ -162,6 +171,20 @@ describe("sync", () => {
 		expect(mockFetchBranches).toHaveBeenCalledWith(["main", "feat/a"], "/repo");
 		expect(result.fetched).toEqual(["main", "feat/a"]);
 		expect(result.branches[0].status).toBe("up-to-date");
+		expect(mockRestack).not.toHaveBeenCalled();
+	});
+
+	it("does not restack unless --restack is explicitly requested", async () => {
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "main" },
+			]),
+		);
+		mockGetRefSha.mockResolvedValue("same-sha");
+
+		const result = await sync("/repo", { interactive: false });
+		expect(result.restacked).toBe(false);
 		expect(mockRestack).not.toHaveBeenCalled();
 	});
 
@@ -348,5 +371,28 @@ describe("sync", () => {
 
 		expect(result.branches[0].status).toBe("needs-remote-sync");
 		expect(result.branches[0].action).toBe("skipped");
+	});
+
+	it("throws actionable recovery guidance when restack phase conflicts", async () => {
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "main" },
+			]),
+		);
+		mockGetRefSha.mockResolvedValue("same-sha");
+		mockRestack.mockResolvedValue({
+			status: "conflict",
+			rebased: [],
+			conflictBranch: "feat/a",
+		});
+		mockDetectActiveOperation.mockResolvedValue("restack");
+
+		await expect(
+			sync("/repo", { interactive: false, restack: true }),
+		).rejects.toThrow("dub continue");
+		await expect(
+			sync("/repo", { interactive: false, restack: true }),
+		).rejects.toThrow("dub abort");
 	});
 });

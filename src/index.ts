@@ -32,12 +32,16 @@ import { children } from "./commands/children";
 import { continueCommand } from "./commands/continue";
 import { create } from "./commands/create";
 import { deleteCommand } from "./commands/delete";
+import { doctor } from "./commands/doctor";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
 import { parent } from "./commands/parent";
 import { pr } from "./commands/pr";
+import { prune } from "./commands/prune";
+import { ready } from "./commands/ready";
 import { restack, restackContinue } from "./commands/restack";
+import type { SubmitPathMode } from "./commands/submit";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
 import { track } from "./commands/track";
@@ -420,11 +424,7 @@ program
 program
 	.command("sync")
 	.description("Sync tracked branches with remote and reconcile divergence")
-	.option(
-		"--restack",
-		"Restack branches after sync (disable with --no-restack)",
-		true,
-	)
+	.option("--restack", "Restack branches after sync")
 	.option("-f, --force", "Skip prompts for destructive sync decisions")
 	.option("-a, --all", "Sync all tracked stacks across trunks")
 	.option("--no-interactive", "Disable prompts and use deterministic behavior")
@@ -535,12 +535,20 @@ program
 		"Push branches and create/update GitHub PRs for the current stack",
 	)
 	.option("--dry-run", "Print what would happen without executing")
+	.option(
+		"--path <mode>",
+		"Submit scope: current (default) or stack",
+		parseSubmitPath,
+		"current",
+	)
+	.option("--fix", "Apply safe remediation for common submit blockers")
 	.addHelpText(
 		"after",
 		`
 Examples:
   $ dub submit           Push and create/update PRs
-  $ dub submit --dry-run Preview what would happen`,
+  $ dub submit --dry-run Preview what would happen
+  $ dub submit --path stack --fix Submit full stack with safe auto-remediation`,
 	)
 	.action(runSubmit);
 
@@ -548,7 +556,106 @@ program
 	.command("ss")
 	.description("Submit the current stack (alias for submit)")
 	.option("--dry-run", "Print what would happen without executing")
+	.option(
+		"--path <mode>",
+		"Submit scope: current (default) or stack",
+		parseSubmitPath,
+		"current",
+	)
+	.option("--fix", "Apply safe remediation for common submit blockers")
 	.action(runSubmit);
+
+program
+	.command("doctor")
+	.description("Run stack health checks and print actionable remediation steps")
+	.option("-a, --all", "Check all stacks instead of only the current stack")
+	.option("--no-fetch", "Skip remote fetch before remote drift checks")
+	.action(async (options: { all?: boolean; fetch?: boolean }) => {
+		const result = await doctor(process.cwd(), options);
+		if (result.issues.length === 0) {
+			console.log(
+				chalk.green(`✔ No issues found for '${result.checkedBranch}'.`),
+			);
+			return;
+		}
+		console.log(
+			chalk.yellow(
+				`⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
+			),
+		);
+		for (const issue of result.issues) {
+			console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
+			console.log(chalk.dim(`  ${issue.details}`));
+			for (const fix of issue.fixes) {
+				console.log(chalk.dim(`  ↳ ${fix}`));
+			}
+		}
+	});
+
+program
+	.command("ready")
+	.description("Run health + submit preflight checks for the current branch")
+	.action(async () => {
+		const result = await ready(process.cwd());
+		console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
+		if (result.submitBranches.length > 0) {
+			console.log(
+				chalk.dim(
+					`Submit path (${result.submitPath}): ${result.submitBranches.join(" -> ")} (trunk: ${result.rootBranch})`,
+				),
+			);
+		}
+		if (result.ready) {
+			console.log(chalk.green("✔ Ready to submit."));
+			return;
+		}
+		console.log(chalk.yellow("⚠ Not ready to submit yet."));
+		for (const blocker of result.blockers) {
+			console.log(chalk.yellow(`  - ${blocker}`));
+		}
+	});
+
+program
+	.command("prune")
+	.description(
+		"Preview or remove stale tracked branches from DubStack metadata",
+	)
+	.option("--apply", "Apply pruning changes (default is preview only)")
+	.option("-a, --all", "Prune stale tracked branches across all stacks")
+	.option("--no-fetch", "Skip remote fetch before pruning checks")
+	.action(
+		async (options: { apply?: boolean; all?: boolean; fetch?: boolean }) => {
+			const result = await prune(process.cwd(), options);
+			if (result.stale.length === 0) {
+				console.log(chalk.green("✔ No stale tracked branches found."));
+				return;
+			}
+			const modeLabel = result.applied ? "applied" : "preview";
+			console.log(
+				chalk.yellow(
+					`⚠ Prune ${modeLabel}: ${result.stale.length} stale tracked branch(es) detected.`,
+				),
+			);
+			for (const entry of result.stale) {
+				console.log(
+					chalk.dim(
+						`  ↳ ${entry.branch} (${entry.reason}; local=${entry.hasLocal}; remote=${entry.hasRemote})`,
+					),
+				);
+			}
+			if (result.applied) {
+				console.log(
+					chalk.green(
+						`✔ Removed ${result.removed.length} stale tracked branch(es): ${result.removed.join(", ")}`,
+					),
+				);
+			} else {
+				console.log(
+					chalk.dim("  Run 'dub prune --apply' to persist these removals."),
+				);
+			}
+		},
+	);
 
 program
 	.command("checkout")
@@ -674,8 +781,24 @@ program
 		await pr(process.cwd(), branch);
 	});
 
-async function runSubmit(options: { dryRun?: boolean }) {
-	const result = await submit(process.cwd(), options.dryRun ?? false);
+async function runSubmit(options: {
+	dryRun?: boolean;
+	path?: SubmitPathMode;
+	fix?: boolean;
+}) {
+	const result = await submit(process.cwd(), options.dryRun ?? false, {
+		path: options.path ?? "current",
+		fix: options.fix ?? false,
+	});
+
+	if (result.pushed.length > 0 && result.dryRun) {
+		console.log(
+			chalk.green(
+				`✔ Dry-run complete (${result.path} path): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
+			),
+		);
+		return;
+	}
 
 	if (result.pushed.length > 0) {
 		console.log(
@@ -708,6 +831,11 @@ function parseSteps(positional?: string, option?: string): number {
 		throw new DubError("Steps must be a positive integer.");
 	}
 	return parsed;
+}
+
+function parseSubmitPath(value: string): SubmitPathMode {
+	if (value === "current" || value === "stack") return value;
+	throw new DubError("Submit path must be either 'current' or 'stack'.");
 }
 
 async function main() {
