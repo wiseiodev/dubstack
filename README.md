@@ -75,6 +75,9 @@ dub log
 git checkout main && git pull
 dub restack
 
+# 4b. Sync local stack state with remote branches
+dub sync
+
 # 5. Made a mistake? Undo it
 # 5. Made a mistake? Undo it
 dub undo
@@ -227,6 +230,43 @@ Progress is saved to `.git/dubstack/restack-progress.json`, so the resume picks 
 | Uncommitted changes | `Working tree has uncommitted changes. Commit or stash them before restacking.` |
 | Branch not in a stack | `Branch '<name>' is not part of any stack.` |
 | Tracked branch deleted | `Branch '<name>' is tracked in state but no longer exists in git.` |
+
+---
+
+### `dub sync`
+
+Synchronizes tracked stack branches with remote refs and optionally restacks.
+
+```bash
+dub sync
+```
+
+Useful flags:
+
+```bash
+# Sync all stacks across trunks
+dub sync --all
+
+# Non-interactive safe mode (skip destructive operations)
+dub sync --no-interactive
+
+# Force overwrite/delete decisions during sync
+dub sync --force
+
+# Skip post-sync restack
+dub sync --no-restack
+```
+
+Current behavior:
+- Fetches tracked roots and branches from `origin`
+- Attempts fast-forward trunk updates (or overwrite with `--force`)
+- Cleans local branches missing from remote (interactive/force)
+- Reconciles each tracked branch:
+  - restores missing local branches from remote
+  - fast-forwards branches that are safely behind remote
+  - keeps local-ahead branches
+  - prompts/skips/forces on diverged branches
+- Runs post-sync restack by default
 
 ---
 

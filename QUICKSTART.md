@@ -81,6 +81,9 @@ dub restack
 
 # Push everything again
 dub ss
+
+# Optionally sync local branch graph with remote before submitting
+dub sync
 ```
 
 ## 6. After a PR Merges
@@ -118,4 +121,5 @@ dub undo
 | `dub ss` | Push + create/update all PRs |
 | `dub submit --dry-run` | Preview submit |
 | `dub restack` | Rebase all branches onto parents |
+| `dub sync` | Sync tracked branches with remote and reconcile divergence |
 | `dub undo` | Reverse last operation |

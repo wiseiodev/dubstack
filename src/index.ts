@@ -29,6 +29,7 @@ import { log } from "./commands/log";
 import { bottom, down, top, up } from "./commands/navigate";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
+import { sync } from "./commands/sync";
 import { undo } from "./commands/undo";
 import { DubError } from "./lib/errors";
 
@@ -185,6 +186,28 @@ program
 				const info = await branchInfo(process.cwd());
 				console.log(formatBranchInfo(info));
 			}),
+	);
+
+program
+	.command("sync")
+	.description("Sync tracked branches with remote and reconcile divergence")
+	.option(
+		"--restack",
+		"Restack branches after sync (disable with --no-restack)",
+		true,
+	)
+	.option("-f, --force", "Skip prompts for destructive sync decisions")
+	.option("-a, --all", "Sync all tracked stacks across trunks")
+	.option("--no-interactive", "Disable prompts and use deterministic behavior")
+	.action(
+		async (options: {
+			restack?: boolean;
+			force?: boolean;
+			all?: boolean;
+			interactive?: boolean;
+		}) => {
+			await sync(process.cwd(), options);
+		},
 	);
 
 program
