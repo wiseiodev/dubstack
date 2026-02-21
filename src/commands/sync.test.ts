@@ -29,6 +29,7 @@ vi.mock("./restack.js", () => ({
 
 vi.mock("../lib/github.js", () => ({
 	getBranchPrLifecycleState: vi.fn(),
+	getBranchPrSyncInfo: vi.fn(),
 }));
 
 import {
@@ -44,7 +45,7 @@ import {
 	isAncestor,
 	remoteBranchExists,
 } from "../lib/git";
-import { getBranchPrLifecycleState } from "../lib/github";
+import { getBranchPrLifecycleState, getBranchPrSyncInfo } from "../lib/github";
 import type { DubState } from "../lib/state";
 import { readState, writeState } from "../lib/state";
 import { restack } from "./restack";
@@ -73,6 +74,7 @@ const mockRestack = restack as ReturnType<typeof vi.fn>;
 const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
 	typeof vi.fn
 >;
+const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as ReturnType<typeof vi.fn>;
 
 function makeState(
 	branches: { name: string; parent: string | null; type?: "root" }[],
@@ -118,6 +120,10 @@ beforeEach(() => {
 	mockDeleteBranch.mockResolvedValue(undefined);
 	mockRestack.mockResolvedValue({ status: "up-to-date", rebased: [] });
 	mockGetBranchPrLifecycleState.mockResolvedValue("OPEN");
+	mockGetBranchPrSyncInfo.mockResolvedValue({
+		state: "OPEN",
+		baseRefName: "main",
+	});
 	mockWriteState.mockResolvedValue(undefined);
 });
 
@@ -289,5 +295,31 @@ describe("sync", () => {
 		expect(mockDeleteBranch).toHaveBeenCalledWith("feat/a", "/repo");
 		expect(result.cleaned).toContain("feat/a");
 		expect(result.branches).toHaveLength(0);
+	});
+
+	it("handles parent-mismatch status in non-interactive mode by skipping", async () => {
+		mockReadState.mockResolvedValue(
+			makeState([
+				{ name: "main", parent: null, type: "root" },
+				{ name: "feat/a", parent: "local-parent" },
+			]),
+		);
+		mockGetRefSha
+			.mockResolvedValueOnce("local-sha")
+			.mockResolvedValueOnce("remote-sha");
+		mockIsAncestor.mockResolvedValue(false);
+		mockGetBranchPrSyncInfo.mockResolvedValue({
+			state: "OPEN",
+			baseRefName: "remote-parent",
+		});
+
+		const result = await sync("/repo", {
+			interactive: false,
+			force: false,
+			restack: false,
+		});
+
+		expect(result.branches[0].status).toBe("needs-remote-sync");
+		expect(result.branches[0].action).toBe("skipped");
 	});
 });

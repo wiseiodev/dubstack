@@ -17,6 +17,7 @@ import {
 	createPr,
 	ensureGhInstalled,
 	getBranchPrLifecycleState,
+	getBranchPrSyncInfo,
 	getPr,
 	updatePrBody,
 } from "./github";
@@ -116,6 +117,22 @@ describe("getBranchPrLifecycleState", () => {
 		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
 			"OPEN",
 		);
+	});
+});
+
+describe("getBranchPrSyncInfo", () => {
+	it("returns baseRefName when present", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				state: "OPEN",
+				mergedAt: null,
+				baseRefName: "main",
+			}),
+		});
+		await expect(getBranchPrSyncInfo("feat/a", "/repo")).resolves.toEqual({
+			state: "OPEN",
+			baseRefName: "main",
+		});
 	});
 });
 

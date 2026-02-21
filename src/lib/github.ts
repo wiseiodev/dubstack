@@ -11,6 +11,11 @@ export interface PrInfo {
 
 export type BranchPrLifecycleState = "OPEN" | "CLOSED" | "MERGED" | "NONE";
 
+export interface BranchPrSyncInfo {
+	state: BranchPrLifecycleState;
+	baseRefName: string | null;
+}
+
 /**
  * Ensures the `gh` CLI is installed and available in PATH.
  * @throws {DubError} If `gh` is not found.
@@ -77,6 +82,17 @@ export async function getBranchPrLifecycleState(
 	branch: string,
 	cwd: string,
 ): Promise<BranchPrLifecycleState> {
+	const info = await getBranchPrSyncInfo(branch, cwd);
+	return info.state;
+}
+
+/**
+ * Returns PR lifecycle and base branch information for sync decisions.
+ */
+export async function getBranchPrSyncInfo(
+	branch: string,
+	cwd: string,
+): Promise<BranchPrSyncInfo> {
 	const { stdout } = await execa(
 		"gh",
 		[
@@ -87,7 +103,7 @@ export async function getBranchPrLifecycleState(
 			"--state",
 			"all",
 			"--json",
-			"state,mergedAt",
+			"state,mergedAt,baseRefName",
 			"--jq",
 			".[0]",
 		],
@@ -95,17 +111,35 @@ export async function getBranchPrLifecycleState(
 	);
 
 	const trimmed = stdout.trim();
-	if (!trimmed || trimmed === "null") return "NONE";
+	if (!trimmed || trimmed === "null") {
+		return { state: "NONE", baseRefName: null };
+	}
 
 	try {
 		const parsed = JSON.parse(trimmed) as {
 			state?: string;
 			mergedAt?: string | null;
+			baseRefName?: string | null;
 		};
-		if (parsed.mergedAt) return "MERGED";
-		if (parsed.state === "CLOSED") return "CLOSED";
-		if (parsed.state === "OPEN") return "OPEN";
-		return "NONE";
+		if (parsed.mergedAt) {
+			return {
+				state: "MERGED",
+				baseRefName: parsed.baseRefName ?? null,
+			};
+		}
+		if (parsed.state === "CLOSED") {
+			return {
+				state: "CLOSED",
+				baseRefName: parsed.baseRefName ?? null,
+			};
+		}
+		if (parsed.state === "OPEN") {
+			return {
+				state: "OPEN",
+				baseRefName: parsed.baseRefName ?? null,
+			};
+		}
+		return { state: "NONE", baseRefName: parsed.baseRefName ?? null };
 	} catch {
 		throw new DubError(
 			`Failed to parse PR lifecycle state for branch '${branch}'.`,
