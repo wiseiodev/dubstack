@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
 import {
   appendHistoryEntry,
+  normalizeHistoryLine,
   readHistory,
   redactSensitiveText,
   sanitizeCommandArgs,
@@ -75,5 +76,19 @@ describe('history', () => {
     expect(redacted).not.toContain('abc');
     expect(redacted).not.toContain('super-secret-token');
     expect(redacted).toContain('[REDACTED]');
+  });
+
+  it('normalizes carriage-return spinner lines to the final visible content', () => {
+    expect(normalizeHistoryLine('- thinking\r\\ thinking\rfinal output')).toBe(
+      'final output',
+    );
+  });
+
+  it('returns empty string when normalized content is whitespace only', () => {
+    expect(normalizeHistoryLine('progress\r   \t   ')).toBe('');
+  });
+
+  it('keeps regular lines without carriage returns unchanged', () => {
+    expect(normalizeHistoryLine('plain output line')).toBe('plain output line');
   });
 });

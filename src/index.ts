@@ -55,6 +55,7 @@ import { DubError } from './lib/errors';
 import { getCurrentBranch } from './lib/git';
 import {
   appendHistoryEntry,
+  normalizeHistoryLine,
   redactSensitiveText,
   sanitizeCommandArgs,
 } from './lib/history';
@@ -1241,11 +1242,6 @@ async function finalizeHistoryCapture(
 function truncateHistoryLine(line: string): string {
   if (line.length <= MAX_HISTORY_OUTPUT_LINE_LENGTH) return line;
   return `${line.slice(0, MAX_HISTORY_OUTPUT_LINE_LENGTH)}...`;
-}
-
-function normalizeHistoryLine(line: string): string {
-  const visible = line.split('\r').pop() ?? '';
-  return visible.trim().length === 0 ? '' : visible;
 }
 
 main();

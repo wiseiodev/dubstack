@@ -138,3 +138,8 @@ export function redactSensitiveText(value: string): string {
 
   return redacted;
 }
+
+export function normalizeHistoryLine(line: string): string {
+  const visible = line.split('\r').pop() ?? '';
+  return visible.trim().length === 0 ? '' : visible;
+}
