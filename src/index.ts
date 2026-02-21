@@ -31,14 +31,17 @@ import {
 import { continueCommand } from "./commands/continue";
 import { create } from "./commands/create";
 import { deleteCommand } from "./commands/delete";
+import { children } from "./commands/children";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
 import { bottom, downBySteps, top, upBySteps } from "./commands/navigate";
+import { parent } from "./commands/parent";
 import { pr } from "./commands/pr";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
 import { sync } from "./commands/sync";
 import { track } from "./commands/track";
+import { trunk } from "./commands/trunk";
 import { untrack } from "./commands/untrack";
 import { undo } from "./commands/undo";
 import { DubError } from "./lib/errors";
@@ -363,6 +366,39 @@ Examples:
 			}
 		},
 	);
+
+program
+	.command("parent")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show the direct parent branch")
+	.action(async (branch?: string) => {
+		const result = await parent(process.cwd(), branch);
+		console.log(result.parent);
+	});
+
+program
+	.command("children")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show direct child branches")
+	.action(async (branch?: string) => {
+		const result = await children(process.cwd(), branch);
+		if (result.children.length === 0) {
+			console.log("(none)");
+			return;
+		}
+		for (const child of result.children) {
+			console.log(child);
+		}
+	});
+
+program
+	.command("trunk")
+	.argument("[branch]", "Branch to inspect (defaults to current branch)")
+	.description("Show trunk/root branch for the active stack")
+	.action(async (branch?: string) => {
+		const result = await trunk(process.cwd(), branch);
+		console.log(result.trunk);
+	});
 
 program
 	.command("sync")
