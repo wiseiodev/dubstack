@@ -159,7 +159,7 @@ function validateLinearStack(ordered: Branch[]): void {
 				`Branch '${parent}' has ${count} children. ` +
 					"Branching stacks are not supported by submit. " +
 					"Ensure each branch has at most one child. " +
-					"Use 'dub move' to linearize the stack before submitting.",
+					"Use 'dub track <child> --parent <branch>' to re-parent branches and linearize the stack before submitting.",
 			);
 		}
 	}

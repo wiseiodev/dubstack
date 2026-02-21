@@ -121,7 +121,7 @@ describe("submit", () => {
 		);
 
 		await expect(submit("/repo", false)).rejects.toThrow("Branching stacks");
-		await expect(submit("/repo", false)).rejects.toThrow("dub move");
+		await expect(submit("/repo", false)).rejects.toThrow("dub track");
 	});
 
 	it("dry-run does not call push or gh commands", async () => {
