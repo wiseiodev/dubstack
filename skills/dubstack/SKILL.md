@@ -24,8 +24,15 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Navigate stack | `dub up`, `dub down`, `dub top`, `dub bottom` |
 | Interactive checkout | `dub checkout` / `dub co` |
 | View stack | `dub log` / `dub ls` |
+| View current stack only | `dub log --stack` |
 | Sync with remote | `dub sync` |
 | Rebase stack | `dub restack` |
+| Continue interrupted op | `dub continue` |
+| Abort interrupted op | `dub abort` |
+| Track/re-parent branch | `dub track [branch] --parent <branch>` |
+| Untrack metadata only | `dub untrack [branch] [--downstack]` |
+| Stack-aware delete | `dub delete [branch] [--upstack|--downstack]` |
+| Show parent/children/trunk | `dub parent`, `dub children`, `dub trunk` |
 | Submit PR stack | `dub submit` / `dub ss` |
 | Open PR in browser | `dub pr [branch|number]` |
 | Undo last create/restack | `dub undo` |
@@ -95,6 +102,8 @@ dub sync --no-restack
 ```bash
 dub restack
 dub restack --continue
+dub continue
+dub abort
 ```
 
 ```bash
@@ -106,6 +115,29 @@ dub submit --dry-run
 dub pr
 dub pr feat/a
 dub pr 123
+```
+
+### Track, Untrack, Delete
+
+```bash
+dub track
+dub track feat/a --parent main
+
+dub untrack feat/a
+dub untrack feat/a --downstack
+
+dub delete feat/a
+dub delete feat/a --upstack
+dub delete feat/a --downstack
+dub delete feat/a --force --quiet
+```
+
+### Orientation
+
+```bash
+dub parent
+dub children
+dub trunk
 ```
 
 ## Recommended Workflow
@@ -135,8 +167,18 @@ dub undo
 
 ### Branch not tracked
 
-- Ensure branch was created with `dub create`.
-- Or checkout a tracked branch and continue from there.
+- Track branch explicitly:
+
+```bash
+dub track <branch> --parent <parent>
+```
+
+- Verify placement:
+
+```bash
+dub parent <branch>
+dub trunk <branch>
+```
 
 ## Common Errors
 

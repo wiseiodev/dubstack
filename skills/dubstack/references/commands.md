@@ -30,6 +30,9 @@ This is a concise command reference for agents using `dub`.
 | Command | Purpose |
 |---|---|
 | `dub log` / `dub ls` / `dub l` | Show stack tree |
+| `dub log --stack` | Show only current stack |
+| `dub log --all` | Show all stacks explicitly |
+| `dub log --reverse` | Reverse stack and child ordering |
 | `dub checkout` / `dub co` | Interactive checkout |
 | `dub checkout <branch>` | Direct checkout |
 | `dub checkout --trunk` | Checkout stack trunk |
@@ -41,6 +44,21 @@ This is a concise command reference for agents using `dub`.
 | `dub bottom` | Jump to first branch above root |
 | `dub info [branch]` | Show tracked metadata for branch |
 | `dub branch info [branch]` | Equivalent branch metadata command |
+| `dub parent [branch]` | Show direct parent branch |
+| `dub children [branch]` | Show direct child branches |
+| `dub trunk [branch]` | Show stack trunk/root branch |
+
+## Tracking and Repair
+
+| Command | Purpose |
+|---|---|
+| `dub track [branch] --parent <branch>` | Track branch or re-parent tracked branch |
+| `dub untrack [branch]` | Remove branch metadata only |
+| `dub untrack [branch] --downstack` | Remove branch and descendants from metadata |
+| `dub delete [branch]` | Delete one branch with confirmation |
+| `dub delete [branch] --upstack` | Delete branch and descendants |
+| `dub delete [branch] --downstack` | Delete branch and ancestors |
+| `dub delete [branch] --force --quiet` | Non-interactive destructive delete |
 
 ## Sync and Rebase
 
@@ -53,6 +71,8 @@ This is a concise command reference for agents using `dub`.
 | `dub sync --no-restack` | Skip restack after sync |
 | `dub restack` | Rebase branches onto updated parents |
 | `dub restack --continue` | Continue after conflict resolution |
+| `dub continue` | Continue active restack or git rebase |
+| `dub abort` | Abort active restack or git rebase |
 
 ## Submit and PR
 

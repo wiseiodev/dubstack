@@ -63,6 +63,14 @@ git add <resolved-files>
 dub restack --continue
 ```
 
+If you are already mid-operation, use the unified recovery commands:
+
+```bash
+dub continue
+# or
+dub abort
+```
+
 ## 5) Open PR Quickly
 
 ```bash
@@ -83,7 +91,44 @@ Notes:
 - `undo` supports one level.
 - Intended for reverting last `create` or `restack`.
 
-## 7) Stack Navigation Patterns
+## 7) Repair Untracked Branch Metadata
+
+```bash
+# branch created outside dub create
+git checkout feat/manual
+
+dub track feat/manual --parent main
+
+# verify placement
+dub parent feat/manual
+dub trunk feat/manual
+```
+
+## 8) Remove Metadata or Delete Branches Safely
+
+```bash
+# metadata-only removal
+dub untrack feat/top
+
+# remove branch + descendants from metadata
+dub untrack feat/middle --downstack
+
+# delete branch with confirmation
+dub delete feat/top
+
+# delete branch and descendants non-interactively
+dub delete feat/middle --upstack --force --quiet
+```
+
+## 9) Stack Inspection Modes
+
+```bash
+dub log --stack
+dub log --all
+dub log --reverse
+```
+
+## 10) Stack Navigation Patterns
 
 ```bash
 dub up
@@ -94,7 +139,7 @@ dub top
 dub bottom
 ```
 
-## 8) Checkout Patterns
+## 11) Checkout Patterns
 
 ```bash
 # interactive

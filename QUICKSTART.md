@@ -130,7 +130,42 @@ git add <resolved-files>
 dub restack --continue
 ```
 
-## 8) Undo Last Stack Mutation
+Unified recovery commands:
+
+```bash
+dub continue   # continue active restack/rebase
+dub abort      # abort active restack/rebase
+```
+
+## 8) Repair Tracking Metadata
+
+If you created branches outside `dub create`:
+
+```bash
+# track current branch
+dub track --parent main
+
+# inspect placement
+dub parent
+dub children
+dub trunk
+```
+
+Stop tracking without deleting local git branches:
+
+```bash
+dub untrack feat/auth-tests
+dub untrack feat/auth-login --downstack
+```
+
+Delete branches with stack-aware expansion:
+
+```bash
+dub delete feat/auth-login
+dub delete feat/auth-login --upstack --force --quiet
+```
+
+## 9) Undo Last Stack Mutation
 
 ```bash
 dub undo
@@ -150,6 +185,10 @@ dub undo
 | `dub pr` | Open PR in browser |
 | `dub sync` | Sync local state with remote |
 | `dub restack` | Rebase stack onto updated parents |
+| `dub track` | Track/re-parent branch metadata |
+| `dub untrack` | Remove branch metadata only |
+| `dub delete` | Stack-aware branch deletion |
+| `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
 
 ## Next Step
