@@ -428,7 +428,10 @@ program
   .command('sync')
   .description('Sync tracked branches with remote and reconcile divergence')
   .option('--restack', 'Restack branches after sync')
-  .option('-f, --force', 'Skip prompts for destructive sync decisions')
+  .option(
+    '-f, --force',
+    'Skip prompts for branch reset/reconcile sync decisions',
+  )
   .option('-a, --all', 'Sync all tracked stacks across trunks')
   .option('--no-interactive', 'Disable prompts and use deterministic behavior')
   .action(
@@ -634,7 +637,7 @@ program
     '--method <method>',
     'Merge strategy: merge|squash|rebase',
     parseMergeMethod,
-    'merge',
+    'squash',
   )
   .option(
     '--restack',
@@ -660,6 +663,13 @@ program
             `✔ Dry-run: would merge '${result.mergedBranch}' (PR #${result.prNumber}).`,
           ),
         );
+        if (result.preMergeRetargeted.length > 0) {
+          console.log(
+            chalk.dim(
+              `  pre-merge retarget: ${result.preMergeRetargeted.join(', ')}`,
+            ),
+          );
+        }
         return;
       }
       console.log(
@@ -667,6 +677,13 @@ program
           `✔ Merged '${result.mergedBranch}' (PR #${result.prNumber}) and ran post-merge maintenance.`,
         ),
       );
+      if (result.preMergeRetargeted.length > 0) {
+        console.log(
+          chalk.dim(
+            `  pre-merge retargeted: ${result.preMergeRetargeted.join(', ')}`,
+          ),
+        );
+      }
     },
   );
 

@@ -156,6 +156,7 @@ dub abort      # abort active restack/rebase
 dub merge-check --pr 123
 
 # safest merge flow (bottom-up + maintenance)
+# merge-next pre-retargets direct child PRs before deleting merged branches
 dub merge-next
 dub merge-next
 ```

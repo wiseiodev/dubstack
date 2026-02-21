@@ -410,7 +410,7 @@ dub sync --restack
 Current sync behavior includes:
 - fetch tracked refs from `origin`
 - attempt trunk fast-forward (or overwrite with `--force`)
-- cleanup for merged/closed PR branches whose commits are confirmed in trunk
+- auto-clean local branches for merged PRs (and closed PRs confirmed in trunk)
 - reconcile local/remote divergence states per branch
 - optional restack when `--restack` is set
 
@@ -471,7 +471,8 @@ dub merge-check --pr 123
 
 ### `dub merge-next` / `dub land`
 
-Merge the next safe PR in your current stack path, then run post-merge maintenance.
+Merge the next safe PR in your current stack path, pre-retarget direct child PRs
+to the parent base, then run post-merge maintenance.
 
 ```bash
 dub merge-next
