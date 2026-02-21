@@ -7,7 +7,7 @@ Guidance for AI coding agents working in this repository.
 - Project: `dubstack`
 - Type: TypeScript CLI (ESM) for stacked git branch workflows
 - Main entrypoint: `src/index.ts`
-- Core commands: `create`, `restack`, `submit`/`ss`, `undo`, `co`, `modify`, `skills`
+- Core commands: `create`, `restack`, `submit`/`ss`, `merge-next`/`land`, `post-merge`, `undo`, `co`, `modify`, `skills`
 - State storage: `.git/dubstack/*` inside the target git repository
 
 ## 2) Environment And Tooling

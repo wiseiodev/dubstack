@@ -3,6 +3,7 @@ import {
 	buildMetadataBlock,
 	buildStackTable,
 	composePrBody,
+	parseDubstackMetadata,
 	stripDubstackSections,
 } from "./pr-body";
 import type { Branch } from "./state";
@@ -129,5 +130,32 @@ describe("composePrBody", () => {
 		const result = composePrBody("", "TABLE", "META");
 
 		expect(result).toBe("TABLE\n\nMETA");
+	});
+});
+
+describe("parseDubstackMetadata", () => {
+	it("parses metadata block from a composed PR body", () => {
+		const body = composePrBody(
+			"My description",
+			"STACK",
+			buildMetadataBlock("stack-1", 12, 11, 13, "feat/a"),
+		);
+
+		expect(parseDubstackMetadata(body)).toEqual({
+			stack_id: "stack-1",
+			pr_number: 12,
+			prev_pr: 11,
+			next_pr: 13,
+			branch: "feat/a",
+		});
+	});
+
+	it("returns null when metadata block is missing", () => {
+		expect(parseDubstackMetadata("no metadata here")).toBeNull();
+	});
+
+	it("returns null when metadata JSON is invalid", () => {
+		const broken = "text\n<!-- dubstack-metadata\n{ nope }\n-->";
+		expect(parseDubstackMetadata(broken)).toBeNull();
 	});
 });
