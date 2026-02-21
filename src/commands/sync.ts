@@ -12,10 +12,16 @@ import {
 	getRefSha,
 	hardResetBranchToRef,
 	isAncestor,
+	rebaseBranchOntoRef,
 	remoteBranchExists,
 } from "../lib/git";
 import { getBranchPrLifecycleState } from "../lib/github";
-import { findStackForBranch, readState } from "../lib/state";
+import {
+	type Branch,
+	findStackForBranch,
+	readState,
+	writeState,
+} from "../lib/state";
 import { classifyBranchSyncStatus } from "../lib/sync/branch-status";
 import { buildCleanupPlan } from "../lib/sync/cleanup";
 import { resolveReconcileDecision } from "../lib/sync/reconcile";
@@ -93,6 +99,9 @@ export async function sync(
 				}
 				return [stack];
 			})();
+	const stateBranchMap = new Map<string, Branch>(
+		scopeStacks.flatMap((stack) => stack.branches.map((b) => [b.name, b])),
+	);
 
 	const roots = Array.from(
 		new Set(
@@ -215,6 +224,8 @@ export async function sync(
 			remoteSha,
 			localBehind,
 			remoteBehind,
+			hasSubmittedBaseline:
+				stateBranchMap.get(branch)?.last_submitted_version != null,
 		});
 
 		if (status === "missing-remote") {
@@ -251,6 +262,26 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
+			markBranchSynced(stateBranchMap, branch, localSha ?? remoteSha ?? null, {
+				source: "sync",
+				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			});
+			continue;
+		}
+
+		if (status === "updated-outside-dubstack-but-up-to-date") {
+			outcome = {
+				branch,
+				status,
+				action: "none",
+				message: `• '${branch}' is up to date but was previously unmanaged by DubStack sync metadata.`,
+			};
+			result.branches.push(outcome);
+			printBranchOutcome(outcome);
+			markBranchSynced(stateBranchMap, branch, localSha ?? remoteSha ?? null, {
+				source: "imported",
+				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			});
 			continue;
 		}
 
@@ -264,6 +295,10 @@ export async function sync(
 			};
 			result.branches.push(outcome);
 			printBranchOutcome(outcome);
+			markBranchSynced(stateBranchMap, branch, remoteSha, {
+				source: "sync",
+				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			});
 			continue;
 		}
 
@@ -309,6 +344,10 @@ export async function sync(
 				action: "synced",
 				message: `✔ Synced '${branch}' to remote version.`,
 			};
+			markBranchSynced(stateBranchMap, branch, remoteSha, {
+				source: "sync",
+				baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+			});
 		} else if (decision === "keep-local") {
 			outcome = {
 				branch,
@@ -317,12 +356,22 @@ export async function sync(
 				message: `• Kept local '${branch}' (remote divergence ignored).`,
 			};
 		} else if (decision === "reconcile") {
+			const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
 			outcome = {
 				branch,
 				status: "reconcile-needed",
-				action: "kept-local",
-				message: `• Kept local '${branch}' and marked for manual reconciliation.`,
+				action: reconciled ? "synced" : "kept-local",
+				message: reconciled
+					? `✔ Reconciled '${branch}' by rebasing local commits onto remote.`
+					: `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
 			};
+			if (reconciled) {
+				const newSha = await getRefSha(branch, cwd);
+				markBranchSynced(stateBranchMap, branch, newSha, {
+					source: "sync",
+					baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+				});
+			}
 		} else {
 			outcome = {
 				branch,
@@ -347,7 +396,28 @@ export async function sync(
 		result.restacked = true;
 	}
 
+	await writeState(state, cwd);
 	await checkoutBranch(originalBranch, cwd);
 	printSyncSummary(result);
 	return result;
+}
+
+function markBranchSynced(
+	branchMap: Map<string, Branch>,
+	branchName: string,
+	headSha: string | null,
+	options: { source: "sync" | "imported"; baseBranch: string | null },
+) {
+	if (!headSha) return;
+	const entry = branchMap.get(branchName);
+	if (!entry) return;
+	entry.last_submitted_version = {
+		head_sha: headSha,
+		base_sha: entry.last_submitted_version?.base_sha ?? "",
+		base_branch: options.baseBranch ?? "",
+		version_number: entry.last_submitted_version?.version_number ?? null,
+		source: options.source,
+	};
+	entry.last_synced_at = new Date().toISOString();
+	entry.sync_source = options.source;
 }

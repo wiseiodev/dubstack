@@ -19,6 +19,7 @@ vi.mock("../lib/state.js", async (importOriginal) => {
 	return {
 		...actual,
 		readState: vi.fn(),
+		writeState: vi.fn(),
 	};
 });
 
@@ -45,7 +46,7 @@ import {
 } from "../lib/git";
 import { getBranchPrLifecycleState } from "../lib/github";
 import type { DubState } from "../lib/state";
-import { readState } from "../lib/state";
+import { readState, writeState } from "../lib/state";
 import { restack } from "./restack";
 import { sync } from "./sync";
 
@@ -67,6 +68,7 @@ const mockHardResetBranchToRef = hardResetBranchToRef as ReturnType<
 const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
+const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockRestack = restack as ReturnType<typeof vi.fn>;
 const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
 	typeof vi.fn
@@ -83,6 +85,18 @@ function makeState(
 					...b,
 					pr_number: null,
 					pr_link: null,
+					last_submitted_version:
+						b.type === "root"
+							? null
+							: {
+									head_sha: `${b.name}-sha`,
+									base_sha: `${b.parent ?? "main"}-sha`,
+									base_branch: b.parent ?? "main",
+									version_number: null,
+									source: "submit",
+								},
+					last_synced_at: null,
+					sync_source: b.type === "root" ? null : "submit",
 				})),
 			},
 		],
@@ -104,6 +118,7 @@ beforeEach(() => {
 	mockDeleteBranch.mockResolvedValue(undefined);
 	mockRestack.mockResolvedValue({ status: "up-to-date", rebased: [] });
 	mockGetBranchPrLifecycleState.mockResolvedValue("OPEN");
+	mockWriteState.mockResolvedValue(undefined);
 });
 
 describe("sync", () => {
@@ -215,6 +230,43 @@ describe("sync", () => {
 			"feat/a",
 			"origin/feat/a",
 			"/repo",
+		);
+	});
+
+	it("classifies equal unmanaged branch as updated outside dubstack", async () => {
+		mockReadState.mockResolvedValue({
+			stacks: [
+				{
+					id: "stack-1",
+					branches: [
+						{
+							name: "main",
+							parent: null,
+							type: "root",
+							pr_number: null,
+							pr_link: null,
+							last_submitted_version: null,
+							last_synced_at: null,
+							sync_source: null,
+						},
+						{
+							name: "feat/a",
+							parent: "main",
+							pr_number: null,
+							pr_link: null,
+							last_submitted_version: null,
+							last_synced_at: null,
+							sync_source: null,
+						},
+					],
+				},
+			],
+		});
+		mockGetRefSha.mockResolvedValue("same-sha");
+
+		const result = await sync("/repo", { interactive: false, restack: false });
+		expect(result.branches[0].status).toBe(
+			"updated-outside-dubstack-but-up-to-date",
 		);
 	});
 });

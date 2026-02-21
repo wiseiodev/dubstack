@@ -563,3 +563,29 @@ export async function fastForwardBranchToRef(
 		return false;
 	}
 }
+
+/**
+ * Rebases a branch onto a target ref.
+ * Returns false if conflicts occur.
+ */
+export async function rebaseBranchOntoRef(
+	branch: string,
+	ref: string,
+	cwd: string,
+): Promise<boolean> {
+	try {
+		const current = await getCurrentBranch(cwd).catch(() => null);
+		if (current !== branch) {
+			await checkoutBranch(branch, cwd);
+		}
+		await execa("git", ["rebase", ref], { cwd });
+		return true;
+	} catch {
+		try {
+			await execa("git", ["rebase", "--abort"], { cwd });
+		} catch {
+			// no-op
+		}
+		return false;
+	}
+}
