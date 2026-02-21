@@ -242,4 +242,40 @@ describe('create with --ai', () => {
       ),
     ).rejects.toThrow("Enable it with 'dub config ai-assistant on'.");
   });
+
+  it('redacts sensitive staged diff content before sending prompt to AI', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+
+    fs.writeFileSync(
+      path.join(dir, 'secrets.ts'),
+      'export const token = "sk-supersecret123456";\nexport const key = "AIzaSecretToken1234567890";\n',
+    );
+    await gitInRepo(dir, ['add', 'secrets.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/redacted-prompt","message":"feat: redact ai prompt diff"}',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    const call = vi.mocked(generateText).mock.calls[0]?.[0];
+    expect(call).toBeDefined();
+    const prompt = String(call?.prompt ?? '');
+    expect(prompt).toContain('[REDACTED]');
+    expect(prompt).not.toContain('sk-supersecret123456');
+    expect(prompt).not.toContain('AIzaSecretToken1234567890');
+  });
 });

@@ -15,6 +15,7 @@ import {
   stageAll,
   stageUpdate,
 } from '../lib/git';
+import { redactSensitiveText } from '../lib/history';
 import { addBranchToStack, ensureState, writeState } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
 
@@ -188,7 +189,8 @@ async function generateBranchAndCommitFromAi(
   deps: CreateDependencies,
 ): Promise<{ branch: string; message: string }> {
   const resolved = resolveModel(deps);
-  const diffForPrompt = truncate(stagedDiff.trim(), 12_000);
+  const redactedDiff = redactSensitiveText(stagedDiff).trim();
+  const diffForPrompt = truncate(redactedDiff, 12_000);
   const prompt = [
     'Generate a git branch name and conventional commit message from the staged diff.',
     'Return JSON only, exactly like: {"branch":"feat/your-branch","message":"feat: summary"}',
