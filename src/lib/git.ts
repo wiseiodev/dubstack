@@ -209,6 +209,17 @@ export async function rebaseContinue(cwd: string): Promise<void> {
 }
 
 /**
+ * Aborts an in-progress rebase operation.
+ */
+export async function rebaseAbort(cwd: string): Promise<void> {
+	try {
+		await execa("git", ["rebase", "--abort"], { cwd });
+	} catch {
+		throw new DubError("Failed to abort rebase.");
+	}
+}
+
+/**
  * Returns the merge-base (common ancestor) commit SHA of two branches.
  */
 export async function getMergeBase(

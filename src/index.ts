@@ -22,11 +22,13 @@ import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
 import { branchInfo, formatBranchInfo } from "./commands/branch";
+import { abortCommand } from "./commands/abort";
 import {
 	checkout,
 	interactiveCheckout,
 	resolveCheckoutTrunk,
 } from "./commands/checkout";
+import { continueCommand } from "./commands/continue";
 import { create } from "./commands/create";
 import { deleteCommand } from "./commands/delete";
 import { init } from "./commands/init";
@@ -419,6 +421,47 @@ Examples:
 				console.log(chalk.dim(`  ↳ ${branch}`));
 			}
 		}
+	});
+
+program
+	.command("continue")
+	.description("Continue the active restack or git rebase operation")
+	.action(async () => {
+		const result = await continueCommand(process.cwd());
+		if (result.continued === "rebase") {
+			console.log(chalk.green("✔ Continued git rebase."));
+			return;
+		}
+		if (result.restackResult?.status === "conflict") {
+			console.log(
+				chalk.yellow(
+					`⚠ Conflict while restacking '${result.restackResult.conflictBranch}'`,
+				),
+			);
+			console.log(
+				chalk.dim(
+					"  Resolve conflicts, stage changes, then run: dub continue",
+				),
+			);
+			return;
+		}
+		if (result.restackResult?.status === "up-to-date") {
+			console.log(chalk.green("✔ Stack is already up to date."));
+			return;
+		}
+		console.log(chalk.green("✔ Continued restack."));
+	});
+
+program
+	.command("abort")
+	.description("Abort the active restack or git rebase operation")
+	.action(async () => {
+		const result = await abortCommand(process.cwd());
+		if (result.aborted === "restack") {
+			console.log(chalk.green("✔ Aborted restack and cleared progress."));
+			return;
+		}
+		console.log(chalk.green("✔ Aborted git rebase."));
 	});
 
 program
