@@ -1,68 +1,195 @@
 ---
 name: dubstack
-description: DubStack CLI reference. Use for managing stacked changes (git branches). Covers creating stacks, navigating, submitting PRs, rebasing (restacking), and undoing mistakes.
+description: Use when managing stacked branch workflows with DubStack, including create/modify, navigation, sync/restack, submit, PR opening, and recovery.
 ---
 
-# DubStack CLI
+# DubStack CLI Skill
 
-## Key Concepts
+Use this skill whenever the user is working in a repo that uses `dub` for stacked diffs.
 
-- **Stack**: Chain of dependent branches (e.g., `main` -> `feat/a` -> `feat/b`)
-- **Root**: The base branch (usually `main`)
-- **Restacking**: Rebasing branches onto their updated parents (e.g., after parent changes)
-- **Submit**: Pushing branches and creating/updating GitHub PRs for the entire stack
+## Core Concepts
 
-## Prerequisites
+- **Stack**: A chain of dependent branches (`main -> feat/a -> feat/b`)
+- **Root**: Trunk branch for a stack (commonly `main`)
+- **Restack**: Rebase branches so each child is based on its updated parent
+- **Submit**: Push stack branches and create/update PRs
 
-1. **Install**: `npm install -g dubstack` or `brew install wiseiodev/dubstack/dubstack`
-2. **Auth**: Ensure `gh auth login` is done (DubStack uses `gh` CLI for PRs)
-3. **Init**: Auto-initialized on first `dub create` (or run `dub init`)
+## Fast Command Map
 
-## Quick Decision Trees
+| Intent | Command |
+|---|---|
+| Create branch | `dub create <name>` |
+| Create + commit | `dub create <name> -am "msg"` |
+| Modify current branch | `dub modify` / `dub m` |
+| Navigate stack | `dub up`, `dub down`, `dub top`, `dub bottom` |
+| Interactive checkout | `dub checkout` / `dub co` |
+| View stack | `dub log` / `dub ls` |
+| View current stack only | `dub log --stack` |
+| Sync with remote | `dub sync` |
+| Rebase stack | `dub restack` |
+| Continue interrupted op | `dub continue` |
+| Abort interrupted op | `dub abort` |
+| Track/re-parent branch | `dub track [branch] --parent <branch>` |
+| Untrack metadata only | `dub untrack [branch] [--downstack]` |
+| Stack-aware delete | `dub delete [branch] [--upstack|--downstack]` |
+| Show parent/children/trunk | `dub parent`, `dub children`, `dub trunk` |
+| Submit PR stack | `dub submit` / `dub ss` |
+| Open PR in browser | `dub pr [branch|number]` |
+| Undo last create/restack | `dub undo` |
 
-### "I need to start a new feature or stack"
-- **Create branch & commit:** `dub create <name> -am "<msg>"`
-- **Create branch only:** `dub create <name>` (then git add/commit manually)
+## Command Notes
 
-### "I need to visualize my work"
-- **See stack tree:** `dub log`
-- **Switch branches (interactive):** `dub checkout` (or `dub co`)
-- **Switch branch directly:** `dub checkout <name>`
+### Create
 
-### "I need to update code"
-- **Modify current branch:** standard git workflow (`git add`, `git commit`)
-- **Update parent branch:** `dub co <parent>`, modify, commit
-- **Propagate parent changes to children:** `dub restack`
+```bash
+dub create feat/x
+dub create feat/x -m "feat: ..."
+dub create feat/x -am "feat: ..."
+dub create feat/x -um "feat: ..."
+dub create feat/x -pm "feat: ..."
+```
 
-### "I need to submit my work"
-- **Submit entire stack:** `dub ss` (sets up PRs for all branches in stack)
-- **Preview submission:** `dub ss --dry-run`
+- `-a`: stage all
+- `-u`: stage tracked-file updates
+- `-p`: interactive hunk staging
+- staging flags require `-m`
 
-### "I made a mistake"
-- **Undo last DubStack action:** `dub undo` (reverses create/restack)
+### Modify
 
-## Command Reference
+```bash
+dub m
+dub m -c -m "fix: ..."
+dub m -p
+dub m -u
+dub m -v
+dub m -vv
+dub m --interactive-rebase
+```
 
-| Command | Description |
-|---------|-------------|
-| `dub create <name> -am "msg"` | Create branch, stage all, commit (like `gt create`) |
-| `dub log` | Show ASCII tree of current stack |
-| `dub checkout` | Interactive branch picker (alias `dub co`) |
-| `dub ss` | Push branches & create/update PRs (alias for `dub submit`) |
-| `dub restack` | Rebase all branches in stack onto their parents |
-| `dub undo` | Undo last `create` or `restack` operation |
-| `dub init` | Manually initialize DubStack (optional) |
+- Restacks descendants after modification.
+- `-m` can be passed multiple times.
+- `-v` prints staged diff, `-vv` also prints unstaged diff.
 
-## Troubleshooting
+### Checkout and Navigation
 
-| Problem | Solution |
-|---------|----------|
-| "Not authenticated" | Run `gh auth login` |
-| "Branch name exists" | Choose different name |
-| "Conflict during restack" | Resolve files, `git add`, `git rebase --continue` |
-| "Need to sync with main" | `git checkout main && git pull`, then `dub restack` |
-| "Accidentally modified wrong branch" | `dub undo` if created via dub, or standard git undo |
+```bash
+dub co
+# or
+dub checkout --stack
+dub checkout --show-untracked
+dub checkout --trunk
+```
 
-## Full Documentation
+```bash
+dub up
+dub up 2
+dub down
+dub down --steps 2
+dub top
+dub bottom
+```
 
-See `QUICKSTART.md` in the repo root for a complete walkthrough.
+### Sync, Restack, Submit, PR
+
+```bash
+dub sync
+dub sync --all
+dub sync --no-interactive
+dub sync --force
+dub sync --no-restack
+```
+
+```bash
+dub restack
+dub restack --continue
+dub continue
+dub abort
+```
+
+```bash
+dub ss
+dub submit --dry-run
+```
+
+```bash
+dub pr
+dub pr feat/a
+dub pr 123
+```
+
+### Track, Untrack, Delete
+
+```bash
+dub track
+dub track feat/a --parent main
+
+dub untrack feat/a
+dub untrack feat/a --downstack
+
+dub delete feat/a
+dub delete feat/a --upstack
+dub delete feat/a --downstack
+dub delete feat/a --force --quiet
+```
+
+### Orientation
+
+```bash
+dub parent
+dub children
+dub trunk
+```
+
+## Recommended Workflow
+
+1. Start from trunk: `git checkout main && git pull`
+2. Create layers with `dub create ... -am ...`
+3. Inspect stack with `dub log`
+4. Submit with `dub ss`
+5. Iterate with `dub m ...` and `dub ss`
+6. Keep updated with `dub sync` (or `dub restack` when needed)
+
+## Recovery Patterns
+
+### Restack conflict
+
+```bash
+# after conflict
+git add <resolved-files>
+dub restack --continue
+```
+
+### Undo mistaken create/restack
+
+```bash
+dub undo
+```
+
+### Branch not tracked
+
+- Track branch explicitly:
+
+```bash
+dub track <branch> --parent <parent>
+```
+
+- Verify placement:
+
+```bash
+dub parent <branch>
+dub trunk <branch>
+```
+
+## Common Errors
+
+| Symptom | Action |
+|---|---|
+| `gh CLI not found` | Install `gh` |
+| `Not authenticated with GitHub` | `gh auth login` |
+| branch missing from stack | Use `dub create` from tracked context |
+| sync skips branches | rerun with interactive mode or `--force` if appropriate |
+
+## References
+
+- [Command Reference](./references/commands.md)
+- [Workflow Reference](./references/workflows.md)
