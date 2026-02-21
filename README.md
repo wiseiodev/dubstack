@@ -535,6 +535,75 @@ dub skills add --dry-run
 dub skills remove --dry-run
 ```
 
+### `dub config ai-assistant [on|off]`
+
+Enable or disable the repo-local AI assistant flag.
+
+```bash
+# check current value
+dub config ai-assistant
+
+# enable for this repository
+dub config ai-assistant on
+
+# disable for this repository
+dub config ai-assistant off
+```
+
+### `dub ai ask <prompt...>`
+
+Ask DubStack's AI assistant using streaming output (`streamText`).
+
+```bash
+dub ai ask "Summarize what this stack is changing"
+```
+
+`dub ai ask` automatically includes a context packet (current branch/stack signals, git status, doctor summary, and recent Dub command history) so it can give better recovery guidance.
+
+Provider/key selection:
+- If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access (`gemini-3-flash`).
+- Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway (`google/gemini-3-flash`).
+- If both are set, DubStack prefers `DUBSTACK_GEMINI_API_KEY`.
+
+Thinking is enabled by default for Gemini 3 Flash.
+
+### `dub ai env`
+
+Write DubStack AI keys into your shell profile (macOS/Linux shells).
+
+```bash
+# write Gemini key
+dub ai env --gemini-key "<your-key>"
+
+# write Gateway key
+dub ai env --gateway-key "<your-key>"
+
+# write both
+dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>"
+
+# target a specific profile file explicitly
+dub ai env --gemini-key "<your-key>" --profile ~/.zshrc
+```
+
+Supported automatic profile detection:
+- `zsh` → `~/.zshrc`
+- `bash` → `~/.bashrc` (or `~/.bash_profile` fallback)
+
+### `dub history`
+
+Inspect recent Dub command history used for troubleshooting context.
+
+```bash
+# show last 20 entries
+dub history
+
+# show more
+dub history --limit 50
+
+# machine-readable output
+dub history --json
+```
+
 ## Typical Workflows
 
 ### Add review feedback to a middle branch
