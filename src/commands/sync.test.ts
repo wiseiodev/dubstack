@@ -340,6 +340,42 @@ describe('sync', () => {
     ).toBeUndefined();
   });
 
+  it('warns when auto-cleaning a merged branch with dependent children', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
+      branch === 'feat/a' ? 'MERGED' : 'OPEN',
+    );
+    const logSpy = vi.spyOn(console, 'log');
+
+    try {
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(result.cleaned).toEqual(['feat/a']);
+      expect(mockDeleteBranch).toHaveBeenCalledWith('feat/a', '/repo');
+      const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(
+        writtenState.stacks[0].branches.find((b) => b.name === 'feat/b')
+          ?.parent,
+      ).toBe('main');
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Auto-clean deleting 'feat/a' (merged-pr) with dependent branch(es): feat/b",
+        ),
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('handles parent-mismatch status in non-interactive mode by skipping', async () => {
     mockReadState.mockResolvedValue(
       makeState([

@@ -410,7 +410,7 @@ dub sync --restack
 Current sync behavior includes:
 - fetch tracked refs from `origin`
 - attempt trunk fast-forward (or overwrite with `--force`)
-- cleanup for merged/closed PR branches whose commits are confirmed in trunk
+- auto-clean local branches for merged PRs (and closed PRs confirmed in trunk)
 - reconcile local/remote divergence states per branch
 - optional restack when `--restack` is set
 

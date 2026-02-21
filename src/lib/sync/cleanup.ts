@@ -1,7 +1,10 @@
 import type { BranchPrLifecycleState } from '../github';
 
 export interface CleanupPlan {
-  toDelete: string[];
+  toDelete: Array<{
+    branch: string;
+    reason: 'merged-pr' | 'closed-pr-merged-into-trunk';
+  }>;
   skipped: Array<{ branch: string; reason: string }>;
 }
 
@@ -10,7 +13,10 @@ export async function buildCleanupPlan(input: {
   getPrStatus: (branch: string) => Promise<BranchPrLifecycleState>;
   isMergedIntoAnyRoot: (branch: string) => Promise<boolean>;
 }): Promise<CleanupPlan> {
-  const toDelete: string[] = [];
+  const toDelete: Array<{
+    branch: string;
+    reason: 'merged-pr' | 'closed-pr-merged-into-trunk';
+  }> = [];
   const skipped: Array<{ branch: string; reason: string }> = [];
 
   for (const branch of input.branches) {
@@ -18,7 +24,7 @@ export async function buildCleanupPlan(input: {
     if (prState === 'MERGED') {
       // Squash/rebase merge strategies may not preserve branch commit ancestry,
       // but a merged PR still means the change is integrated and branch is cleanable.
-      toDelete.push(branch);
+      toDelete.push({ branch, reason: 'merged-pr' });
       continue;
     }
     if (prState !== 'CLOSED') {
@@ -31,7 +37,7 @@ export async function buildCleanupPlan(input: {
       continue;
     }
 
-    toDelete.push(branch);
+    toDelete.push({ branch, reason: 'closed-pr-merged-into-trunk' });
   }
 
   return { toDelete, skipped };

@@ -428,7 +428,10 @@ program
   .command('sync')
   .description('Sync tracked branches with remote and reconcile divergence')
   .option('--restack', 'Restack branches after sync')
-  .option('-f, --force', 'Skip prompts for destructive sync decisions')
+  .option(
+    '-f, --force',
+    'Skip prompts for branch reset/reconcile sync decisions',
+  )
   .option('-a, --all', 'Sync all tracked stacks across trunks')
   .option('--no-interactive', 'Disable prompts and use deterministic behavior')
   .action(

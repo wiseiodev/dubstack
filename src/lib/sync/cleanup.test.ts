@@ -9,7 +9,9 @@ describe('buildCleanupPlan', () => {
       isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
     });
 
-    expect(result.toDelete).toEqual(['feat/a']);
+    expect(result.toDelete).toEqual([
+      { branch: 'feat/a', reason: 'merged-pr' },
+    ]);
     expect(result.skipped).toEqual([]);
   });
 
@@ -38,5 +40,32 @@ describe('buildCleanupPlan', () => {
 
     expect(result.toDelete).toEqual([]);
     expect(result.skipped).toEqual([]);
+  });
+
+  it('handles mixed lifecycle states across multiple branches', async () => {
+    const statuses = new Map<string, 'OPEN' | 'CLOSED' | 'MERGED'>([
+      ['feat/a', 'MERGED'],
+      ['feat/b', 'CLOSED'],
+      ['feat/c', 'OPEN'],
+      ['feat/d', 'CLOSED'],
+    ]);
+    const mergedIntoRoot = new Set<string>(['feat/b']);
+    const result = await buildCleanupPlan({
+      branches: ['feat/a', 'feat/b', 'feat/c', 'feat/d'],
+      getPrStatus: vi.fn((branch: string) =>
+        Promise.resolve(statuses.get(branch) ?? 'OPEN'),
+      ),
+      isMergedIntoAnyRoot: vi.fn((branch: string) =>
+        Promise.resolve(mergedIntoRoot.has(branch)),
+      ),
+    });
+
+    expect(result.toDelete).toEqual([
+      { branch: 'feat/a', reason: 'merged-pr' },
+      { branch: 'feat/b', reason: 'closed-pr-merged-into-trunk' },
+    ]);
+    expect(result.skipped).toEqual([
+      { branch: 'feat/d', reason: 'commits-not-in-trunk' },
+    ]);
   });
 });

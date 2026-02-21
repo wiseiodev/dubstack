@@ -202,8 +202,20 @@ export async function sync(
         }
       }
     }
-    for (const branch of cleanupPlan.toDelete) {
+    for (const entry of cleanupPlan.toDelete) {
+      const branch = entry.branch;
       if (excludedFromSync.has(branch)) continue;
+      const descendants = getDescendants(scopeStacks, branch).filter(
+        (name) =>
+          !cleanupPlan.toDelete.some((target) => target.branch === name),
+      );
+      if (descendants.length > 0) {
+        console.log(
+          `⚠ Auto-clean deleting '${branch}' (${entry.reason}) with dependent branch(es): ${descendants.join(', ')}. Their parent will be reassigned in local DubStack state.`,
+        );
+      } else {
+        console.log(`• Auto-clean deleting '${branch}' (${entry.reason}).`);
+      }
       await checkoutBranch(roots[0] ?? originalBranch, cwd);
       await deleteBranch(branch, cwd);
       removeBranchFromState(scopeStacks, branch);
