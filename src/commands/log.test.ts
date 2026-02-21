@@ -28,9 +28,20 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
-						{ name: "feat/b", parent: "feat/a", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
+						{
+							name: "feat/b",
+							parent: "feat/a",
+							pr_number: null,
+							pr_link: null,
+						},
 					],
 				},
 			],
@@ -52,9 +63,15 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
-						{ name: "feat/b", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
+						{ name: "feat/b", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -82,15 +99,27 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 				{
 					id: "stack-2",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/b", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/b", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -107,8 +136,19 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/deleted", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{
+							name: "feat/deleted",
+							parent: "main",
+							pr_number: null,
+							pr_link: null,
+						},
 					],
 				},
 			],
@@ -129,15 +169,27 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 				{
 					id: "stack-2",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/b", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/b", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -160,15 +212,27 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 				{
 					id: "stack-2",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/b", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/b", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
@@ -192,10 +256,16 @@ describe("log", () => {
 				{
 					id: "stack-1",
 					branches: [
-						{ name: "main", type: "root", parent: null, pr_link: null },
-						{ name: "feat/a", parent: "main", pr_link: null },
-						{ name: "feat/b", parent: "main", pr_link: null },
-						{ name: "feat/c", parent: "main", pr_link: null },
+						{
+							name: "main",
+							type: "root",
+							parent: null,
+							pr_number: null,
+							pr_link: null,
+						},
+						{ name: "feat/a", parent: "main", pr_number: null, pr_link: null },
+						{ name: "feat/b", parent: "main", pr_number: null, pr_link: null },
+						{ name: "feat/c", parent: "main", pr_number: null, pr_link: null },
 					],
 				},
 			],
