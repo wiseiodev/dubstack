@@ -2,7 +2,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DubError } from "../lib/errors";
-import { getCurrentBranch, getLastCommitMessage, pushBranch } from "../lib/git";
+import {
+	getBranchTip,
+	getCurrentBranch,
+	getLastCommitMessage,
+	pushBranch,
+} from "../lib/git";
 import {
 	checkGhAuth,
 	createPr,
@@ -113,6 +118,17 @@ export async function submit(
 				if (stateBranch) {
 					stateBranch.pr_number = pr.number;
 					stateBranch.pr_link = pr.url;
+					const headSha = await getBranchTip(branch.name, cwd);
+					const baseSha = await getBranchTip(branch.parent as string, cwd);
+					stateBranch.last_submitted_version = {
+						head_sha: headSha,
+						base_sha: baseSha,
+						base_branch: branch.parent as string,
+						version_number: null,
+						source: "submit",
+					};
+					stateBranch.last_synced_at = new Date().toISOString();
+					stateBranch.sync_source = "submit";
 				}
 			}
 		}

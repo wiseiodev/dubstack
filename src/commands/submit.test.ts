@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../lib/git.js", () => ({
+	getBranchTip: vi.fn(),
 	getCurrentBranch: vi.fn(),
 	getLastCommitMessage: vi.fn(),
 	pushBranch: vi.fn(),
@@ -23,7 +24,12 @@ vi.mock("../lib/state.js", async (importOriginal) => {
 	};
 });
 
-import { getCurrentBranch, getLastCommitMessage, pushBranch } from "../lib/git";
+import {
+	getBranchTip,
+	getCurrentBranch,
+	getLastCommitMessage,
+	pushBranch,
+} from "../lib/git";
 import {
 	checkGhAuth,
 	createPr,
@@ -36,6 +42,7 @@ import { readState, writeState } from "../lib/state";
 import { submit } from "./submit";
 
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
+const mockGetBranchTip = getBranchTip as ReturnType<typeof vi.fn>;
 const mockGetLastCommitMessage = getLastCommitMessage as ReturnType<
 	typeof vi.fn
 >;
@@ -71,6 +78,9 @@ beforeEach(() => {
 	mockCheckGhAuth.mockResolvedValue(undefined);
 	mockWriteState.mockResolvedValue(undefined);
 	mockPushBranch.mockResolvedValue(undefined);
+	mockGetBranchTip.mockImplementation(
+		async (branch: string) => `${branch}-sha`,
+	);
 	mockUpdatePrBody.mockResolvedValue(undefined);
 });
 
@@ -201,5 +211,13 @@ describe("submit", () => {
 		);
 		expect(featBranch?.pr_number).toBe(99);
 		expect(featBranch?.pr_link).toBe("https://github.com/o/r/pull/99");
+		expect(featBranch?.last_submitted_version).toMatchObject({
+			head_sha: "feat/a-sha",
+			base_sha: "main-sha",
+			base_branch: "main",
+			source: "submit",
+		});
+		expect(featBranch?.sync_source).toBe("submit");
+		expect(featBranch?.last_synced_at).toBeTruthy();
 	});
 });

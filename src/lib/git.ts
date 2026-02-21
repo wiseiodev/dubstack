@@ -436,3 +436,170 @@ export async function listBranches(cwd: string): Promise<string[]> {
 		throw new DubError("Failed to list branches.");
 	}
 }
+
+/**
+ * Fetches the provided branches from the remote.
+ */
+export async function fetchBranches(
+	branches: string[],
+	cwd: string,
+	remote = "origin",
+): Promise<void> {
+	if (branches.length === 0) return;
+	for (const branch of branches) {
+		try {
+			await execa("git", ["fetch", remote, branch], { cwd });
+		} catch (error: unknown) {
+			const stderr =
+				typeof (error as { stderr?: unknown })?.stderr === "string"
+					? (error as { stderr: string }).stderr
+					: "";
+			const stdout =
+				typeof (error as { stdout?: unknown })?.stdout === "string"
+					? (error as { stdout: string }).stdout
+					: "";
+			const output = `${stderr}\n${stdout}`;
+			if (output.includes("couldn't find remote ref")) {
+				continue;
+			}
+			throw new DubError(`Failed to fetch branches from '${remote}'.`);
+		}
+	}
+}
+
+/**
+ * Returns whether a remote branch exists.
+ */
+export async function remoteBranchExists(
+	branch: string,
+	cwd: string,
+	remote = "origin",
+): Promise<boolean> {
+	try {
+		await execa("git", ["rev-parse", "--verify", `${remote}/${branch}`], {
+			cwd,
+		});
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Reads a ref SHA.
+ */
+export async function getRefSha(ref: string, cwd: string): Promise<string> {
+	try {
+		const { stdout } = await execa("git", ["rev-parse", ref], { cwd });
+		return stdout.trim();
+	} catch {
+		throw new DubError(`Failed to read ref '${ref}'.`);
+	}
+}
+
+/**
+ * Returns true when `ancestor` is an ancestor of `descendant`.
+ */
+export async function isAncestor(
+	ancestor: string,
+	descendant: string,
+	cwd: string,
+): Promise<boolean> {
+	try {
+		await execa("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+			cwd,
+		});
+		return true;
+	} catch (error: unknown) {
+		const exitCode = (error as { exitCode?: number }).exitCode;
+		if (exitCode === 1) return false;
+		throw new DubError(
+			`Failed to compare ancestry between '${ancestor}' and '${descendant}'.`,
+		);
+	}
+}
+
+/**
+ * Creates or resets a local branch from a remote ref and checks it out.
+ */
+export async function checkoutRemoteBranch(
+	branch: string,
+	cwd: string,
+	remote = "origin",
+): Promise<void> {
+	try {
+		await execa("git", ["checkout", "-B", branch, `${remote}/${branch}`], {
+			cwd,
+		});
+	} catch {
+		throw new DubError(
+			`Failed to create local branch '${branch}' from '${remote}/${branch}'.`,
+		);
+	}
+}
+
+/**
+ * Resets a local branch hard to a ref.
+ */
+export async function hardResetBranchToRef(
+	branch: string,
+	ref: string,
+	cwd: string,
+): Promise<void> {
+	try {
+		const current = await getCurrentBranch(cwd).catch(() => null);
+		if (current !== branch) {
+			await checkoutBranch(branch, cwd);
+		}
+		await execa("git", ["reset", "--hard", ref], { cwd });
+	} catch {
+		throw new DubError(`Failed to hard reset '${branch}' to '${ref}'.`);
+	}
+}
+
+/**
+ * Fast-forwards a local branch to a ref when possible.
+ * Returns false when fast-forward is not possible.
+ */
+export async function fastForwardBranchToRef(
+	branch: string,
+	ref: string,
+	cwd: string,
+): Promise<boolean> {
+	try {
+		const current = await getCurrentBranch(cwd).catch(() => null);
+		if (current !== branch) {
+			await checkoutBranch(branch, cwd);
+		}
+		await execa("git", ["merge", "--ff-only", ref], { cwd });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Rebases a branch onto a target ref.
+ * Returns false if conflicts occur.
+ */
+export async function rebaseBranchOntoRef(
+	branch: string,
+	ref: string,
+	cwd: string,
+): Promise<boolean> {
+	try {
+		const current = await getCurrentBranch(cwd).catch(() => null);
+		if (current !== branch) {
+			await checkoutBranch(branch, cwd);
+		}
+		await execa("git", ["rebase", ref], { cwd });
+		return true;
+	} catch {
+		try {
+			await execa("git", ["rebase", "--abort"], { cwd });
+		} catch {
+			// no-op
+		}
+		return false;
+	}
+}

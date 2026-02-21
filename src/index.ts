@@ -21,12 +21,15 @@
 import { createRequire } from "node:module";
 import chalk from "chalk";
 import { Command } from "commander";
+import { branchInfo, formatBranchInfo } from "./commands/branch";
 import { checkout, interactiveCheckout } from "./commands/checkout";
 import { create } from "./commands/create";
 import { init } from "./commands/init";
 import { log } from "./commands/log";
+import { bottom, down, top, up } from "./commands/navigate";
 import { restack, restackContinue } from "./commands/restack";
 import { submit } from "./commands/submit";
+import { sync } from "./commands/sync";
 import { undo } from "./commands/undo";
 import { DubError } from "./lib/errors";
 
@@ -107,13 +110,105 @@ Examples:
   $ dub log    Show the branch tree with current branch highlighted`,
 	)
 	.action(async () => {
-		const output = await log(process.cwd());
-		// Apply chalk styling to the output
-		const styled = output
-			.replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan("$1 (Current)"))
-			.replace(/⚠ \(missing\)/g, chalk.yellow("⚠ (missing)"));
-		console.log(styled);
+		await printLog(process.cwd());
 	});
+
+program
+	.command("ls")
+	.description("Display an ASCII tree of the current stack")
+	.action(async () => {
+		await printLog(process.cwd());
+	});
+
+program
+	.command("up")
+	.description("Checkout the child branch directly above the current branch")
+	.action(async () => {
+		const result = await up(process.cwd());
+		if (result.changed) {
+			console.log(chalk.green(`✔ Switched up to '${result.branch}'`));
+		} else {
+			console.log(chalk.yellow(`⚠ Already at top branch '${result.branch}'`));
+		}
+	});
+
+program
+	.command("down")
+	.description("Checkout the parent branch directly below the current branch")
+	.action(async () => {
+		const result = await down(process.cwd());
+		if (result.changed) {
+			console.log(chalk.green(`✔ Switched down to '${result.branch}'`));
+		} else {
+			console.log(
+				chalk.yellow(`⚠ Already at bottom branch '${result.branch}'`),
+			);
+		}
+	});
+
+program
+	.command("top")
+	.description("Checkout the topmost branch in the current stack path")
+	.action(async () => {
+		const result = await top(process.cwd());
+		if (result.changed) {
+			console.log(chalk.green(`✔ Switched to top branch '${result.branch}'`));
+		} else {
+			console.log(chalk.yellow(`⚠ Already at top branch '${result.branch}'`));
+		}
+	});
+
+program
+	.command("bottom")
+	.description(
+		"Checkout the first branch above the root in the current stack path",
+	)
+	.action(async () => {
+		const result = await bottom(process.cwd());
+		if (result.changed) {
+			console.log(
+				chalk.green(`✔ Switched to bottom stack branch '${result.branch}'`),
+			);
+		} else {
+			console.log(
+				chalk.yellow(`⚠ Already at bottom stack branch '${result.branch}'`),
+			);
+		}
+	});
+
+program
+	.command("branch")
+	.description("Show DubStack branch metadata")
+	.addCommand(
+		new Command("info")
+			.description("Show tracked stack info for the current branch")
+			.action(async () => {
+				const info = await branchInfo(process.cwd());
+				console.log(formatBranchInfo(info));
+			}),
+	);
+
+program
+	.command("sync")
+	.description("Sync tracked branches with remote and reconcile divergence")
+	.option(
+		"--restack",
+		"Restack branches after sync (disable with --no-restack)",
+		true,
+	)
+	.option("-f, --force", "Skip prompts for destructive sync decisions")
+	.option("-a, --all", "Sync all tracked stacks across trunks")
+	.option("--no-interactive", "Disable prompts and use deterministic behavior")
+	.action(
+		async (options: {
+			restack?: boolean;
+			force?: boolean;
+			all?: boolean;
+			interactive?: boolean;
+		}) => {
+			await sync(process.cwd(), options);
+		},
+	);
 
 program
 	.command("restack")
@@ -266,6 +361,14 @@ async function runSubmit(options: { dryRun?: boolean }) {
 			console.log(chalk.dim(`  ↳ ${branch}`));
 		}
 	}
+}
+
+async function printLog(cwd: string) {
+	const output = await log(cwd);
+	const styled = output
+		.replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan("$1 (Current)"))
+		.replace(/⚠ \(missing\)/g, chalk.yellow("⚠ (missing)"));
+	console.log(styled);
 }
 
 async function main() {

@@ -16,6 +16,18 @@ export interface Branch {
 	pr_number: number | null;
 	/** GitHub PR URL. Populated after `dub submit`. */
 	pr_link: string | null;
+	/** Last known remote baseline synced/submitted for this branch. */
+	last_submitted_version?: {
+		head_sha: string;
+		base_sha: string;
+		base_branch: string;
+		version_number: number | null;
+		source: "submit" | "sync" | "imported";
+	} | null;
+	/** ISO timestamp of the most recent successful sync for this branch. */
+	last_synced_at?: string | null;
+	/** Source of the branch's current sync baseline metadata. */
+	sync_source?: "submit" | "sync" | "imported" | null;
 }
 
 /** A stack of dependent branches. */
@@ -61,7 +73,7 @@ export async function readState(cwd: string): Promise<DubState> {
 	}
 	try {
 		const raw = fs.readFileSync(statePath, "utf-8");
-		return JSON.parse(raw) as DubState;
+		return normalizeState(JSON.parse(raw) as DubState);
 	} catch {
 		throw new DubError(
 			"State file is corrupted. Delete .git/dubstack and run 'dub init' to re-initialize.",
@@ -178,6 +190,9 @@ export function addBranchToStack(
 		parent,
 		pr_number: null,
 		pr_link: null,
+		last_submitted_version: null,
+		last_synced_at: null,
+		sync_source: null,
 	};
 	const existingStack = findStackForBranch(state, parent);
 
@@ -190,12 +205,33 @@ export function addBranchToStack(
 			parent: null,
 			pr_number: null,
 			pr_link: null,
+			last_submitted_version: null,
+			last_synced_at: null,
+			sync_source: null,
 		};
 		state.stacks.push({
 			id: crypto.randomUUID(),
 			branches: [rootBranch, childBranch],
 		});
 	}
+}
+
+function normalizeState(state: DubState): DubState {
+	return {
+		stacks: state.stacks.map((stack) => ({
+			...stack,
+			branches: stack.branches.map((branch) => normalizeBranch(branch)),
+		})),
+	};
+}
+
+function normalizeBranch(branch: Branch): Branch {
+	return {
+		...branch,
+		last_submitted_version: branch.last_submitted_version ?? null,
+		last_synced_at: branch.last_synced_at ?? null,
+		sync_source: branch.sync_source ?? null,
+	};
 }
 
 /**

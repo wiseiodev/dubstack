@@ -45,6 +45,39 @@ describe("readState", () => {
 		await expect(readState(dir)).rejects.toThrow(DubError);
 		await expect(readState(dir)).rejects.toThrow("corrupted");
 	});
+
+	it("normalizes legacy branches without sync metadata", async () => {
+		const dubDir = path.join(dir, ".git", "dubstack");
+		fs.mkdirSync(dubDir, { recursive: true });
+		fs.writeFileSync(
+			path.join(dubDir, "state.json"),
+			JSON.stringify(
+				{
+					stacks: [
+						{
+							id: "stack-1",
+							branches: [
+								{
+									name: "main",
+									type: "root",
+									parent: null,
+									pr_number: null,
+									pr_link: null,
+								},
+							],
+						},
+					],
+				},
+				null,
+				2,
+			),
+		);
+
+		const state = await readState(dir);
+		expect(state.stacks[0].branches[0].last_submitted_version).toBeNull();
+		expect(state.stacks[0].branches[0].last_synced_at).toBeNull();
+		expect(state.stacks[0].branches[0].sync_source).toBeNull();
+	});
 });
 
 describe("writeState and readState roundtrip", () => {
@@ -69,7 +102,15 @@ describe("writeState and readState roundtrip", () => {
 		};
 		await writeState(state, dir);
 		const loaded = await readState(dir);
-		expect(loaded).toEqual(state);
+		expect(loaded.stacks[0].branches[0]).toMatchObject(
+			state.stacks[0].branches[0],
+		);
+		expect(loaded.stacks[0].branches[1]).toMatchObject(
+			state.stacks[0].branches[1],
+		);
+		expect(loaded.stacks[0].branches[0].last_submitted_version).toBeNull();
+		expect(loaded.stacks[0].branches[0].last_synced_at).toBeNull();
+		expect(loaded.stacks[0].branches[0].sync_source).toBeNull();
 	});
 
 	it("creates parent directory if missing", async () => {
@@ -171,7 +212,7 @@ describe("addBranchToStack", () => {
 
 		expect(state.stacks).toHaveLength(1);
 		expect(state.stacks[0].branches).toHaveLength(3);
-		expect(state.stacks[0].branches[2]).toEqual({
+		expect(state.stacks[0].branches[2]).toMatchObject({
 			name: "feat/b",
 			parent: "feat/a",
 			pr_number: null,

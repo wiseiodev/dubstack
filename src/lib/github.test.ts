@@ -16,6 +16,8 @@ import {
 	checkGhAuth,
 	createPr,
 	ensureGhInstalled,
+	getBranchPrLifecycleState,
+	getBranchPrSyncInfo,
 	getPr,
 	updatePrBody,
 } from "./github";
@@ -78,6 +80,59 @@ describe("getPr", () => {
 	it("returns null when jq returns null", async () => {
 		mockExeca.mockResolvedValueOnce({ stdout: "null" });
 		expect(await getPr("no-pr", "/repo")).toBeNull();
+	});
+});
+
+describe("getBranchPrLifecycleState", () => {
+	it("returns NONE when no PR exists", async () => {
+		mockExeca.mockResolvedValueOnce({ stdout: "null" });
+		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
+			"NONE",
+		);
+	});
+
+	it("returns MERGED when mergedAt is present", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				state: "CLOSED",
+				mergedAt: "2026-01-01T00:00:00Z",
+			}),
+		});
+		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
+			"MERGED",
+		);
+	});
+
+	it("returns CLOSED/OPEN from state", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({ state: "CLOSED", mergedAt: null }),
+		});
+		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
+			"CLOSED",
+		);
+
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({ state: "OPEN", mergedAt: null }),
+		});
+		await expect(getBranchPrLifecycleState("feat/a", "/repo")).resolves.toBe(
+			"OPEN",
+		);
+	});
+});
+
+describe("getBranchPrSyncInfo", () => {
+	it("returns baseRefName when present", async () => {
+		mockExeca.mockResolvedValueOnce({
+			stdout: JSON.stringify({
+				state: "OPEN",
+				mergedAt: null,
+				baseRefName: "main",
+			}),
+		});
+		await expect(getBranchPrSyncInfo("feat/a", "/repo")).resolves.toEqual({
+			state: "OPEN",
+			baseRefName: "main",
+		});
 	});
 });
 
