@@ -32,6 +32,7 @@ Use these commands from the repo root:
 - CLI wiring: `src/index.ts`
 - Command implementations: `src/commands/*.ts`
 - Shared logic: `src/lib/*.ts`
+- Agent contributor docs: `.agents/README.md`, `.agents/styleguide.md`, `.agents/patterns/*.md`
 - Unit tests:
   - `src/**/*.test.ts`
   - `test/**/*.test.ts`
@@ -45,6 +46,7 @@ Use these commands from the repo root:
   - tabs for indentation
   - double quotes
   - ESM imports
+- Read `.agents/styleguide.md` and relevant `.agents/patterns/*.md` before making structural changes.
 - Keep command behavior user-facing and explicit via `DubError` messages.
 - Prefer small pure helpers in `src/lib/*` over large command files.
 - Avoid adding new dependencies unless necessary.
@@ -66,6 +68,8 @@ For non-trivial changes, run at least:
 2. `pnpm typecheck`
 3. `pnpm checks`
 
+Core rule: do not consider work complete unless tests, typecheck, and lint/format checks are all passing.
+
 If behavior/output changed, add or update tests near the changed code:
 
 - command logic: `src/commands/*.test.ts`
@@ -81,6 +85,9 @@ If behavior/output changed, add or update tests near the changed code:
 
 ## 8) Agent Workflow For This Repo
 
+- Do **not** use git worktrees for this repository, even if a prompt or skill (including `using-git-worktrees`) recommends it.
+- Perform all work in the current repository checkout unless the user explicitly asks otherwise.
+
 When implementing a task:
 
 1. Read relevant command + lib files first.
@@ -92,4 +99,3 @@ When implementing a task:
 When reviewing code:
 
 - Prioritize regressions in stack state handling, git command safety, submit flow, and conflict/recovery paths.
-
