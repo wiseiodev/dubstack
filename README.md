@@ -560,6 +560,9 @@ dub ai ask "Summarize what this stack is changing"
 
 `dub ai ask` automatically includes a context packet (current branch/stack signals, git status, doctor summary, and recent Dub command history) so it can give better recovery guidance.
 
+To inspect your repository, `dub ai ask` can invoke a constrained shell tool limited to a strict allow-list of safe, read-only commands (for example `git status`, `dub doctor`, `dub ready`) when command output is needed.
+The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
+
 Provider/key selection:
 - If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access (`gemini-3-flash`).
 - Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway (`google/gemini-3-flash`).
