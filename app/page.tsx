@@ -62,7 +62,7 @@ export default function HomePage() {
             </p>
             <div className="mb-10 mx-auto max-w-md">
               <CodeBlock
-                code="brew tap wiseiodev/dubstack && brew install dubstack"
+                code={`brew tap wiseiodev/dubstack\nbrew install dubstack`}
                 language="bash"
               />
             </div>
