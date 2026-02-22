@@ -1,5 +1,19 @@
+# dependencies
 node_modules
-dist
-.git/dubstack
 
-.worktrees
+# next.js
+.next
+out
+
+# misc
+.DS_Store
+*.pem
+.env
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
