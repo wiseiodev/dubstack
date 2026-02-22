@@ -36,8 +36,8 @@ export default function QuickStartPage() {
         <li className="flex items-start gap-2">
           <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
           <InlineCode>dub</InlineCode> installed (
-          <InlineCode>brew install dubstack</InlineCode> or{" "}
-          <InlineCode>npm i -g dubstack</InlineCode>)
+          <InlineCode>brew tap wiseiodev/dubstack && brew install dubstack</InlineCode>{" "}
+          or <InlineCode>npm i -g dubstack</InlineCode>)
         </li>
       </ul>
 

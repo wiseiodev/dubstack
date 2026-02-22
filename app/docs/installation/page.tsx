@@ -32,7 +32,7 @@ brew install dubstack`}
         language="bash"
       />
       <p className="mt-3 text-sm text-muted-foreground">Update:</p>
-      <CodeBlock code="brew upgrade dubstack" language="bash" className="mt-2" />
+      <CodeBlock code={`brew update\nbrew upgrade dubstack`} language="bash" className="mt-2" />
 
       <h2
         id="npm"
