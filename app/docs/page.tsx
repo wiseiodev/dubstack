@@ -23,23 +23,35 @@ export default function QuickStartPage() {
       >
         Prerequisites
       </h2>
-      <ul className="mb-6 flex flex-col gap-2 text-sm text-muted-foreground">
-        <li className="flex items-start gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-          <InlineCode>git</InlineCode> installed
-        </li>
-        <li className="flex items-start gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-          <InlineCode>gh</InlineCode> CLI authenticated (
-          <InlineCode>gh auth login</InlineCode>)
-        </li>
-        <li className="flex items-start gap-2">
-          <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
-          <InlineCode>dub</InlineCode> installed (
-          <InlineCode>brew tap wiseiodev/dubstack && brew install dubstack</InlineCode>{" "}
-          or <InlineCode>npm i -g dubstack</InlineCode>)
-        </li>
-      </ul>
+      <div className="mb-6 flex flex-col gap-3 text-sm">
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="mb-1 font-medium text-foreground">
+            <InlineCode>git</InlineCode> installed
+          </p>
+          <p className="text-muted-foreground">Version control must be available on your system.</p>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="mb-2 font-medium text-foreground">
+            <InlineCode>gh</InlineCode> CLI authenticated
+          </p>
+          <CodeBlock code="gh auth login" language="bash" />
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <p className="mb-2 font-medium text-foreground">
+            <InlineCode>dub</InlineCode> installed
+          </p>
+          <div className="flex flex-col gap-2">
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">Homebrew</p>
+              <CodeBlock code={`brew tap wiseiodev/dubstack\nbrew install dubstack`} language="bash" />
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">npm</p>
+              <CodeBlock code="npm i -g dubstack" language="bash" />
+            </div>
+          </div>
+        </div>
+      </div>
 
       <h2
         id="enable-ai"
