@@ -79,6 +79,7 @@ describe('askAi', () => {
     stack: null,
     doctor: null,
     recentHistory: [],
+    recentShellHistory: [],
   };
 
   it('requires ai assistant to be enabled in config', async () => {
@@ -143,6 +144,7 @@ describe('askAi', () => {
               thinkingLevel: 'high',
               includeThoughts: true,
             },
+            useSearchGrounding: true,
           },
         },
       }),
@@ -248,6 +250,43 @@ describe('askAi', () => {
         },
       }),
     ).rejects.toThrow('boom');
+  });
+
+  it('falls back gracefully when browsing options are unsupported', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+
+    const streamText = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('unsupported provider option useSearchGrounding');
+      })
+      .mockReturnValueOnce({
+        fullStream: streamFrom(['fallback answer']),
+      });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+    const output = createOutputCapture();
+
+    const result = await askAi('Explain this stack', dir, {
+      output: output.stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    expect(streamText).toHaveBeenCalledTimes(2);
+    expect(output.writes.join('')).toContain('Web browsing is unavailable');
+    expect(result.webBrowsingRequested).toBe(true);
+    expect(result.webBrowsingUsed).toBe(false);
   });
 
   it('requires at least one AI key environment variable', async () => {

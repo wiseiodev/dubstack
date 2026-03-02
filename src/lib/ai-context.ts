@@ -1,8 +1,10 @@
 import { execa } from 'execa';
 import { doctor } from '../commands/doctor';
+import { readConfig } from './config';
 import { getCurrentBranch } from './git';
 import { readHistory } from './history';
 import { detectActiveOperation } from './operation-state';
+import { readRecentShellHistory } from './shell-history';
 import { type Branch, findStackForBranch, readState } from './state';
 
 export interface AiContext {
@@ -32,9 +34,31 @@ export interface AiContext {
     output: string[];
     errorMessage?: string;
   }>;
+  recentShellHistory: string[];
 }
 
-export async function collectAiContext(cwd: string): Promise<AiContext> {
+export interface CollectAiContextOptions {
+  readShellHistory?: (limit: number) => Promise<string[]>;
+  shellHistoryEnabled?: boolean;
+  shellHistoryLimit?: number;
+}
+
+export async function collectAiContext(
+  cwd: string,
+  options: CollectAiContextOptions = {},
+): Promise<AiContext> {
+  const config = await readConfig(cwd).catch(() => null);
+  const shellHistoryEnabled =
+    options.shellHistoryEnabled ??
+    config?.ai.context.shellHistory.enabled ??
+    true;
+  const shellHistoryLimit =
+    options.shellHistoryLimit ??
+    config?.ai.context.shellHistory.maxCommands ??
+    200;
+  const readShellHistory =
+    options.readShellHistory ??
+    ((limit: number) => readRecentShellHistory({ maxCommands: limit }));
   const currentBranch = await getCurrentBranch(cwd).catch(() => null);
   const activeOperation = await detectActiveOperation(cwd).catch(() => null);
   const gitStatusShort = await readGitStatusShort(cwd).catch(() => []);
@@ -52,6 +76,9 @@ export async function collectAiContext(cwd: string): Promise<AiContext> {
       output: entry.output.slice(-6).map((line) => truncate(line, 220)),
       errorMessage: entry.errorMessage,
     }));
+  const recentShellHistory = shellHistoryEnabled
+    ? await readShellHistory(shellHistoryLimit).catch(() => [])
+    : [];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -70,6 +97,7 @@ export async function collectAiContext(cwd: string): Promise<AiContext> {
         }
       : null,
     recentHistory,
+    recentShellHistory,
   };
 }
 

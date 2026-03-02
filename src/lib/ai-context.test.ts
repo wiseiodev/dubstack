@@ -35,6 +35,7 @@ describe('ai context', () => {
       stack: null,
       doctor: null,
       recentHistory: [],
+      recentShellHistory: [],
     });
 
     expect(prompt).toContain('CONTEXT_START');
@@ -44,8 +45,12 @@ describe('ai context', () => {
   });
 
   it('collects context without throwing in a basic git repo', async () => {
-    const context = await collectAiContext(dir);
+    const context = await collectAiContext(dir, {
+      readShellHistory: async () => ['git status', 'dub submit'],
+      shellHistoryLimit: 200,
+    });
     expect(context.currentBranch).toBe('main');
     expect(Array.isArray(context.gitStatusShort)).toBe(true);
+    expect(context.recentShellHistory).toEqual(['git status', 'dub submit']);
   });
 });
