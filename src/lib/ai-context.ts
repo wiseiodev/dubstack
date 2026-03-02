@@ -41,6 +41,8 @@ export interface CollectAiContextOptions {
   readShellHistory?: (limit: number) => Promise<string[]>;
   shellHistoryEnabled?: boolean;
   shellHistoryLimit?: number;
+  shellHistoryLineMaxLength?: number;
+  shellHistoryTotalCharBudget?: number;
 }
 
 export async function collectAiContext(
@@ -56,6 +58,9 @@ export async function collectAiContext(
     options.shellHistoryLimit ??
     config?.ai.context.shellHistory.maxCommands ??
     200;
+  const shellHistoryLineMaxLength = options.shellHistoryLineMaxLength ?? 220;
+  const shellHistoryTotalCharBudget =
+    options.shellHistoryTotalCharBudget ?? 6000;
   const readShellHistory =
     options.readShellHistory ??
     ((limit: number) => readRecentShellHistory({ maxCommands: limit }));
@@ -77,7 +82,13 @@ export async function collectAiContext(
       errorMessage: entry.errorMessage,
     }));
   const recentShellHistory = shellHistoryEnabled
-    ? await readShellHistory(shellHistoryLimit).catch(() => [])
+    ? constrainShellHistoryForContext(
+        await readShellHistory(shellHistoryLimit).catch(() => []),
+        {
+          maxLineLength: shellHistoryLineMaxLength,
+          totalCharBudget: shellHistoryTotalCharBudget,
+        },
+      )
     : [];
 
   return {
@@ -182,4 +193,24 @@ async function readStackContext(
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value;
   return `${value.slice(0, max)}...`;
+}
+
+function constrainShellHistoryForContext(
+  lines: string[],
+  options: { maxLineLength: number; totalCharBudget: number },
+): string[] {
+  if (lines.length === 0) return [];
+  const normalized = lines.map((line) => truncate(line, options.maxLineLength));
+  const result: string[] = [];
+  let used = 0;
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    const line = normalized[i];
+    const cost = line.length + 1;
+    if (used + cost > options.totalCharBudget) {
+      break;
+    }
+    result.unshift(line);
+    used += cost;
+  }
+  return result;
 }

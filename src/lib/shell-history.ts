@@ -20,7 +20,7 @@ export async function readRecentShellHistory(
   const files = getCandidateHistoryFiles(homeDir, shell);
   const collected: string[] = [];
   for (const file of files) {
-    const parsed = await readHistoryFile(file);
+    const parsed = await readHistoryFile(file, maxCommands);
     collected.push(...parsed);
   }
 
@@ -44,15 +44,38 @@ function getCandidateHistoryFiles(homeDir: string, shell: string): string[] {
   ];
 }
 
-async function readHistoryFile(filePath: string): Promise<string[]> {
+async function readHistoryFile(
+  filePath: string,
+  maxCommands: number,
+): Promise<string[]> {
   try {
-    const raw = await fs.readFile(filePath, 'utf8');
+    const raw = await readTailBytes(filePath, {
+      maxBytes: Math.max(64 * 1024, maxCommands * 1024),
+    });
     return raw
       .split('\n')
       .map(parseHistoryLine)
       .filter((line): line is string => line !== null);
   } catch {
     return [];
+  }
+}
+
+async function readTailBytes(
+  filePath: string,
+  options: { maxBytes: number },
+): Promise<string> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stats = await handle.stat();
+    if (stats.size <= 0) return '';
+    const toRead = Math.min(stats.size, options.maxBytes);
+    const start = stats.size - toRead;
+    const buffer = Buffer.allocUnsafe(toRead);
+    await handle.read(buffer, 0, toRead, start);
+    return buffer.toString('utf8');
+  } finally {
+    await handle.close();
   }
 }
 

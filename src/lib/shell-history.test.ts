@@ -72,4 +72,27 @@ describe('readRecentShellHistory', () => {
     expect(entries.join('\n')).not.toContain('abc123');
     expect(entries.join('\n')).not.toContain('super-secret');
   });
+
+  it('reads recent lines from large history files', async () => {
+    const home = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dub-big-'));
+    tempDirs.push(home);
+    const lines = Array.from({ length: 20000 }, (_, i) => `echo line-${i + 1}`);
+    await fs.promises.writeFile(
+      path.join(home, '.bash_history'),
+      `${lines.join('\n')}\n`,
+      'utf8',
+    );
+
+    const entries = await readRecentShellHistory({
+      homeDir: home,
+      shell: '/bin/bash',
+      maxCommands: 3,
+    });
+
+    expect(entries).toEqual([
+      'echo line-19998',
+      'echo line-19999',
+      'echo line-20000',
+    ]);
+  });
 });

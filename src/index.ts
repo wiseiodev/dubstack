@@ -57,6 +57,7 @@ import {
   promptTypoResolution,
   type ShortcutMetadata,
 } from './lib/ai-shortcut';
+import { readConfig } from './lib/config';
 import { DubError } from './lib/errors';
 import { getCurrentBranch } from './lib/git';
 import {
@@ -1159,12 +1160,17 @@ async function main() {
     const rawArgs = process.argv.slice(2);
     historyArgsForCapture = rawArgs;
     const knownCommands = collectKnownTopLevelCommands(program.commands);
-    const preprocessed = await preprocessCliArgs(
-      rawArgs,
-      knownCommands,
-      Boolean(process.stdin.isTTY && process.stdout.isTTY),
-      promptTypoResolution,
-    );
+    const config = await readConfig(process.cwd()).catch(() => null);
+    const shortcutEnabled = config?.ai.shortcutFallback.enabled ?? true;
+    const preprocessed =
+      shortcutEnabled || rawArgs[0] === '--ai'
+        ? await preprocessCliArgs(
+            rawArgs,
+            knownCommands,
+            Boolean(process.stdin.isTTY && process.stdout.isTTY),
+            promptTypoResolution,
+          )
+        : { finalArgs: rawArgs, metadata: {} };
     invocationMetadata = { ...preprocessed.metadata };
     process.argv = [
       process.argv[0],
