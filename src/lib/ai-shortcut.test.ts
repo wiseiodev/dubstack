@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DubError } from './errors';
 import {
   collectKnownTopLevelCommands,
   preprocessCliArgs,
@@ -43,7 +42,13 @@ describe('preprocessCliArgs', () => {
       vi.fn(),
     );
 
-    expect(result.finalArgs).toEqual(['ai', 'ask', 'what', 'changed', 'today?']);
+    expect(result.finalArgs).toEqual([
+      'ai',
+      'ask',
+      'what',
+      'changed',
+      'today?',
+    ]);
     expect(result.metadata.invocationMode).toBe('shortcut-fallback');
     expect(result.metadata.typoGuardTriggered).toBe(false);
   });
@@ -56,7 +61,13 @@ describe('preprocessCliArgs', () => {
       vi.fn(),
     );
 
-    expect(result.finalArgs).toEqual(['ai', 'ask', 'submit', 'branch', 'status']);
+    expect(result.finalArgs).toEqual([
+      'ai',
+      'ask',
+      'submit',
+      'branch',
+      'status',
+    ]);
     expect(result.metadata.invocationMode).toBe('shortcut-forced');
   });
 

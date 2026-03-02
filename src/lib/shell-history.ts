@@ -38,7 +38,10 @@ function getCandidateHistoryFiles(homeDir: string, shell: string): string[] {
   if (normalized.includes('bash')) {
     return [path.join(homeDir, '.bash_history')];
   }
-  return [path.join(homeDir, '.zsh_history'), path.join(homeDir, '.bash_history')];
+  return [
+    path.join(homeDir, '.zsh_history'),
+    path.join(homeDir, '.bash_history'),
+  ];
 }
 
 async function readHistoryFile(filePath: string): Promise<string[]> {

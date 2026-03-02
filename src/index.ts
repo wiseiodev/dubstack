@@ -51,14 +51,14 @@ import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
 import { untrack } from './commands/untrack';
-import { DubError } from './lib/errors';
-import { getCurrentBranch } from './lib/git';
 import {
   collectKnownTopLevelCommands,
   preprocessCliArgs,
   promptTypoResolution,
   type ShortcutMetadata,
 } from './lib/ai-shortcut';
+import { DubError } from './lib/errors';
+import { getCurrentBranch } from './lib/git';
 import {
   appendHistoryEntry,
   normalizeHistoryLine,
@@ -925,7 +925,9 @@ program
 
 program
   .command('ai')
-  .description('Use DubStack AI assistant utilities (or shortcut with: dub PROMPT)')
+  .description(
+    'Use DubStack AI assistant utilities (or shortcut with: dub PROMPT)',
+  )
   .addCommand(
     new Command('ask')
       .argument('<prompt...>', 'Prompt text to send to the AI assistant')
@@ -1164,7 +1166,11 @@ async function main() {
       promptTypoResolution,
     );
     invocationMetadata = { ...preprocessed.metadata };
-    process.argv = [process.argv[0], process.argv[1], ...preprocessed.finalArgs];
+    process.argv = [
+      process.argv[0],
+      process.argv[1],
+      ...preprocessed.finalArgs,
+    ];
 
     await program.parseAsync(process.argv);
   } catch (error) {
