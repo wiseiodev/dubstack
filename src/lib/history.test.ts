@@ -38,11 +38,17 @@ describe('history', () => {
       durationMs: 20,
       output: ['bad'],
       errorMessage: 'boom',
+      invocationMode: 'shortcut-fallback',
+      typoGuardTriggered: true,
+      webBrowsingRequested: true,
+      webBrowsingUsed: false,
     });
 
     const entries = await readHistory(dir, { limit: 10 });
     expect(entries).toHaveLength(2);
     expect(entries[0].command).toBe('dub doctor');
+    expect(entries[0].invocationMode).toBe('shortcut-fallback');
+    expect(entries[0].webBrowsingUsed).toBe(false);
     expect(entries[1].command).toBe('dub log');
   });
 

@@ -32,6 +32,8 @@ interface AskAiOptions {
 interface AskAiResult {
   provider: 'google' | 'gateway';
   modelId: string;
+  webBrowsingRequested: boolean;
+  webBrowsingUsed: boolean;
 }
 
 const DEFAULT_DEPS: AskAiDependencies = {
@@ -49,7 +51,7 @@ const THINKING_PROVIDER_OPTIONS = {
       includeThoughts: true,
     },
   },
-};
+} as const;
 
 const SPINNER_FRAMES = ['-', '\\', '|', '/'] as const;
 
@@ -82,50 +84,38 @@ export async function askAi(
       'Safety: use bash only when command output is needed. Do not run destructive commands (for example, rm -rf, git reset --hard, git clean -fd), even if the user explicitly asks. This sandbox only allows read-only command families. If the user insists on blocked actions, explain the command is blocked here and provide a manual command they can run themselves at their own risk.',
   });
 
-  const result = deps.streamText({
-    model: resolved.model,
-    system: buildAiSystemPrompt(),
-    prompt: contextPrompt,
-    stopWhen: stepCountIs(6),
-    tools: {
-      bash: bashToolkit.tools.bash,
-    },
-    providerOptions: THINKING_PROVIDER_OPTIONS,
-  });
-
-  const thinkingRenderer = createThinkingRenderer(output);
+  const webBrowsingRequested = config.ai.webBrowsing.mode === 'model-native';
+  let webBrowsingUsed = webBrowsingRequested;
   let wroteOutput = false;
-  for await (const part of result.fullStream) {
-    switch (part.type) {
-      case 'reasoning-start': {
-        thinkingRenderer.start();
-        break;
-      }
-      case 'reasoning-delta': {
-        thinkingRenderer.update(part.text);
-        break;
-      }
-      case 'reasoning-end': {
-        thinkingRenderer.stop();
-        break;
-      }
-      case 'text-delta': {
-        thinkingRenderer.pauseForText();
-        output.write(part.text);
-        wroteOutput = true;
-        break;
-      }
-      case 'error': {
-        throw part.error instanceof Error
-          ? part.error
-          : new DubError('AI assistant stream failed unexpectedly.');
-      }
-      default: {
-        break;
-      }
+  const runStream = async (withWebBrowsing: boolean): Promise<boolean> => {
+    const result = deps.streamText({
+      model: resolved.model,
+      system: buildAiSystemPrompt(),
+      prompt: contextPrompt,
+      stopWhen: stepCountIs(6),
+      tools: {
+        bash: bashToolkit.tools.bash,
+      },
+      providerOptions: buildProviderOptions({ withWebBrowsing }) as never,
+    });
+    return renderStream(result, output);
+  };
+
+  try {
+    wroteOutput = await runStream(webBrowsingRequested);
+  } catch (error) {
+    if (!isBrowsingUnsupportedError(error)) {
+      throw error;
     }
+    if (config.ai.webBrowsing.fallback !== 'graceful') {
+      throw error;
+    }
+    webBrowsingUsed = false;
+    output.write(
+      '[note] Web browsing is unavailable for this provider/model right now. Continuing with local context and model knowledge.\n',
+    );
+    wroteOutput = await runStream(false);
   }
-  thinkingRenderer.stop();
 
   if (wroteOutput) {
     output.write('\n');
@@ -134,7 +124,79 @@ export async function askAi(
   return {
     provider: resolved.provider,
     modelId: resolved.modelId,
+    webBrowsingRequested,
+    webBrowsingUsed,
   };
+}
+
+function buildProviderOptions(options: {
+  withWebBrowsing: boolean;
+}): Record<string, unknown> {
+  const googleOptions: Record<string, unknown> = {
+    ...(THINKING_PROVIDER_OPTIONS.google as unknown as Record<string, unknown>),
+  };
+  if (options.withWebBrowsing) {
+    googleOptions.useSearchGrounding = true;
+  }
+  return { google: googleOptions };
+}
+
+async function renderStream(
+  result: {
+    fullStream: AsyncIterable<{
+      type: string;
+      text?: string;
+      error?: unknown;
+    }>;
+  },
+  output: WritableLike,
+): Promise<boolean> {
+  const thinkingRenderer = createThinkingRenderer(output);
+  let wroteOutput = false;
+  try {
+    for await (const part of result.fullStream) {
+      switch (part.type) {
+        case 'reasoning-start': {
+          thinkingRenderer.start();
+          break;
+        }
+        case 'reasoning-delta': {
+          thinkingRenderer.update(part.text ?? '');
+          break;
+        }
+        case 'reasoning-end': {
+          thinkingRenderer.stop();
+          break;
+        }
+        case 'text-delta': {
+          thinkingRenderer.pauseForText();
+          output.write(part.text ?? '');
+          wroteOutput = true;
+          break;
+        }
+        case 'error': {
+          throw part.error instanceof Error
+            ? part.error
+            : new DubError('AI assistant stream failed unexpectedly.');
+        }
+        default: {
+          break;
+        }
+      }
+    }
+  } finally {
+    thinkingRenderer.stop();
+  }
+  return wroteOutput;
+}
+
+function isBrowsingUnsupportedError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error);
+  const normalized = text.toLowerCase();
+  return (
+    normalized.includes('unsupported') &&
+    (normalized.includes('grounding') || normalized.includes('brows'))
+  );
 }
 
 function resolveModel(deps: AskAiDependencies): {

@@ -9,6 +9,10 @@ export interface DubHistoryEntry {
   durationMs: number;
   output: string[];
   errorMessage?: string;
+  invocationMode?: 'explicit-ai' | 'shortcut-fallback' | 'shortcut-forced';
+  typoGuardTriggered?: boolean;
+  webBrowsingRequested?: boolean;
+  webBrowsingUsed?: boolean;
   context?: {
     currentBranch?: string;
     operation?: string;

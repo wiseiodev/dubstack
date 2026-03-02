@@ -51,6 +51,13 @@ import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
 import { untrack } from './commands/untrack';
+import {
+  collectKnownTopLevelCommands,
+  preprocessCliArgs,
+  promptTypoResolution,
+  type ShortcutMetadata,
+} from './lib/ai-shortcut';
+import { readConfig } from './lib/config';
 import { DubError } from './lib/errors';
 import { getCurrentBranch } from './lib/git';
 import {
@@ -69,7 +76,14 @@ const program = new Command();
 program
   .name('dub')
   .description('Manage stacked diffs (dependent git branches) with ease')
-  .version(version);
+  .version(version)
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub "what changed in this stack?"    Ask AI directly
+  $ dub --ai "summarize terminal work"   Force AI shortcut mode`,
+  );
 
 program
   .command('init')
@@ -912,14 +926,21 @@ program
 
 program
   .command('ai')
-  .description('Use DubStack AI assistant utilities')
+  .description(
+    'Use DubStack AI assistant utilities (or shortcut with: dub PROMPT)',
+  )
   .addCommand(
     new Command('ask')
       .argument('<prompt...>', 'Prompt text to send to the AI assistant')
-      .description('Ask DubStack AI assistant a question')
+      .description('Ask DubStack AI assistant a question (explicit mode)')
       .action(async (promptParts: string[]) => {
         const { askAi } = await import('./commands/ai');
-        await askAi(promptParts.join(' '), process.cwd());
+        if (!invocationMetadata.invocationMode) {
+          invocationMetadata.invocationMode = 'explicit-ai';
+        }
+        const result = await askAi(promptParts.join(' '), process.cwd());
+        invocationMetadata.webBrowsingRequested = result.webBrowsingRequested;
+        invocationMetadata.webBrowsingUsed = result.webBrowsingUsed;
       }),
   )
   .addCommand(
@@ -1120,6 +1141,11 @@ interface HistoryCaptureState {
 const MAX_HISTORY_OUTPUT_LINES = 120;
 const MAX_HISTORY_OUTPUT_LINE_LENGTH = 500;
 let historyCapture: HistoryCaptureState | null = null;
+let historyArgsForCapture: string[] | null = null;
+let invocationMetadata: ShortcutMetadata & {
+  webBrowsingRequested?: boolean;
+  webBrowsingUsed?: boolean;
+} = {};
 
 program.hook('preAction', () => {
   beginHistoryCapture();
@@ -1131,6 +1157,27 @@ program.hook('postAction', async () => {
 
 async function main() {
   try {
+    const rawArgs = process.argv.slice(2);
+    historyArgsForCapture = rawArgs;
+    const knownCommands = collectKnownTopLevelCommands(program.commands);
+    const config = await readConfig(process.cwd()).catch(() => null);
+    const shortcutEnabled = config?.ai.shortcutFallback.enabled ?? true;
+    const preprocessed =
+      shortcutEnabled || rawArgs[0] === '--ai'
+        ? await preprocessCliArgs(
+            rawArgs,
+            knownCommands,
+            Boolean(process.stdin.isTTY && process.stdout.isTTY),
+            promptTypoResolution,
+          )
+        : { finalArgs: rawArgs, metadata: {} };
+    invocationMetadata = { ...preprocessed.metadata };
+    process.argv = [
+      process.argv[0],
+      process.argv[1],
+      ...preprocessed.finalArgs,
+    ];
+
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof DubError) {
@@ -1150,7 +1197,8 @@ async function main() {
 function beginHistoryCapture(): void {
   if (historyCapture) return;
 
-  const sanitizedArgs = sanitizeCommandArgs(process.argv.slice(2));
+  const captureArgs = historyArgsForCapture ?? process.argv.slice(2);
+  const sanitizedArgs = sanitizeCommandArgs(captureArgs);
   if (sanitizedArgs.length === 0) return;
 
   const output: string[] = [];
@@ -1243,6 +1291,10 @@ async function finalizeHistoryCapture(
     durationMs: Date.now() - capture.startedAt,
     output: capture.output,
     errorMessage,
+    invocationMode: invocationMetadata.invocationMode,
+    typoGuardTriggered: invocationMetadata.typoGuardTriggered,
+    webBrowsingRequested: invocationMetadata.webBrowsingRequested,
+    webBrowsingUsed: invocationMetadata.webBrowsingUsed,
     context: {
       currentBranch,
       operation,
@@ -1250,6 +1302,9 @@ async function finalizeHistoryCapture(
   }).catch(() => {
     // Do not block command execution if history append fails.
   });
+
+  historyArgsForCapture = null;
+  invocationMetadata = {};
 }
 
 function truncateHistoryLine(line: string): string {

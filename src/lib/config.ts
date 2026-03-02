@@ -5,10 +5,44 @@ import { getDubDir } from './state';
 
 export interface DubConfig {
   aiAssistantEnabled: boolean;
+  ai: {
+    shortcutFallback: {
+      enabled: boolean;
+      typoGuard: 'interactive';
+      nonTtyPolicy: 'error-with-suggestion';
+    };
+    context: {
+      shellHistory: {
+        enabled: boolean;
+        maxCommands: number;
+      };
+    };
+    webBrowsing: {
+      mode: 'model-native';
+      fallback: 'graceful';
+    };
+  };
 }
 
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
+  ai: {
+    shortcutFallback: {
+      enabled: true,
+      typoGuard: 'interactive',
+      nonTtyPolicy: 'error-with-suggestion',
+    },
+    context: {
+      shellHistory: {
+        enabled: true,
+        maxCommands: 200,
+      },
+    },
+    webBrowsing: {
+      mode: 'model-native',
+      fallback: 'graceful',
+    },
+  },
 };
 
 export async function getConfigPath(cwd: string): Promise<string> {
@@ -34,7 +68,7 @@ export async function readConfig(cwd: string): Promise<DubConfig> {
 }
 
 export async function writeConfig(
-  config: DubConfig,
+  config: Partial<DubConfig>,
   cwd: string,
 ): Promise<void> {
   const configPath = await getConfigPath(cwd);
@@ -47,10 +81,53 @@ export async function writeConfig(
 }
 
 function normalizeConfig(config: Partial<DubConfig>): DubConfig {
+  const fallback = config.ai?.shortcutFallback;
+  const shellHistory = config.ai?.context?.shellHistory;
+  const webBrowsing = config.ai?.webBrowsing;
+
   return {
     aiAssistantEnabled:
       typeof config.aiAssistantEnabled === 'boolean'
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
+    ai: {
+      shortcutFallback: {
+        enabled:
+          typeof fallback?.enabled === 'boolean'
+            ? fallback.enabled
+            : DEFAULT_CONFIG.ai.shortcutFallback.enabled,
+        typoGuard:
+          fallback?.typoGuard === 'interactive'
+            ? fallback.typoGuard
+            : DEFAULT_CONFIG.ai.shortcutFallback.typoGuard,
+        nonTtyPolicy:
+          fallback?.nonTtyPolicy === 'error-with-suggestion'
+            ? fallback.nonTtyPolicy
+            : DEFAULT_CONFIG.ai.shortcutFallback.nonTtyPolicy,
+      },
+      context: {
+        shellHistory: {
+          enabled:
+            typeof shellHistory?.enabled === 'boolean'
+              ? shellHistory.enabled
+              : DEFAULT_CONFIG.ai.context.shellHistory.enabled,
+          maxCommands:
+            Number.isInteger(shellHistory?.maxCommands) &&
+            (shellHistory?.maxCommands ?? 0) > 0
+              ? (shellHistory?.maxCommands as number)
+              : DEFAULT_CONFIG.ai.context.shellHistory.maxCommands,
+        },
+      },
+      webBrowsing: {
+        mode:
+          webBrowsing?.mode === 'model-native'
+            ? webBrowsing.mode
+            : DEFAULT_CONFIG.ai.webBrowsing.mode,
+        fallback:
+          webBrowsing?.fallback === 'graceful'
+            ? webBrowsing.fallback
+            : DEFAULT_CONFIG.ai.webBrowsing.fallback,
+      },
+    },
   };
 }

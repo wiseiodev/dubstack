@@ -23,6 +23,23 @@ describe('readConfig', () => {
     const config = await readConfig(dir);
     expect(config).toEqual({
       aiAssistantEnabled: false,
+      ai: {
+        shortcutFallback: {
+          enabled: true,
+          typoGuard: 'interactive',
+          nonTtyPolicy: 'error-with-suggestion',
+        },
+        context: {
+          shellHistory: {
+            enabled: true,
+            maxCommands: 200,
+          },
+        },
+        webBrowsing: {
+          mode: 'model-native',
+          fallback: 'graceful',
+        },
+      },
     });
   });
 
