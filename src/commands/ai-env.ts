@@ -5,10 +5,14 @@ import { DubError } from '../lib/errors';
 
 const GEMINI_KEY_NAME = 'DUBSTACK_GEMINI_API_KEY';
 const GATEWAY_KEY_NAME = 'DUBSTACK_AI_GATEWAY_API_KEY';
+const GEMINI_MODEL_NAME = 'DUBSTACK_GEMINI_MODEL';
+const GATEWAY_MODEL_NAME = 'DUBSTACK_AI_GATEWAY_MODEL';
 
 interface ConfigureAiEnvOptions {
   geminiKey?: string;
   gatewayKey?: string;
+  geminiModel?: string;
+  gatewayModel?: string;
   shell?: string;
   profile?: string;
 }
@@ -21,9 +25,14 @@ interface ConfigureAiEnvResult {
 export async function configureAiEnv(
   options: ConfigureAiEnvOptions,
 ): Promise<ConfigureAiEnvResult> {
-  if (!options.geminiKey && !options.gatewayKey) {
+  if (
+    !options.geminiKey &&
+    !options.gatewayKey &&
+    !options.geminiModel &&
+    !options.gatewayModel
+  ) {
     throw new DubError(
-      'Provide at least one key via --gemini-key or --gateway-key.',
+      'Provide at least one key or model via --gemini-key, --gateway-key, --gemini-model, or --gateway-model.',
     );
   }
 
@@ -46,6 +55,18 @@ export async function configureAiEnv(
   if (options.gatewayKey) {
     content = upsertExport(content, GATEWAY_KEY_NAME, options.gatewayKey);
     updated.push(GATEWAY_KEY_NAME);
+  }
+
+  if (options.geminiModel !== undefined) {
+    const model = normalizeGeminiModel(options.geminiModel);
+    content = upsertExport(content, GEMINI_MODEL_NAME, model);
+    updated.push(GEMINI_MODEL_NAME);
+  }
+
+  if (options.gatewayModel !== undefined) {
+    const model = normalizeGatewayModel(options.gatewayModel);
+    content = upsertExport(content, GATEWAY_MODEL_NAME, model);
+    updated.push(GATEWAY_MODEL_NAME);
   }
 
   if (!content.endsWith('\n')) {
@@ -96,4 +117,25 @@ function upsertExport(content: string, key: string, value: string): string {
 
 function quoteForShell(value: string): string {
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+function normalizeGeminiModel(value: string): string {
+  const model = value.trim();
+  if (model.length === 0) {
+    throw new DubError('Gemini model cannot be empty.');
+  }
+  if (model.includes('/')) {
+    throw new DubError(
+      "Gemini model should not include '/'. Use names like 'gemini-3-flash-preview'.",
+    );
+  }
+  return model;
+}
+
+function normalizeGatewayModel(value: string): string {
+  const model = value.trim();
+  if (model.length === 0) {
+    throw new DubError('Gateway model cannot be empty.');
+  }
+  return model;
 }

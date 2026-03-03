@@ -119,7 +119,7 @@ describe('askAi', () => {
     expect(createGoogleGenerativeAI).toHaveBeenCalledWith({
       apiKey: 'gem-key',
     });
-    expect(googleModel).toHaveBeenCalledWith('gemini-3-flash');
+    expect(googleModel).toHaveBeenCalledWith('gemini-3-flash-preview');
     expect(createGateway).not.toHaveBeenCalled();
     expect(createBashTool).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -149,6 +149,36 @@ describe('askAi', () => {
         },
       }),
     );
+  });
+
+  it('uses DUBSTACK_GEMINI_MODEL override when provided', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_GEMINI_MODEL = 'gemini-2.5-pro-preview';
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: streamFrom(['hello']),
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+
+    const result = await askAi('Explain this stack', dir, {
+      output: createOutputCapture().stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    expect(googleModel).toHaveBeenCalledWith('gemini-2.5-pro-preview');
+    expect(result.modelId).toBe('gemini-2.5-pro-preview');
   });
 
   it('uses AI Gateway provider when only DUBSTACK_AI_GATEWAY_API_KEY is set', async () => {
@@ -184,6 +214,36 @@ describe('askAi', () => {
     expect(gatewayModel).toHaveBeenCalledWith('google/gemini-3-flash');
     expect(result.provider).toBe('gateway');
     expect(output.writes.join('')).toBe('gateway\n');
+  });
+
+  it('uses DUBSTACK_AI_GATEWAY_MODEL override when provided', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    delete process.env.DUBSTACK_GEMINI_API_KEY;
+    process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.DUBSTACK_AI_GATEWAY_MODEL = 'google/gemini-2.5-pro';
+
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: streamFrom(['gateway']),
+    });
+    const createGoogleGenerativeAI = vi.fn();
+    const gatewayModel = vi.fn().mockReturnValue('gateway-model');
+    const createGateway = vi.fn().mockReturnValue(gatewayModel);
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+
+    const result = await askAi('Explain this stack', dir, {
+      output: createOutputCapture().stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    expect(gatewayModel).toHaveBeenCalledWith('google/gemini-2.5-pro');
+    expect(result.modelId).toBe('google/gemini-2.5-pro');
   });
 
   it('streams a TTY thinking preview with spinner frames', async () => {

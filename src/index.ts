@@ -946,10 +946,12 @@ program
   .addCommand(
     new Command('env')
       .description(
-        'Write DubStack AI API keys to your shell profile (macOS/Linux)',
+        'Write DubStack AI API keys/models to your shell profile (macOS/Linux)',
       )
       .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
+      .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
+      .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
       .option(
         '--profile <path>',
         'Override target profile path (recommended for custom shells)',
@@ -962,6 +964,8 @@ program
         async (options: {
           geminiKey?: string;
           gatewayKey?: string;
+          geminiModel?: string;
+          gatewayModel?: string;
           profile?: string;
           shell?: string;
         }) => {
@@ -969,6 +973,8 @@ program
           const result = await configureAiEnv({
             geminiKey: options.geminiKey,
             gatewayKey: options.gatewayKey,
+            geminiModel: options.geminiModel,
+            gatewayModel: options.gatewayModel,
             profile: options.profile,
             shell: options.shell,
           });
