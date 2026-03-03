@@ -571,15 +571,15 @@ To inspect your repository, `dub ai ask` can invoke a constrained shell tool lim
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
 
 Provider/key selection:
-- If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access (`gemini-3-flash`).
-- Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway (`google/gemini-3-flash`).
+- If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access with model from `DUBSTACK_GEMINI_MODEL` (default: `gemini-3-flash-preview`).
+- Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway with model from `DUBSTACK_AI_GATEWAY_MODEL` (default: `google/gemini-3-flash`).
 - If both are set, DubStack prefers `DUBSTACK_GEMINI_API_KEY`.
 
 Thinking is enabled by default for Gemini 3 Flash.
 
 ### `dub ai env`
 
-Write DubStack AI keys into your shell profile (macOS/Linux shells).
+Write DubStack AI keys/models into your shell profile (macOS/Linux shells).
 
 ```bash
 # write Gemini key
@@ -588,8 +588,17 @@ dub ai env --gemini-key "<your-key>"
 # write Gateway key
 dub ai env --gateway-key "<your-key>"
 
+# write Gemini model override
+dub ai env --gemini-model "gemini-2.5-pro-preview"
+
+# write Gateway model override
+dub ai env --gateway-model "google/gemini-2.5-pro"
+
 # write both
 dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>"
+
+# write key + model together
+dub ai env --gemini-key "<gemini-key>" --gemini-model "gemini-3-flash-preview"
 
 # target a specific profile file explicitly
 dub ai env --gemini-key "<your-key>" --profile ~/.zshrc

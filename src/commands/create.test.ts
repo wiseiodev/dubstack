@@ -219,6 +219,70 @@ describe('create with --ai', () => {
     );
   });
 
+  it('uses DUBSTACK_GEMINI_MODEL override when provided', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_GEMINI_MODEL = 'gemini-2.5-flash';
+    fs.writeFileSync(
+      path.join(dir, 'ai-model.ts'),
+      'export const aiModel = 1;\n',
+    );
+    await gitInRepo(dir, ['add', 'ai-model.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/ai-model-override","message":"feat: model override"}',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(googleModel).toHaveBeenCalledWith('gemini-2.5-flash');
+  });
+
+  it('uses DUBSTACK_AI_GATEWAY_MODEL override when provided', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    delete process.env.DUBSTACK_GEMINI_API_KEY;
+    process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
+    process.env.DUBSTACK_AI_GATEWAY_MODEL = 'google/gemini-2.5-flash';
+    fs.writeFileSync(
+      path.join(dir, 'ai-gateway.ts'),
+      'export const viaGateway = 1;\n',
+    );
+    await gitInRepo(dir, ['add', 'ai-gateway.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/ai-gateway-model","message":"feat: gateway model override"}',
+    });
+    const createGoogleGenerativeAI = vi.fn();
+    const gatewayModel = vi.fn().mockReturnValue('gateway-model');
+    const createGateway = vi.fn().mockReturnValue(gatewayModel);
+
+    await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(gatewayModel).toHaveBeenCalledWith('google/gemini-2.5-flash');
+  });
+
   it('requires ai assistant to be enabled in config', async () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     fs.writeFileSync(path.join(dir, 'ai-off.ts'), 'export const off = true;\n');

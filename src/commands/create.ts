@@ -222,21 +222,25 @@ function resolveModel(deps: CreateDependencies): {
 } {
   const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
   if (geminiApiKey) {
+    const geminiModel =
+      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
     const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
     return {
       provider: 'google',
-      model: google('gemini-3-flash'),
-      modelId: 'gemini-3-flash',
+      model: google(geminiModel),
+      modelId: geminiModel,
     };
   }
 
   const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
   if (gatewayApiKey) {
+    const gatewayModel =
+      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
     const gateway = deps.createGateway({ apiKey: gatewayApiKey });
     return {
       provider: 'gateway',
-      model: gateway('google/gemini-3-flash'),
-      modelId: 'google/gemini-3-flash',
+      model: gateway(gatewayModel),
+      modelId: gatewayModel,
     };
   }
 

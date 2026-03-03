@@ -70,6 +70,24 @@ describe('history', () => {
     ]);
   });
 
+  it('does not redact non-secret model args', () => {
+    const sanitized = sanitizeCommandArgs([
+      'ai',
+      'env',
+      '--gemini-model',
+      'gemini-2.5-pro',
+      '--gateway-model=google/gemini-3-flash',
+    ]);
+
+    expect(sanitized).toEqual([
+      'ai',
+      'env',
+      '--gemini-model',
+      'gemini-2.5-pro',
+      '--gateway-model=google/gemini-3-flash',
+    ]);
+  });
+
   it('redacts sensitive text payloads', () => {
     const redacted = redactSensitiveText(
       [
