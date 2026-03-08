@@ -19,7 +19,9 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Intent | Command |
 |---|---|
 | Create branch | `dub create <name>` |
+| AI create | `dub create --ai` |
 | Create + commit | `dub create <name> -am "msg"` |
+| AI full flow | `dub flow --ai -a` / `dub f --ai -a` |
 | Modify current branch | `dub modify` / `dub m` |
 | Navigate stack | `dub up`, `dub down`, `dub top`, `dub bottom` |
 | Interactive checkout | `dub checkout` / `dub co` |
@@ -34,8 +36,11 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Stack-aware delete | `dub delete [branch] [--upstack|--downstack]` |
 | Show parent/children/trunk | `dub parent`, `dub children`, `dub trunk` |
 | Submit PR stack | `dub submit` / `dub ss` |
+| AI PR description | `dub submit --ai` |
 | Open PR in browser | `dub pr [branch|number]` |
 | Undo last create/restack | `dub undo` |
+| Ask AI assistant | `dub ai ask "..."` |
+| AI conflict help | `dub ai resolve` / `dub continue --ai` |
 
 ## Command Notes
 
@@ -53,6 +58,18 @@ dub create feat/x -pm "feat: ..."
 - `-u`: stage tracked-file updates
 - `-p`: interactive hunk staging
 - staging flags require `-m`
+
+AI create mode:
+
+```bash
+dub create --ai
+dub create -ai
+dub create --no-ai feat/x
+```
+
+- `--ai` generates both branch name and commit message from staged changes.
+- `--no-ai` overrides repo AI defaults for a single invocation.
+- if a repo commit template is configured via `git config commit.template`, AI create preserves that structure in the generated commit body.
 
 ### Modify
 
@@ -109,6 +126,10 @@ dub abort
 ```bash
 dub ss
 dub submit --dry-run
+dub submit --ai
+dub submit --no-ai
+dub flow --ai -a
+dub f --dry-run
 ```
 
 ```bash
@@ -148,6 +169,77 @@ dub trunk
 4. Submit with `dub ss`
 5. Iterate with `dub m ...` and `dub ss`
 6. Keep updated with `dub sync` (or `dub restack` when needed)
+
+## AI Setup
+
+```bash
+dub ai env --gemini-key "<your-key>"
+# or
+dub ai env --gateway-key "<your-key>"
+
+dub config ai-assistant on
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+```
+
+Precedence:
+
+1. command flag such as `--ai` or `--no-ai`
+2. repo-local `dub config ai-defaults ...`
+3. built-in fallback of off
+
+## AI Workflow
+
+Manual path:
+
+1. stage changes
+2. run `dub create <name> -am "type: summary"`
+3. run `dub submit`
+
+AI-assisted path:
+
+1. stage changes or use `-a`, `-u`, or `-p`
+2. run `dub flow --ai`
+3. review the rendered branch, commit, and PR previews
+4. approve or edit
+5. let DubStack create and submit
+
+Notes:
+
+- In non-interactive terminals, add `-y` because `dub flow` approval prompts require a TTY.
+- `dub ai ask` streams response text live and renders tool/status lines separately in TTY output.
+
+## Template Setup
+
+If a repo wants DubStack AI to follow existing formatting, set up templates first.
+
+Pull request templates:
+
+- `.github/pull_request_template.md`
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- `.github/PULL_REQUEST_TEMPLATE/*.md`
+- `docs/pull_request_template.md`
+- `pull_request_template.md`
+
+Commit message templates:
+
+```bash
+cat <<'EOF' > .gitmessage
+feat(scope): summary
+
+## Testing
+- [ ] added coverage
+EOF
+
+git config commit.template .gitmessage
+```
+
+Notes:
+
+- PR titles still come from the last commit message.
+- AI-generated PR descriptions preserve repo PR template structure when present.
+- AI-generated commit bodies preserve repo commit template structure when present, but the first line still needs to be a valid Conventional Commit subject.
 
 ## Recovery Patterns
 

@@ -160,6 +160,32 @@ dub trunk
 5. Iterate with `dub m ...` and `dub ss`
 6. Keep updated with `dub sync` (add `--restack` when you want automatic post-sync rebasing)
 
+## AI Workflow
+
+```bash
+dub ai env --gemini-key "<your-key>"
+# or
+dub ai env --gateway-key "<your-key>"
+
+dub config ai-assistant on
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+```
+
+AI-assisted path:
+
+1. stage changes or use `-a`, `-u`, or `-p`
+2. run `dub flow --ai`
+3. review the rendered branch, commit, and PR previews
+4. approve or edit
+5. let DubStack create and submit
+
+Notes:
+
+- In non-interactive terminals, add `-y` because `dub flow` approval prompts require a TTY.
+- `dub ai ask` streams response text live and renders tool/status lines separately in TTY output.
+
 ## Recovery Patterns
 
 ### Restack conflict

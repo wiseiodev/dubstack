@@ -1,27 +1,36 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { LanguageModel } from 'ai';
 import { createGateway, generateText } from 'ai';
+import { buildAiDiffContext } from '../lib/ai-diff-context';
+import {
+  type AiMetadataDependencies,
+  generateCreateMetadata,
+} from '../lib/ai-metadata';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
   commitStaged,
+  commitStagedFromFile,
   createBranch,
   getBranchTip,
   getCurrentBranch,
   getDiff,
+  getDiffFileNames,
+  getDiffNumStat,
   hasStagedChanges,
   interactiveStage,
   isValidBranchName,
   stageAll,
   stageUpdate,
 } from '../lib/git';
-import { redactSensitiveText } from '../lib/history';
+import { readMetadataTemplates } from '../lib/metadata-templates';
 import { addBranchToStack, ensureState, writeState } from '../lib/state';
+import { withTempMarkdownFile } from '../lib/temp-text-file';
 import { saveUndoEntry } from '../lib/undo-log';
 
 interface CreateOptions {
   ai?: boolean;
+  noAi?: boolean;
   message?: string;
   all?: boolean;
   update?: boolean;
@@ -34,20 +43,13 @@ interface CreateResult {
   committed?: string;
 }
 
-interface CreateDependencies {
-  generateText: typeof generateText;
-  createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
-  createGateway: typeof createGateway;
-}
+type CreateDependencies = AiMetadataDependencies;
 
 const DEFAULT_DEPS: CreateDependencies = {
   generateText,
   createGoogleGenerativeAI,
   createGateway,
 };
-
-const CONVENTIONAL_COMMIT_RE =
-  /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+/;
 
 /**
  * Creates a new branch stacked on top of the current branch.
@@ -69,7 +71,18 @@ export async function create(
   deps: CreateDependencies = DEFAULT_DEPS,
 ): Promise<CreateResult> {
   const normalizedOptions = options ?? {};
-  const useAi = normalizedOptions.ai ?? false;
+
+  if (normalizedOptions.ai && normalizedOptions.noAi) {
+    throw new DubError("'--ai' cannot be combined with '--no-ai'.");
+  }
+
+  const config = await readConfig(cwd);
+  const useAi =
+    normalizedOptions.ai === true
+      ? true
+      : normalizedOptions.noAi === true
+        ? false
+        : config.ai.defaults.createMetadata;
 
   if (
     (normalizedOptions.all ||
@@ -127,7 +140,6 @@ export async function create(
   }
 
   if (useAi) {
-    const config = await readConfig(cwd);
     if (!config.aiAssistantEnabled) {
       throw new DubError(
         "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
@@ -135,7 +147,22 @@ export async function create(
     }
 
     const stagedDiff = await getDiff(cwd, true);
-    const generated = await generateBranchAndCommitFromAi(stagedDiff, deps);
+    const [stagedFiles, stagedDiffStats] = await Promise.all([
+      getDiffFileNames(cwd, true),
+      getDiffNumStat(cwd, true),
+    ]);
+    const templates = await readMetadataTemplates(cwd);
+    const generated = await generateCreateMetadata(
+      buildAiDiffContext({
+        rawDiff: stagedDiff,
+        filePaths: stagedFiles,
+        diffStats: stagedDiffStats,
+      }),
+      deps,
+      {
+        commitTemplate: templates.commitTemplate,
+      },
+    );
     branchName = generated.branch;
     commitMessage = generated.message;
   }
@@ -173,7 +200,17 @@ export async function create(
 
   if (commitMessage) {
     try {
-      await commitStaged(commitMessage, cwd);
+      if (commitMessage.includes('\n')) {
+        await withTempMarkdownFile(
+          'commit-message',
+          commitMessage,
+          async (filePath) => {
+            await commitStagedFromFile(filePath, cwd);
+          },
+        );
+      } else {
+        await commitStaged(commitMessage, cwd);
+      }
     } catch (error) {
       const reason = error instanceof DubError ? error.message : String(error);
       throw new DubError(
@@ -184,158 +221,4 @@ export async function create(
   }
 
   return { branch: branchName, parent };
-}
-
-async function generateBranchAndCommitFromAi(
-  stagedDiff: string,
-  deps: CreateDependencies,
-): Promise<{ branch: string; message: string }> {
-  const resolved = resolveModel(deps);
-  const redactedDiff = redactSensitiveText(stagedDiff).trim();
-  const diffForPrompt = truncate(redactedDiff, 12_000);
-  const prompt = [
-    'Generate a git branch name and conventional commit message from the staged diff.',
-    'Return JSON only, exactly like: {"branch":"feat/your-branch","message":"feat: summary"}',
-    'Rules:',
-    '- branch must be lowercase, slash-delimited, and kebab-case.',
-    '- message must be a Conventional Commit subject line.',
-    '- keep message under 72 characters when possible.',
-    '- do not include markdown fences.',
-    '',
-    'STAGED_DIFF_START',
-    diffForPrompt.length > 0 ? diffForPrompt : '[No textual diff available]',
-    'STAGED_DIFF_END',
-  ].join('\n');
-
-  const result = await deps.generateText({
-    model: resolved.model,
-    system:
-      'You produce concise git metadata. Output strict JSON only and never add extra commentary.',
-    prompt,
-  });
-
-  return parseAiCreateResponse(result.text);
-}
-
-function resolveModel(deps: CreateDependencies): {
-  provider: 'google' | 'gateway';
-  model: LanguageModel;
-  modelId: string;
-} {
-  const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
-  if (geminiApiKey) {
-    const geminiModel =
-      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
-    const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
-    return {
-      provider: 'google',
-      model: google(geminiModel),
-      modelId: geminiModel,
-    };
-  }
-
-  const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
-  if (gatewayApiKey) {
-    const gatewayModel =
-      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
-    const gateway = deps.createGateway({ apiKey: gatewayApiKey });
-    return {
-      provider: 'gateway',
-      model: gateway(gatewayModel),
-      modelId: gatewayModel,
-    };
-  }
-
-  throw new DubError(
-    "AI assistant requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env --gemini-key <key>' or 'dub ai env --gateway-key <key>'.",
-  );
-}
-
-function parseAiCreateResponse(text: string): {
-  branch: string;
-  message: string;
-} {
-  const candidate = extractJsonObject(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(candidate);
-  } catch {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
-  }
-
-  if (!parsed || typeof parsed !== 'object') {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
-  }
-
-  const rawBranch = getStringValue(parsed, 'branch');
-  const rawMessage = getStringValue(parsed, 'message');
-  const branch = normalizeBranchName(rawBranch);
-  const message = normalizeCommitMessage(rawMessage);
-
-  if (branch.length === 0) {
-    throw new DubError('AI assistant generated an empty branch name.');
-  }
-
-  if (!CONVENTIONAL_COMMIT_RE.test(message)) {
-    throw new DubError(
-      "AI assistant generated a non-conventional commit message. Re-run '--ai' or pass '-m' manually.",
-    );
-  }
-
-  return { branch, message };
-}
-
-function getStringValue(source: object, key: string): string {
-  const value = (source as Record<string, unknown>)[key];
-  if (typeof value !== 'string') {
-    throw new DubError(`AI assistant metadata is missing '${key}'.`);
-  }
-  return value;
-}
-
-function normalizeBranchName(value: string): string {
-  return value
-    .trim()
-    .replace(/^`+|`+$/g, '')
-    .replace(/^refs\/heads\//, '')
-    .toLowerCase()
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9./_-]+/g, '-')
-    .replace(/\/+/g, '/')
-    .replace(/-+/g, '-')
-    .replace(/^\/+|\/+$/g, '')
-    .replace(/^\.+/, '')
-    .replace(/\.+$/, '');
-}
-
-function normalizeCommitMessage(value: string): string {
-  return value
-    .trim()
-    .replace(/^`+|`+$/g, '')
-    .replace(/\s+/g, ' ');
-}
-
-function extractJsonObject(text: string): string {
-  const trimmed = text.trim();
-  const withoutFences =
-    trimmed.startsWith('```') && trimmed.endsWith('```')
-      ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-      : trimmed;
-  const start = withoutFences.indexOf('{');
-  const end = withoutFences.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
-  }
-  return withoutFences.slice(start, end + 1);
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}\n...[truncated]`;
 }

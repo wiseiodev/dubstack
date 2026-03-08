@@ -6,6 +6,8 @@ coverage
 
 .worktrees
 .dispatch
+.evalite
+.evalite-export
 
 # Dolt database files (added by bd init)
 .dolt/

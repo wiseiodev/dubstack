@@ -7,6 +7,8 @@ interface StackEntry {
 
 const DUBSTACK_START = '<!-- dubstack:start -->';
 const DUBSTACK_END = '<!-- dubstack:end -->';
+const AI_SUMMARY_START = '<!-- dubstack-ai-summary:start -->';
+const AI_SUMMARY_END = '<!-- dubstack-ai-summary:end -->';
 const METADATA_START = '<!-- dubstack-metadata';
 const METADATA_END = '-->';
 
@@ -97,20 +99,59 @@ export function stripDubstackSections(body: string): string {
 }
 
 /**
+ * Wraps an AI-managed PR summary in explicit markers so it can be replaced safely.
+ */
+export function buildAiSummarySection(summary: string): string {
+  const trimmed = summary.trim();
+  if (trimmed.length === 0) return '';
+  return [AI_SUMMARY_START, trimmed, AI_SUMMARY_END].join('\n');
+}
+
+/**
+ * Removes only the AI-managed summary section while preserving user-authored text.
+ */
+export function stripAiSummarySection(body: string): string {
+  let result = body;
+
+  while (true) {
+    const startIdx = result.indexOf(AI_SUMMARY_START);
+    const endIdx = result.indexOf(AI_SUMMARY_END);
+
+    if (startIdx === -1 || endIdx === -1) {
+      return normalizeBodyWhitespace(result);
+    }
+
+    result =
+      result.slice(0, startIdx) + result.slice(endIdx + AI_SUMMARY_END.length);
+  }
+}
+
+/**
  * Composes the final PR body by combining user content with DubStack sections.
  *
  * @param existingBody - The existing PR body (may contain stale DubStack sections)
+ * @param aiSummary - Human-readable AI-generated summary content
  * @param stackTable - Output of `buildStackTable`
  * @param metadataBlock - Output of `buildMetadataBlock`
  */
 export function composePrBody(
   existingBody: string,
+  aiSummary: string,
   stackTable: string,
   metadataBlock: string,
 ): string {
-  const userContent = stripDubstackSections(existingBody);
-  const parts = [userContent, stackTable, metadataBlock].filter(Boolean);
+  const userContent = stripAiSummarySection(
+    stripDubstackSections(existingBody),
+  );
+  const aiSection = buildAiSummarySection(aiSummary);
+  const parts = [userContent, aiSection, stackTable, metadataBlock].filter(
+    Boolean,
+  );
   return parts.join('\n\n');
+}
+
+function normalizeBodyWhitespace(body: string): string {
+  return body.trim().replace(/\n{3,}/g, '\n\n');
 }
 
 /**

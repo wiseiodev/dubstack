@@ -192,6 +192,138 @@ describe('create with -u -m', () => {
 });
 
 describe('create with --ai', () => {
+  it('uses the repo default to enable AI when no flag is passed', async () => {
+    await writeConfig(
+      {
+        aiAssistantEnabled: true,
+        ai: {
+          defaults: {
+            createMetadata: true,
+            submitDescription: false,
+            flow: false,
+          },
+        },
+      },
+      dir,
+    );
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    fs.writeFileSync(
+      path.join(dir, 'ai-default.ts'),
+      'export const defaulted = true;\n',
+    );
+    await gitInRepo(dir, ['add', 'ai-default.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/default-ai","message":"feat: default ai mode"}',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    const result = await create(
+      undefined as unknown as string,
+      dir,
+      {},
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(result.branch).toBe('feat/default-ai');
+    expect(result.committed).toBe('feat: default ai mode');
+  });
+
+  it('allows --no-ai to override an enabled repo default', async () => {
+    await writeConfig(
+      {
+        aiAssistantEnabled: true,
+        ai: {
+          defaults: {
+            createMetadata: true,
+            submitDescription: false,
+            flow: false,
+          },
+        },
+      },
+      dir,
+    );
+
+    const generateText = vi.fn();
+    const createGoogleGenerativeAI = vi.fn();
+    const createGateway = vi.fn();
+
+    await expect(
+      create(
+        undefined as unknown as string,
+        dir,
+        { noAi: true },
+        {
+          generateText,
+          createGoogleGenerativeAI,
+          createGateway,
+        },
+      ),
+    ).rejects.toThrow(
+      "Branch name is required. Pass '<branch-name>' or use '--ai'.",
+    );
+
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it('allows --ai to override a disabled repo default', async () => {
+    await writeConfig(
+      {
+        aiAssistantEnabled: true,
+        ai: {
+          defaults: {
+            createMetadata: false,
+            submitDescription: false,
+            flow: false,
+          },
+        },
+      },
+      dir,
+    );
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    fs.writeFileSync(
+      path.join(dir, 'ai-forced.ts'),
+      'export const forced = true;\n',
+    );
+    await gitInRepo(dir, ['add', 'ai-forced.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/forced-ai","message":"feat: forced ai mode"}',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    const result = await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(result.branch).toBe('feat/forced-ai');
+    expect(result.committed).toBe('feat: forced ai mode');
+  });
+
+  it('rejects combining --ai and --no-ai', async () => {
+    await expect(
+      create(undefined as unknown as string, dir, {
+        ai: true,
+        noAi: true,
+      }),
+    ).rejects.toThrow("'--ai' cannot be combined with '--no-ai'.");
+  });
+
   it('creates branch and commit from AI output using staged changes', async () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
@@ -226,6 +358,48 @@ describe('create with --ai', () => {
         model: 'google-model',
       }),
     );
+  });
+
+  it('preserves multiline AI commit messages when applying them', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    fs.writeFileSync(
+      path.join(dir, '.gitmessage'),
+      'feat(scope): summary\n\n## Testing\n- [ ] added\n',
+    );
+    await gitInRepo(dir, ['config', 'commit.template', '.gitmessage']);
+    fs.writeFileSync(
+      path.join(dir, 'ai-template.ts'),
+      'export const aiTemplate = 1;\n',
+    );
+    await gitInRepo(dir, ['add', 'ai-template.ts']);
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: JSON.stringify({
+        branch: 'feat/template-aware',
+        message: 'feat: preserve template\n\n## Testing\n- [x] added coverage',
+      }),
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    const result = await create(
+      undefined as unknown as string,
+      dir,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(result.committed).toContain('## Testing');
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%B']);
+    expect(stdout).toContain('feat: preserve template');
+    expect(stdout).toContain('## Testing');
+    expect(stdout).toContain('- [x] added coverage');
   });
 
   it('uses DUBSTACK_GEMINI_MODEL override when provided', async () => {

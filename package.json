@@ -7,16 +7,22 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "check:all": "pnpm checks:fix:unsafe && pnpm typecheck && pnpm test && pnpm evals",
+    "cli:dev": "pnpm --filter dubstack exec tsx src/index.ts",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
     "typecheck": "turbo run typecheck",
     "checks": "biome check .",
     "checks:fix": "biome check --write .",
     "checks:fix:unsafe": "biome check --write --unsafe .",
-    "dev": "turbo run dev"
+    "dev": "turbo run dev",
+    "evals": "evalite run",
+    "evals:watch": "evalite watch",
+    "evals:export": "evalite export --output .evalite-export"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.2",
+    "evalite": "0.19.0",
     "turbo": "^2.5.0"
   }
 }

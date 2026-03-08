@@ -33,6 +33,7 @@ import { continueCommand } from './commands/continue';
 import { create } from './commands/create';
 import { deleteCommand } from './commands/delete';
 import { doctor } from './commands/doctor';
+import { flow } from './commands/flow';
 import { init } from './commands/init';
 import { log } from './commands/log';
 import { mergeCheck } from './commands/merge-check';
@@ -124,6 +125,7 @@ program
     '-i, --ai',
     'AI-generate branch + conventional commit from staged changes',
   )
+  .option('--no-ai', 'Disable AI generation for this invocation')
   .addHelpText(
     'after',
     `
@@ -131,7 +133,8 @@ Examples:
   $ dub create feat/api                       Create branch only
   $ dub create feat/api -m "feat: add API"    Create branch + commit staged
   $ dub create feat/api -am "feat: add API"   Stage all + create + commit
-  $ dub create --ai                            AI-generate branch + commit from staged`,
+  $ dub create --ai                            AI-generate branch + commit from staged
+  $ dub create --no-ai feat/api                Override repo AI defaults for one create`,
   )
   .action(
     async (
@@ -142,6 +145,7 @@ Examples:
         update?: boolean;
         patch?: boolean;
         ai?: boolean;
+        noAi?: boolean;
       },
     ) => {
       const result = await create(branchName, process.cwd(), {
@@ -150,6 +154,7 @@ Examples:
         update: options.update,
         patch: options.patch,
         ai: options.ai,
+        noAi: options.noAi,
       });
       if (result.committed) {
         console.log(
@@ -166,6 +171,35 @@ Examples:
       }
     },
   );
+
+program
+  .command('flow')
+  .alias('f')
+  .description(
+    'Stage, preview, create, and submit an AI-assisted DubStack change',
+  )
+  .option('-a, --all', 'Stage all changes before generating metadata')
+  .option(
+    '-u, --update',
+    'Stage tracked file changes before generating metadata',
+  )
+  .option('-p, --patch', 'Pick hunks to stage before generating metadata')
+  .option('-y, --yes', 'Auto-approve generated metadata without prompting')
+  .option('-i, --ai', 'Force AI flow for this invocation')
+  .option('--no-ai', 'Disable AI flow for this invocation')
+  .option(
+    '--dry-run',
+    'Preview generated metadata without creating or submitting',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub flow --ai -a      Stage all, preview AI metadata, create, and submit
+  $ dub flow -y -u        Auto-approve after staging tracked changes
+  $ dub flow --dry-run    Preview generated branch, commit, and PR text only`,
+  )
+  .action(runFlow);
 
 program
   .command('log')
@@ -580,6 +614,8 @@ program
     'Push branches and create/update GitHub PRs for the current stack',
   )
   .option('--dry-run', 'Print what would happen without executing')
+  .option('-i, --ai', 'AI-generate a PR description for this invocation')
+  .option('--no-ai', 'Disable AI PR description generation for this invocation')
   .option(
     '--path <mode>',
     'Submit scope: current (default) or stack',
@@ -593,6 +629,7 @@ program
 Examples:
   $ dub submit           Push and create/update PRs
   $ dub submit --dry-run Preview what would happen
+  $ dub submit --ai      Generate a PR description before updating the PR body
   $ dub submit --path stack --fix Submit full stack with safe auto-remediation`,
   )
   .action(runSubmit);
@@ -601,6 +638,8 @@ program
   .command('ss')
   .description('Submit the current stack (alias for submit)')
   .option('--dry-run', 'Print what would happen without executing')
+  .option('-i, --ai', 'AI-generate a PR description for this invocation')
+  .option('--no-ai', 'Disable AI PR description generation for this invocation')
   .option(
     '--path <mode>',
     'Submit scope: current (default) or stack',
@@ -926,6 +965,39 @@ program
           );
         }
       }),
+  )
+  .addCommand(
+    new Command('ai-defaults')
+      .description('Manage repo-local AI defaults for DubStack commands')
+      .argument('<target>', 'One of: create, submit, flow')
+      .argument('[state]', 'Set to on/off (omit to inspect current value)')
+      .action(async (target: 'create' | 'submit' | 'flow', state?: string) => {
+        const { configAiDefaults } = await import('./commands/config');
+        const result = await configAiDefaults(process.cwd(), target, state);
+
+        if (!state) {
+          console.log(
+            chalk.blue(
+              `AI default for '${target}' is ${result.enabled ? 'enabled' : 'disabled'} for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(
+              `✔ AI default for '${target}' ${result.enabled ? 'enabled' : 'disabled'}`,
+            ),
+          );
+        } else {
+          console.log(
+            chalk.yellow(
+              `⚠ AI default for '${target}' is already ${result.enabled ? 'enabled' : 'disabled'}`,
+            ),
+          );
+        }
+      }),
   );
 
 program
@@ -1086,10 +1158,14 @@ program
 
 async function runSubmit(options: {
   dryRun?: boolean;
+  ai?: boolean;
+  noAi?: boolean;
   path?: SubmitPathMode;
   fix?: boolean;
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
+    ai: options.ai,
+    noAi: options.noAi,
     path: options.path ?? 'current',
     fix: options.fix ?? false,
   });
@@ -1113,6 +1189,44 @@ async function runSubmit(options: {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
   }
+}
+
+async function runFlow(options: {
+  all?: boolean;
+  update?: boolean;
+  patch?: boolean;
+  yes?: boolean;
+  ai?: boolean;
+  noAi?: boolean;
+  dryRun?: boolean;
+}) {
+  const result = await flow(process.cwd(), {
+    all: options.all,
+    update: options.update,
+    patch: options.patch,
+    yes: options.yes,
+    ai: options.ai,
+    noAi: options.noAi,
+    dryRun: options.dryRun,
+  });
+
+  if (result.aborted) {
+    console.log(chalk.yellow('⚠ Flow cancelled before create/submit.'));
+    return;
+  }
+
+  if (result.dryRun) {
+    console.log(
+      chalk.green(
+        `✔ Dry-run complete: ${result.branch} • ${result.commitMessage}`,
+      ),
+    );
+    return;
+  }
+
+  console.log(
+    chalk.green(`✔ Flow complete: ${result.branch} • ${result.commitMessage}`),
+  );
 }
 
 async function printLog(

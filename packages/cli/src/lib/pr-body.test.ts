@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAiSummarySection,
   buildMetadataBlock,
   buildStackTable,
   composePrBody,
   parseDubstackMetadata,
+  stripAiSummarySection,
   stripDubstackSections,
 } from './pr-body';
 import type { Branch } from './state';
@@ -111,25 +113,130 @@ describe('stripDubstackSections', () => {
 });
 
 describe('composePrBody', () => {
-  it('combines user content with stack sections', () => {
-    const result = composePrBody('My PR', 'STACK_TABLE', 'META_BLOCK');
+  it('combines user content with ai summary and stack sections', () => {
+    const result = composePrBody(
+      'My PR',
+      'AI summary',
+      'STACK_TABLE',
+      'META_BLOCK',
+    );
 
-    expect(result).toBe('My PR\n\nSTACK_TABLE\n\nMETA_BLOCK');
+    expect(result).toBe(
+      [
+        'My PR',
+        buildAiSummarySection('AI summary'),
+        'STACK_TABLE',
+        'META_BLOCK',
+      ].join('\n\n'),
+    );
   });
 
-  it('strips stale sections before composing', () => {
-    const existingBody =
-      'My PR\n\n<!-- dubstack:start -->\nold table\n<!-- dubstack:end -->\n\n<!-- dubstack-metadata\nold meta\n-->';
+  it('replaces stale ai summary and dubstack sections before composing', () => {
+    const existingBody = [
+      'My PR',
+      buildAiSummarySection('Old summary'),
+      '<!-- dubstack:start -->',
+      'old table',
+      '<!-- dubstack:end -->',
+      '',
+      '<!-- dubstack-metadata',
+      'old meta',
+      '-->',
+    ].join('\n');
 
-    const result = composePrBody(existingBody, 'NEW_TABLE', 'NEW_META');
+    const result = composePrBody(
+      existingBody,
+      'New summary',
+      'NEW_TABLE',
+      'NEW_META',
+    );
 
-    expect(result).toBe('My PR\n\nNEW_TABLE\n\nNEW_META');
+    expect(result).toBe(
+      [
+        'My PR',
+        buildAiSummarySection('New summary'),
+        'NEW_TABLE',
+        'NEW_META',
+      ].join('\n\n'),
+    );
   });
 
   it('handles empty existing body', () => {
-    const result = composePrBody('', 'TABLE', 'META');
+    const result = composePrBody('', 'Summary', 'TABLE', 'META');
 
-    expect(result).toBe('TABLE\n\nMETA');
+    expect(result).toBe(
+      [buildAiSummarySection('Summary'), 'TABLE', 'META'].join('\n\n'),
+    );
+  });
+
+  it('preserves user-authored content around ai-managed sections', () => {
+    const existingBody = [
+      'User intro',
+      '',
+      buildAiSummarySection('Old summary'),
+      '',
+      'Extra author note',
+      '',
+      '<!-- dubstack:start -->',
+      'old table',
+      '<!-- dubstack:end -->',
+      '',
+      '<!-- dubstack-metadata',
+      'old meta',
+      '-->',
+    ].join('\n');
+
+    const result = composePrBody(
+      existingBody,
+      'Fresh summary',
+      'TABLE',
+      'META',
+    );
+
+    expect(result).toContain('User intro\n\nExtra author note');
+    expect(result).toContain(buildAiSummarySection('Fresh summary'));
+    expect(result).toContain('TABLE');
+    expect(result).toContain('META');
+  });
+});
+
+describe('AI summary helpers', () => {
+  it('wraps ai summary content in replaceable markers', () => {
+    const result = buildAiSummarySection('Summary text');
+
+    expect(result).toContain('<!-- dubstack-ai-summary:start -->');
+    expect(result).toContain('Summary text');
+    expect(result).toContain('<!-- dubstack-ai-summary:end -->');
+  });
+
+  it('strips only the ai-managed summary section', () => {
+    const body = [
+      'User intro',
+      '',
+      buildAiSummarySection('Generated summary'),
+      '',
+      'User footer',
+    ].join('\n');
+
+    expect(stripAiSummarySection(body)).toBe('User intro\n\nUser footer');
+  });
+
+  it('strips duplicate ai-managed summary sections without leaving stale text behind', () => {
+    const body = [
+      'User intro',
+      '',
+      buildAiSummarySection('Generated summary'),
+      '',
+      'User middle',
+      '',
+      buildAiSummarySection('Older generated summary'),
+      '',
+      'User footer',
+    ].join('\n');
+
+    expect(stripAiSummarySection(body)).toBe(
+      'User intro\n\nUser middle\n\nUser footer',
+    );
   });
 });
 
@@ -137,6 +244,7 @@ describe('parseDubstackMetadata', () => {
   it('parses metadata block from a composed PR body', () => {
     const body = composePrBody(
       'My description',
+      '',
       'STACK',
       buildMetadataBlock('stack-1', 12, 11, 13, 'feat/a'),
     );

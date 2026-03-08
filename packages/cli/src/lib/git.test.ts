@@ -6,11 +6,13 @@ import { DubError } from './errors';
 import {
   branchExists,
   commitStaged,
+  commitStagedFromFile,
   createBranch,
   deleteBranch,
   forceBranchTo,
   getBranchTip,
   getCurrentBranch,
+  getDiffBetween,
   getMergeBase,
   hasStagedChanges,
   isGitRepo,
@@ -184,6 +186,14 @@ describe('getMergeBase', () => {
   });
 });
 
+describe('getDiffBetween', () => {
+  it('throws when either ref is invalid', async () => {
+    await expect(getDiffBetween('main', 'missing-branch', dir)).rejects.toThrow(
+      DubError,
+    );
+  });
+});
+
 describe('getBranchTip', () => {
   it('returns the commit SHA of a branch', async () => {
     const expected = (
@@ -254,5 +264,28 @@ describe('commitStaged', () => {
 
   it('throws when nothing is staged', async () => {
     await expect(commitStaged('empty commit', dir)).rejects.toThrow(DubError);
+  });
+});
+
+describe('commitStagedFromFile', () => {
+  it('creates a commit using a file-backed message', async () => {
+    const messagePath = path.join(dir, 'commit-message.md');
+    fs.writeFileSync(messagePath, 'test: add file from message file\n');
+    fs.writeFileSync(path.join(dir, 'commit-file.txt'), 'data');
+    await gitInRepo(dir, ['add', 'commit-file.txt']);
+
+    await commitStagedFromFile(messagePath, dir);
+
+    const { stdout } = await gitInRepo(dir, ['log', '-1', '--format=%s']);
+    expect(stdout.trim()).toBe('test: add file from message file');
+  });
+
+  it('throws when the message file commit fails', async () => {
+    const messagePath = path.join(dir, 'commit-message.md');
+    fs.writeFileSync(messagePath, 'test: no staged changes\n');
+
+    await expect(commitStagedFromFile(messagePath, dir)).rejects.toThrow(
+      DubError,
+    );
   });
 });

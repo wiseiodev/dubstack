@@ -10,6 +10,7 @@ import {
 } from '../lib/ai-context';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
+import { createTerminalRenderer } from '../lib/terminal-render';
 
 interface WritableLike {
   write: (chunk: string | Uint8Array) => unknown;
@@ -53,8 +54,6 @@ const THINKING_PROVIDER_OPTIONS = {
   },
 } as const;
 
-const SPINNER_FRAMES = ['-', '\\', '|', '/'] as const;
-
 export async function askAi(
   prompt: string,
   cwd: string,
@@ -86,7 +85,6 @@ export async function askAi(
 
   const webBrowsingRequested = config.ai.webBrowsing.mode === 'model-native';
   let webBrowsingUsed = webBrowsingRequested;
-  let wroteOutput = false;
   const runStream = async (withWebBrowsing: boolean): Promise<boolean> => {
     const result = deps.streamText({
       model: resolved.model,
@@ -102,7 +100,7 @@ export async function askAi(
   };
 
   try {
-    wroteOutput = await runStream(webBrowsingRequested);
+    await runStream(webBrowsingRequested);
   } catch (error) {
     if (!isBrowsingUnsupportedError(error)) {
       throw error;
@@ -114,11 +112,7 @@ export async function askAi(
     output.write(
       '[note] Web browsing is unavailable for this provider/model right now. Continuing with local context and model knowledge.\n',
     );
-    wroteOutput = await runStream(false);
-  }
-
-  if (wroteOutput) {
-    output.write('\n');
+    await runStream(false);
   }
 
   return {
@@ -146,32 +140,70 @@ async function renderStream(
     fullStream: AsyncIterable<{
       type: string;
       text?: string;
+      toolName?: string;
       error?: unknown;
     }>;
   },
   output: WritableLike,
 ): Promise<boolean> {
-  const thinkingRenderer = createThinkingRenderer(output);
+  const renderer = createTerminalRenderer(output);
   let wroteOutput = false;
+  let endedWithNewline = false;
+  let pendingToolName: string | null = null;
+  let pendingToolDetail = '';
+
+  const flushPendingTool = () => {
+    if (!pendingToolName) return;
+    renderer.renderToolActivity(pendingToolName, pendingToolDetail);
+    pendingToolName = null;
+    pendingToolDetail = '';
+  };
+
   try {
     for await (const part of result.fullStream) {
       switch (part.type) {
         case 'reasoning-start': {
-          thinkingRenderer.start();
+          renderer.renderStatus('thinking');
           break;
         }
         case 'reasoning-delta': {
-          thinkingRenderer.update(part.text ?? '');
           break;
         }
         case 'reasoning-end': {
-          thinkingRenderer.stop();
+          break;
+        }
+        case 'tool-input-start': {
+          flushPendingTool();
+          pendingToolName = part.toolName ?? 'tool';
+          pendingToolDetail = '';
+          break;
+        }
+        case 'tool-input-delta': {
+          if (!pendingToolName) {
+            pendingToolName = part.toolName ?? 'tool';
+          }
+          pendingToolDetail += part.text ?? '';
+          break;
+        }
+        case 'tool-input-end': {
+          if (!pendingToolName) {
+            pendingToolName = part.toolName ?? 'tool';
+          }
+          flushPendingTool();
+          break;
+        }
+        case 'tool-call': {
+          renderer.renderToolActivity(part.toolName ?? 'tool', part.text);
           break;
         }
         case 'text-delta': {
-          thinkingRenderer.pauseForText();
-          output.write(part.text ?? '');
-          wroteOutput = true;
+          flushPendingTool();
+          const chunk = part.text ?? '';
+          if (chunk.length > 0) {
+            output.write(chunk);
+            wroteOutput = true;
+            endedWithNewline = chunk.endsWith('\n');
+          }
           break;
         }
         case 'error': {
@@ -185,8 +217,13 @@ async function renderStream(
       }
     }
   } finally {
-    thinkingRenderer.stop();
+    flushPendingTool();
   }
+
+  if (wroteOutput && !endedWithNewline) {
+    output.write('\n');
+  }
+
   return wroteOutput;
 }
 
@@ -231,66 +268,4 @@ function resolveModel(deps: AskAiDependencies): {
   throw new DubError(
     "AI assistant requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env --gemini-key <key>' or 'dub ai env --gateway-key <key>'.",
   );
-}
-
-function createThinkingRenderer(output: WritableLike): {
-  start: () => void;
-  update: (delta: string) => void;
-  pauseForText: () => void;
-  stop: () => void;
-} {
-  if (!output.isTTY) {
-    return {
-      start() {},
-      update() {},
-      pauseForText() {},
-      stop() {},
-    };
-  }
-
-  let spinnerIndex = 0;
-  let preview = '';
-  let lineLength = 0;
-  let active = false;
-  let hasRendered = false;
-
-  const clearLine = () => {
-    if (!hasRendered) return;
-    output.write(`\r${' '.repeat(lineLength)}\r`);
-    lineLength = 0;
-    hasRendered = false;
-  };
-
-  const render = () => {
-    const frame = SPINNER_FRAMES[spinnerIndex];
-    spinnerIndex = (spinnerIndex + 1) % SPINNER_FRAMES.length;
-
-    const summary =
-      preview.length > 96 ? `${preview.slice(0, 93)}...` : preview;
-    const line = `${frame} thinking: ${summary || 'working...'}`;
-    output.write(`\r${line}`);
-    lineLength = line.length;
-    hasRendered = true;
-  };
-
-  return {
-    start() {
-      if (active) return;
-      active = true;
-      render();
-    },
-    update(delta: string) {
-      if (!active) return;
-      preview += delta;
-      render();
-    },
-    pauseForText() {
-      clearLine();
-    },
-    stop() {
-      active = false;
-      preview = '';
-      clearLine();
-    },
-  };
 }
