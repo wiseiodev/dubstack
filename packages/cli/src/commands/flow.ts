@@ -1,7 +1,9 @@
 import * as fs from 'node:fs';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import { execa } from 'execa';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
@@ -87,6 +89,9 @@ const DEFAULT_DEPS: FlowDependencies = {
   generateText,
   createGoogleGenerativeAI,
   createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
   generateFlowMetadata,
   readMetadataTemplates,
   readConfig,
@@ -171,6 +176,7 @@ export async function flow(
       commitTemplate: templates.commitTemplate,
       prTemplate: templates.prTemplate,
     },
+    config.ai.provider,
   );
   let commitMessage = generated.commitMessage;
   let prDescription = generated.prDescription;

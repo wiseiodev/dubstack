@@ -25,16 +25,17 @@ Get from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# Add one API key to your shell profile
-dub ai env --gemini-key "<your-gemini-key>"
-# or:
-dub ai env --gateway-key "<your-ai-gateway-key>"
+# Guided setup for Gemini, AI Gateway, or Amazon Bedrock
+dub ai setup
 
-# Reload your shell
+# Reload your shell with the command DubStack prints
 source ~/.zshrc
 
 # Enable assistant for this repo
 dub config ai-assistant on
+
+# Pin the provider for this repository
+dub config ai-provider bedrock
 
 # Optional: enable AI defaults
 dub config ai-defaults create on
@@ -44,6 +45,17 @@ dub config ai-defaults flow on
 # Ask a question
 dub ai ask "Summarize this stack from trunk to current branch"
 ```
+
+For Bedrock teams using AWS SSO or role-based auth, DubStack supports:
+
+```bash
+dub ai env \
+  --bedrock-profile "bw-sso" \
+  --bedrock-region "us-west-2" \
+  --bedrock-model "us.anthropic.claude-sonnet-4-6"
+```
+
+`dub ai setup` and `dub ai env` both print the exact activation command to run after updating your shell profile.
 
 If you want DubStack AI to follow your repository's formatting, also set up:
 

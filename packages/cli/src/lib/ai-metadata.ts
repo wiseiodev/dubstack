@@ -1,16 +1,26 @@
+import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { createGateway, generateText, LanguageModel } from 'ai';
+import type {
+  fromIni,
+  fromNodeProviderChain,
+} from '@aws-sdk/credential-providers';
+import type { createGateway, generateText } from 'ai';
 import {
   type AiDiffContext,
   type AiDiffContextInput,
   buildAiDiffContext,
 } from './ai-diff-context';
+import { resolveAiProvider } from './ai-provider';
+import type { DubConfig } from './config';
 import { DubError } from './errors';
 
 export interface AiMetadataDependencies {
   generateText: typeof generateText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
+  createAmazonBedrock?: typeof createAmazonBedrock;
+  fromIni?: typeof fromIni;
+  fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
 
 export interface PrDescriptionContext {
@@ -37,8 +47,9 @@ export async function generateCreateMetadata(
   stagedDiff: AiDiffContext | string | AiDiffContextInput,
   deps: AiMetadataDependencies,
   templates: AiMetadataTemplates = {},
+  providerConfig: DubConfig['ai']['provider'],
 ): Promise<{ branch: string; message: string }> {
-  const resolved = resolveModel(deps);
+  const resolved = resolveAiProvider({ deps, providerConfig });
   const diffContext = resolveAiDiffContext(stagedDiff);
   const prompt = [
     'Generate a git branch name and conventional commit message for the entire staged change set.',
@@ -79,8 +90,9 @@ export async function generatePrDescriptionSummary(
   context: PrDescriptionContext,
   deps: AiMetadataDependencies,
   templates: AiMetadataTemplates = {},
+  providerConfig: DubConfig['ai']['provider'],
 ): Promise<string> {
-  const resolved = resolveModel(deps);
+  const resolved = resolveAiProvider({ deps, providerConfig });
   const diffContext = resolveAiDiffContext(context.diff);
   const prompt = [
     'Write a concise pull request description in markdown.',
@@ -126,12 +138,18 @@ export async function generateFlowMetadata(
   input: FlowMetadataInput,
   deps: AiMetadataDependencies,
   templates: AiMetadataTemplates = {},
+  providerConfig: DubConfig['ai']['provider'],
 ): Promise<{
   branch: string;
   commitMessage: string;
   prDescription: string;
 }> {
-  const generated = await generateCreateMetadata(input.staged, deps, templates);
+  const generated = await generateCreateMetadata(
+    input.staged,
+    deps,
+    templates,
+    providerConfig,
+  );
   const prDescription = await generatePrDescriptionSummary(
     {
       branch: generated.branch,
@@ -141,6 +159,7 @@ export async function generateFlowMetadata(
     },
     deps,
     templates,
+    providerConfig,
   );
 
   return {
@@ -148,40 +167,6 @@ export async function generateFlowMetadata(
     commitMessage: generated.message,
     prDescription,
   };
-}
-
-function resolveModel(deps: AiMetadataDependencies): {
-  provider: 'google' | 'gateway';
-  model: LanguageModel;
-  modelId: string;
-} {
-  const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
-  if (geminiApiKey) {
-    const geminiModel =
-      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
-    const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
-    return {
-      provider: 'google',
-      model: google(geminiModel),
-      modelId: geminiModel,
-    };
-  }
-
-  const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
-  if (gatewayApiKey) {
-    const gatewayModel =
-      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
-    const gateway = deps.createGateway({ apiKey: gatewayApiKey });
-    return {
-      provider: 'gateway',
-      model: gateway(gatewayModel),
-      modelId: gatewayModel,
-    };
-  }
-
-  throw new DubError(
-    "AI assistant requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env --gemini-key <key>' or 'dub ai env --gateway-key <key>'.",
-  );
 }
 
 function parseAiCreateResponse(text: string): {

@@ -1,4 +1,5 @@
 import { execa } from 'execa';
+import { openUrl } from './browser';
 import { DubError } from './errors';
 
 /** Details of a GitHub Pull Request. */
@@ -370,6 +371,31 @@ export async function mergePr(
   }
 }
 
+export async function getRepositoryWebUrl(cwd: string): Promise<string> {
+  const remote = await getPreferredRemote(cwd);
+  let remoteUrl: string;
+
+  try {
+    const result = await execa('git', ['remote', 'get-url', remote], { cwd });
+    remoteUrl = result.stdout.trim();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes('not a git repository')) {
+      throw new DubError(
+        'Not a git repository. Run this command inside a git repo.',
+      );
+    }
+    throw new DubError(`Failed to read git remote '${remote}': ${message}`);
+  }
+
+  return normalizeGitHubRepositoryUrl(remoteUrl);
+}
+
+export async function openRepositoryInBrowser(cwd: string): Promise<void> {
+  const url = await getRepositoryWebUrl(cwd);
+  await openUrl(url);
+}
+
 /**
  * Opens a PR in the browser via GitHub CLI.
  *
@@ -400,4 +426,45 @@ export async function openPrInBrowser(
         : `Failed to open PR: ${message}`,
     );
   }
+}
+
+async function getPreferredRemote(cwd: string): Promise<string> {
+  try {
+    const result = await execa(
+      'git',
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      { cwd },
+    );
+    const upstream = result.stdout.trim();
+    const slashIndex = upstream.indexOf('/');
+    if (slashIndex > 0) {
+      return upstream.slice(0, slashIndex);
+    }
+  } catch {}
+
+  return 'origin';
+}
+
+function normalizeGitHubRepositoryUrl(remoteUrl: string): string {
+  const trimmed = remoteUrl.trim();
+  const sshMatch = trimmed.match(/^git@github\.com:(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return `https://github.com/${sshMatch[1]}`;
+  }
+
+  const sshProtocolMatch = trimmed.match(
+    /^ssh:\/\/git@github\.com\/(.+?)(?:\.git)?$/,
+  );
+  if (sshProtocolMatch) {
+    return `https://github.com/${sshProtocolMatch[1]}`;
+  }
+
+  const httpsMatch = trimmed.match(/^https:\/\/github\.com\/(.+?)(?:\.git)?$/);
+  if (httpsMatch) {
+    return `https://github.com/${httpsMatch[1]}`;
+  }
+
+  throw new DubError(
+    `Remote URL '${trimmed}' does not point to GitHub. 'dub repo' currently supports GitHub remotes only.`,
+  );
 }

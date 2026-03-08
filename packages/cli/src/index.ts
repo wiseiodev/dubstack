@@ -32,6 +32,7 @@ import { children } from './commands/children';
 import { continueCommand } from './commands/continue';
 import { create } from './commands/create';
 import { deleteCommand } from './commands/delete';
+import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
@@ -44,6 +45,7 @@ import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { ready } from './commands/ready';
+import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import type { SubmitPathMode } from './commands/submit';
 import { submit } from './commands/submit';
@@ -102,6 +104,32 @@ Examples:
     } else {
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
+  });
+
+program
+  .command('docs')
+  .description('Open the DubStack docs website in your browser')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub docs    Open the DubStack docs website`,
+  )
+  .action(async () => {
+    await docs();
+  });
+
+program
+  .command('repo')
+  .description('Open the current repository GitHub page in your browser')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub repo    Open the current repository GitHub page`,
+  )
+  .action(async () => {
+    await repo(process.cwd());
   });
 
 program
@@ -1004,12 +1032,127 @@ program
           );
         }
       }),
+  )
+  .addCommand(
+    new Command('ai-provider')
+      .argument(
+        '[provider]',
+        'Set to auto/gemini/gateway/bedrock (omit to inspect current value)',
+      )
+      .description('Manage the repo-local AI provider selection')
+      .action(async (provider?: string) => {
+        const { configAiProvider } = await import('./commands/config');
+        const result = await configAiProvider(process.cwd(), provider);
+
+        if (!provider) {
+          console.log(
+            chalk.blue(
+              `AI provider is '${result.provider}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ AI provider set to '${result.provider}'`));
+        } else {
+          console.log(
+            chalk.yellow(`⚠ AI provider is already '${result.provider}'`),
+          );
+        }
+      }),
+  )
+  .addCommand(
+    new Command('ai-model')
+      .argument('[model]', 'Set repo-local model override (omit to inspect)')
+      .requiredOption(
+        '--provider <provider>',
+        'Provider name: gemini, gateway, or bedrock',
+      )
+      .option('--clear', 'Clear the repo-local model override')
+      .description('Manage repo-local AI model overrides by provider')
+      .action(
+        async (
+          model: string | undefined,
+          options: {
+            provider: string;
+            clear?: boolean;
+          },
+        ) => {
+          const { configAiModel } = await import('./commands/config');
+          const result = await configAiModel(
+            process.cwd(),
+            options.provider,
+            model,
+            {
+              clear: options.clear,
+            },
+          );
+
+          if (!options.clear && model == null) {
+            console.log(
+              chalk.blue(
+                result.model
+                  ? `AI model override for '${options.provider}' is '${result.model}' for this repository.`
+                  : `AI model override for '${options.provider}' is not set for this repository.`,
+              ),
+            );
+            return;
+          }
+
+          if (result.changed) {
+            console.log(
+              chalk.green(
+                options.clear
+                  ? `✔ Cleared AI model override for '${options.provider}'`
+                  : `✔ AI model override for '${options.provider}' set to '${result.model}'`,
+              ),
+            );
+          } else {
+            console.log(
+              chalk.yellow(
+                options.clear
+                  ? `⚠ AI model override for '${options.provider}' is already clear`
+                  : `⚠ AI model override for '${options.provider}' is already '${result.model}'`,
+              ),
+            );
+          }
+        },
+      ),
   );
 
 program
   .command('ai')
   .description(
     'Use DubStack AI assistant utilities (or shortcut with: dub PROMPT)',
+  )
+  .addCommand(
+    new Command('setup')
+      .description('Guided setup for DubStack AI providers and model defaults')
+      .action(async () => {
+        const { aiSetup } = await import('./commands/ai-setup');
+        const result = await aiSetup(process.cwd());
+
+        console.log(chalk.green(`✔ AI setup updated for '${result.provider}'`));
+        console.log(
+          chalk.dim(`  ↳ model: ${result.model} (${result.modelScope})`),
+        );
+        if (result.updatedEnv.length > 0) {
+          console.log(
+            chalk.dim(`  ↳ updated env: ${result.updatedEnv.join(', ')}`),
+          );
+          if (result.profilePath) {
+            console.log(chalk.dim(`  ↳ wrote profile: ${result.profilePath}`));
+          }
+          if (result.activationCommand) {
+            console.log(
+              chalk.dim(
+                `  ↳ run in your shell to activate now: ${result.activationCommand}`,
+              ),
+            );
+          }
+        }
+      }),
   )
   .addCommand(
     new Command('ask')
@@ -1028,12 +1171,15 @@ program
   .addCommand(
     new Command('env')
       .description(
-        'Write DubStack AI API keys/models to your shell profile (macOS/Linux)',
+        'Write DubStack AI provider settings to your shell profile (macOS/Linux)',
       )
       .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
+      .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
+      .option('--bedrock-region <region>', 'Set DUBSTACK_BEDROCK_AWS_REGION')
+      .option('--bedrock-model <model>', 'Set DUBSTACK_BEDROCK_MODEL')
       .option(
         '--profile <path>',
         'Override target profile path (recommended for custom shells)',
@@ -1048,6 +1194,9 @@ program
           gatewayKey?: string;
           geminiModel?: string;
           gatewayModel?: string;
+          bedrockProfile?: string;
+          bedrockRegion?: string;
+          bedrockModel?: string;
           profile?: string;
           shell?: string;
         }) => {
@@ -1057,6 +1206,9 @@ program
             gatewayKey: options.gatewayKey,
             geminiModel: options.geminiModel,
             gatewayModel: options.gatewayModel,
+            bedrockProfile: options.bedrockProfile,
+            bedrockRegion: options.bedrockRegion,
+            bedrockModel: options.bedrockModel,
             profile: options.profile,
             shell: options.shell,
           });
@@ -1067,7 +1219,7 @@ program
           }
           console.log(
             chalk.dim(
-              `Run: source ${result.profilePath} (or open a new shell)`,
+              `Run in your shell to activate now: ${result.activationCommand}`,
             ),
           );
         },

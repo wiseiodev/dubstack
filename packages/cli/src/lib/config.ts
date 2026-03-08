@@ -11,6 +11,14 @@ export interface DubConfig {
       submitDescription: boolean;
       flow: boolean;
     };
+    provider: {
+      selected: 'auto' | 'gemini' | 'gateway' | 'bedrock';
+      models: {
+        gemini: string | null;
+        gateway: string | null;
+        bedrock: string | null;
+      };
+    };
     shortcutFallback: {
       enabled: boolean;
       typoGuard: 'interactive';
@@ -43,6 +51,14 @@ const DEFAULT_CONFIG: DubConfig = {
       createMetadata: false,
       submitDescription: false,
       flow: false,
+    },
+    provider: {
+      selected: 'auto',
+      models: {
+        gemini: null,
+        gateway: null,
+        bedrock: null,
+      },
     },
     shortcutFallback: {
       enabled: true,
@@ -99,6 +115,7 @@ export async function writeConfig(
 
 function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
   const defaults = config.ai?.defaults;
+  const provider = config.ai?.provider;
   const fallback = config.ai?.shortcutFallback;
   const shellHistory = config.ai?.context?.shellHistory;
   const webBrowsing = config.ai?.webBrowsing;
@@ -122,6 +139,14 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           typeof defaults?.flow === 'boolean'
             ? defaults.flow
             : DEFAULT_CONFIG.ai.defaults.flow,
+      },
+      provider: {
+        selected: normalizeAiProviderSelection(provider?.selected),
+        models: {
+          gemini: normalizeAiProviderModel(provider?.models?.gemini),
+          gateway: normalizeAiProviderModel(provider?.models?.gateway),
+          bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
+        },
       },
       shortcutFallback: {
         enabled:
@@ -162,4 +187,24 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
       },
     },
   };
+}
+
+function normalizeAiProviderSelection(
+  value: unknown,
+): DubConfig['ai']['provider']['selected'] {
+  if (
+    value === 'auto' ||
+    value === 'gemini' ||
+    value === 'gateway' ||
+    value === 'bedrock'
+  ) {
+    return value;
+  }
+  return DEFAULT_CONFIG.ai.provider.selected;
+}
+
+function normalizeAiProviderModel(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const model = value.trim();
+  return model.length > 0 ? model : null;
 }

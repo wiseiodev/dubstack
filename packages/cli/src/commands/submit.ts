@@ -1,4 +1,6 @@
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import {
   type AiMetadataDependencies,
@@ -78,6 +80,9 @@ const DEFAULT_DEPS: SubmitDependencies = {
   generateText,
   createGoogleGenerativeAI,
   createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
 };
 
 /**
@@ -179,6 +184,7 @@ export async function submit(
       deps,
       summaryOverrides: options.summaryOverrides,
       prTemplate: templates?.prTemplate ?? null,
+      providerConfig: config.ai.provider,
     });
 
     for (const branch of plan.branches) {
@@ -367,6 +373,9 @@ async function updateAllPrBodies(
     deps: SubmitDependencies;
     summaryOverrides?: Map<string, string>;
     prTemplate: string | null;
+    providerConfig: NonNullable<
+      Awaited<ReturnType<typeof readConfig>>['ai']
+    >['provider'];
   },
 ): Promise<void> {
   const tableEntries = new Map<string, { number: number; title: string }>();
@@ -419,6 +428,7 @@ async function updateAllPrBodies(
               {
                 prTemplate: options.prTemplate,
               },
+              options.providerConfig,
             )
           : '';
     const finalBody = composePrBody(
