@@ -8,7 +8,6 @@ import {
 } from './ai-env';
 import {
   type AiModelProvider,
-  type AiProvider,
   configAiModel,
   configAiProvider,
 } from './config';
@@ -188,7 +187,7 @@ async function optionalSecret(message: string): Promise<string | undefined> {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function getModelChoices(provider: AiProvider): Array<{
+function getModelChoices(provider: AiModelProvider): Array<{
   label: string;
   value: string;
 }> {
