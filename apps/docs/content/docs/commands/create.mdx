@@ -1,0 +1,30 @@
+---
+title: create
+description: Create a new branch that tracks the current branch as its parent.
+---
+
+## Usage
+
+```bash
+dub create <branch-name>
+```
+
+## Description
+
+Creates a new branch off the current branch and registers the parent-child relationship in DubStack's state. The new branch becomes the current working branch.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--no-track` | Create the branch without adding it to the stack |
+
+## Examples
+
+```bash
+# Create a new stacked branch
+dub create feature-auth
+
+# Create another branch on top
+dub create feature-auth-tests
+```

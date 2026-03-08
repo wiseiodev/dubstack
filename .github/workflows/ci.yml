@@ -10,18 +10,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
+
       - run: pnpm install --frozen-lockfile
-      - run: pnpm checks
-      - run: pnpm typecheck
-      - run: pnpm test:coverage
+
+      - name: Lint and format
+        run: pnpm checks
+
+      - name: Typecheck affected
+        run: pnpm turbo run typecheck --affected
+
+      - name: Test affected
+        run: pnpm turbo run test:coverage --affected
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-report
-          path: coverage/
+          path: packages/cli/coverage/
           retention-days: 30

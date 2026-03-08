@@ -1,0 +1,22 @@
+---
+title: Stacking Workflow
+description: End-to-end guide to the stacked branch workflow with DubStack.
+---
+
+This guide walks through a complete stacking workflow from creating your first branch to landing all PRs.
+
+## Planning Your Stack
+
+Break your feature into small, reviewable pieces. Each piece becomes a branch in the stack.
+
+## Creating the Stack
+
+Start from trunk and use `dub create` to build your stack one branch at a time.
+
+## Iterating on Feedback
+
+When reviewers request changes to a branch in the middle of your stack, make the changes and use `dub restack` to propagate them through descendant branches.
+
+## Landing PRs
+
+Merge PRs in order from the bottom of the stack upward using `dub merge-next`, then run `dub post-merge` to clean up.

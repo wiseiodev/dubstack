@@ -1,0 +1,28 @@
+---
+title: Conflict Resolution
+description: How to handle rebase conflicts during restack and sync operations.
+---
+
+Conflicts are a normal part of stacked workflows. DubStack provides tools to handle them gracefully.
+
+## When Conflicts Occur
+
+Conflicts happen during `dub restack` or `dub sync` when changes in one branch overlap with changes in another.
+
+## Resolving Conflicts
+
+When a conflict is detected, DubStack pauses the operation. Resolve the conflicts in your editor, stage the files, then continue:
+
+```bash
+# After resolving conflicts
+git add .
+dub continue
+```
+
+## Aborting a Restack
+
+If you want to start over:
+
+```bash
+dub abort
+```

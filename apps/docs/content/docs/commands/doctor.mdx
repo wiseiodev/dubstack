@@ -1,0 +1,30 @@
+---
+title: doctor
+description: Diagnose and repair DubStack state.
+---
+
+## Usage
+
+```bash
+dub doctor
+```
+
+## Description
+
+Checks DubStack's state for inconsistencies and offers to repair them. Useful when state gets out of sync with the actual git branch structure.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--fix` | Automatically apply suggested repairs |
+
+## Examples
+
+```bash
+# Diagnose issues
+dub doctor
+
+# Auto-fix issues
+dub doctor --fix
+```

@@ -1,0 +1,27 @@
+---
+title: sync
+description: Fetch trunk and rebase the stack onto the latest trunk.
+---
+
+## Usage
+
+```bash
+dub sync
+```
+
+## Description
+
+Fetches the latest changes from the trunk branch (usually `main`) and rebases the entire stack onto it. This keeps your stack current with upstream changes.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--trunk <branch>` | Specify the trunk branch (default: `main`) |
+
+## Examples
+
+```bash
+# Sync with trunk
+dub sync
+```

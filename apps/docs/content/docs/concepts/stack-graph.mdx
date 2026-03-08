@@ -1,0 +1,20 @@
+---
+title: Stack Graph
+description: Understanding DubStack's directed graph data model.
+---
+
+DubStack models your stack as a directed graph where each branch node points to its parent.
+
+## Parent-Child Relationships
+
+When you run `dub create feature-b` while on `feature-a`, DubStack records that `feature-b`'s parent is `feature-a`.
+
+## Graph Operations
+
+- **`dub log`** — Renders the graph as a tree visualization
+- **`dub restack`** — Walks the graph to rebase branches in dependency order
+- **`dub submit --path stack`** — Traverses the linear path from trunk to current branch
+
+## Tracking and Untracking
+
+Use `dub track` and `dub untrack` to manually add or remove branches from the graph.

@@ -1,0 +1,35 @@
+---
+title: Development
+description: Setting up a development environment for DubStack.
+---
+
+## Prerequisites
+
+- Node.js >= 22
+- pnpm (`corepack enable`)
+- Git
+
+## Setup
+
+```bash
+git clone https://github.com/wiseiodev/dubstack.git
+cd dubstack
+pnpm install
+```
+
+## Development Commands
+
+```bash
+pnpm build          # Build all packages
+pnpm test           # Run tests
+pnpm typecheck      # TypeScript type checking
+pnpm checks         # Biome lint + format
+pnpm checks:fix     # Auto-fix lint/format issues
+```
+
+## Coding Conventions
+
+- TypeScript with ESM imports
+- 2-space indentation, single quotes
+- kebab-case file names
+- Conventional commit messages

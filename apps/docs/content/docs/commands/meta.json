@@ -1,0 +1,18 @@
+{
+  "title": "Commands",
+  "pages": [
+    "create",
+    "restack",
+    "submit",
+    "sync",
+    "merge-next",
+    "post-merge",
+    "undo",
+    "checkout",
+    "log",
+    "modify",
+    "navigate",
+    "doctor",
+    "skills"
+  ]
+}

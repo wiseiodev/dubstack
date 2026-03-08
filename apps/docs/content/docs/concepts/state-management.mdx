@@ -1,0 +1,20 @@
+---
+title: State Management
+description: How DubStack tracks branch relationships and operation state.
+---
+
+DubStack stores all state locally in your repository under `.git/dubstack/`.
+
+## State Files
+
+- **`state.json`** — Branch tracking relationships (parent/child graph)
+- **`undo.json`** — State snapshot for undo operations
+- **`restack-progress.json`** — In-progress rebase/restack state for recovery
+
+## State Recovery
+
+If state becomes corrupted or out of sync, use `dub doctor` to diagnose and repair issues.
+
+## No Cloud Dependency
+
+All state is local to your git repository. There's no external service to authenticate with or depend on.

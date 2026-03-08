@@ -1,0 +1,24 @@
+---
+title: Testing
+description: Writing and running tests for DubStack.
+---
+
+DubStack uses Vitest for testing.
+
+## Running Tests
+
+```bash
+pnpm test                    # Run all tests
+pnpm test:coverage           # Run with coverage
+pnpm --filter=dubstack test  # Run CLI tests only
+```
+
+## Test Organization
+
+- **Command tests**: `packages/cli/src/commands/*.test.ts`
+- **Library tests**: `packages/cli/src/lib/*.test.ts`
+- **Integration tests**: `packages/cli/test/**/*.test.ts`
+
+## Writing Tests
+
+Co-locate unit tests with their source files. Use the existing test patterns as a guide.

@@ -24,19 +24,20 @@ jobs:
         id: version
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          PKG_VERSION=$(node -p "require('./package.json').version")
+          PKG_VERSION=$(node -p "require('./packages/cli/package.json').version")
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::Tag v${TAG_VERSION} does not match package.json version ${PKG_VERSION}"
+            echo "::error::Tag v${TAG_VERSION} does not match packages/cli/package.json version ${PKG_VERSION}"
             exit 1
           fi
           echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
 
       - run: pnpm checks
-      - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm turbo run typecheck --filter=dubstack
+      - run: pnpm turbo run test --filter=dubstack
 
       - name: Pack and compute SHA
         id: sha
+        working-directory: packages/cli
         run: |
           TARBALL=$(pnpm pack | tail -1)
           SHA=$(shasum -a 256 "$TARBALL" | cut -d ' ' -f 1)
@@ -44,6 +45,7 @@ jobs:
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Publish to npm
+        working-directory: packages/cli
         run: pnpm publish ${{ steps.sha.outputs.tarball }} --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

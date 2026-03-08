@@ -9,3 +9,13 @@ coverage
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Turborepo
+.turbo
+
+# Fumadocs generated
+.source
+
+# Next.js
+.next
+out

@@ -1,0 +1,36 @@
+---
+title: submit
+description: Push branches and create or update GitHub PRs.
+---
+
+## Usage
+
+```bash
+dub submit
+dub ss
+```
+
+## Description
+
+Pushes the current branch to the remote and creates or updates a GitHub pull request. Uses the `gh` CLI under the hood.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--path stack` | Submit all branches in the current linear stack path |
+| `--draft` | Create PRs as drafts |
+| `--no-edit` | Skip opening the PR editor |
+
+## Examples
+
+```bash
+# Submit current branch
+dub submit
+
+# Submit the entire stack
+dub submit --path stack
+
+# Submit as draft
+dub ss --draft
+```

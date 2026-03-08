@@ -1,0 +1,30 @@
+---
+title: post-merge
+description: Clean up merged branches and update tracking state.
+---
+
+## Usage
+
+```bash
+dub post-merge
+```
+
+## Description
+
+After PRs have been merged on GitHub, this command cleans up the local and remote branches that are no longer needed and updates DubStack's tracking state.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Show what would be cleaned up without making changes |
+
+## Examples
+
+```bash
+# Clean up after merging
+dub post-merge
+
+# Preview cleanup
+dub post-merge --dry-run
+```

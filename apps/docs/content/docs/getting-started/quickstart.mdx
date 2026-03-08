@@ -1,0 +1,43 @@
+---
+title: Quick Start
+description: Create your first stacked branch workflow in minutes.
+---
+
+## Initialize DubStack
+
+DubStack auto-initializes when you create your first branch. No setup command needed.
+
+## Create Your First Stack
+
+```bash
+# Start from your trunk branch (main)
+git checkout main
+
+# Create the first branch in your stack
+dub create feature-auth
+
+# Make changes, commit, then create the next branch
+dub create feature-auth-ui
+```
+
+## Visualize Your Stack
+
+```bash
+dub log
+```
+
+## Submit PRs
+
+```bash
+# Submit the current branch
+dub submit
+
+# Submit the entire stack
+dub submit --path stack
+```
+
+## Sync with Trunk
+
+```bash
+dub sync
+```

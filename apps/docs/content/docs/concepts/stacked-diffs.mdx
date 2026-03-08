@@ -1,0 +1,17 @@
+---
+title: Stacked Diffs
+description: Understanding the stacked diff workflow model.
+---
+
+Stacked diffs (also called stacked PRs or dependent branches) are a workflow where you build a series of small, dependent branches instead of one large feature branch.
+
+## Why Stack?
+
+- **Smaller PRs** — Each branch is a focused, reviewable unit
+- **Faster reviews** — Reviewers can focus on one logical change at a time
+- **Parallel work** — Start the next piece while waiting for review on the current one
+- **Cleaner history** — Each PR represents a single logical change
+
+## How It Works
+
+Each branch in a stack has a parent branch. The first branch's parent is trunk (usually `main`). Each subsequent branch builds on top of the previous one.

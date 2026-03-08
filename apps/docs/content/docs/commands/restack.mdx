@@ -1,0 +1,30 @@
+---
+title: restack
+description: Rebase the current branch (and optionally descendants) onto their updated parents.
+---
+
+## Usage
+
+```bash
+dub restack
+```
+
+## Description
+
+Rebases the current branch onto its parent, then recursively rebases all descendant branches. This keeps your stack up to date when a parent branch changes.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--current` | Only restack the current branch (skip descendants) |
+
+## Examples
+
+```bash
+# Restack the current branch and all descendants
+dub restack
+
+# Restack only the current branch
+dub restack --current
+```

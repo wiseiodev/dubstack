@@ -1,0 +1,22 @@
+---
+title: Migration from Graphite
+description: Transitioning from Graphite to DubStack.
+---
+
+If you're coming from Graphite, DubStack uses a similar mental model with some key differences.
+
+## Concept Mapping
+
+| Graphite | DubStack |
+|---|---|
+| `gt create` | `dub create` |
+| `gt submit` | `dub submit` |
+| `gt sync` | `dub sync` |
+| `gt log` | `dub log` |
+| `gt modify` | `dub modify` |
+
+## Key Differences
+
+- DubStack stores state locally in `.git/dubstack/` — no cloud service required
+- DubStack uses GitHub PRs directly via the `gh` CLI
+- Stack state is fully transparent and recoverable via `dub doctor`

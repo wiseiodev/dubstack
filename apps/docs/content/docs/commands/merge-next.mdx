@@ -1,0 +1,34 @@
+---
+title: merge-next
+description: Merge the next PR in stack order.
+---
+
+## Usage
+
+```bash
+dub merge-next
+dub land
+```
+
+## Description
+
+Merges the bottom-most PR in the stack that is approved and passing checks. PRs are merged in order from the base of the stack upward.
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Show which PR would be merged without merging |
+
+## Examples
+
+```bash
+# Merge the next ready PR
+dub merge-next
+
+# Using the alias
+dub land
+
+# Preview without merging
+dub land --dry-run
+```

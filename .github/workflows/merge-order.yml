@@ -21,4 +21,4 @@ jobs:
       - name: Validate DubStack merge order
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pnpm dev merge-check --pr ${{ github.event.pull_request.number }}
+        run: pnpm --filter=dubstack run dev merge-check --pr ${{ github.event.pull_request.number }}

@@ -1,0 +1,38 @@
+---
+title: Installation
+description: Install DubStack via Homebrew, npm, or from source.
+---
+
+## Prerequisites
+
+- Node.js >= 22
+- Git
+- GitHub CLI (`gh`) for PR operations
+
+## Homebrew (macOS)
+
+```bash
+brew install wiseiodev/dubstack/dubstack
+```
+
+## npm
+
+```bash
+npm install -g dubstack
+```
+
+## From Source
+
+```bash
+git clone https://github.com/wiseiodev/dubstack.git
+cd dubstack
+pnpm install
+pnpm build
+npm link
+```
+
+## Verify Installation
+
+```bash
+dub --version
+```
