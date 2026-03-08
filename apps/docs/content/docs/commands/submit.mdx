@@ -1,0 +1,47 @@
+---
+title: dub submit
+description: Push branches and create or update pull requests for your stack.
+---
+
+## Usage
+
+```bash
+dub submit
+dub ss
+
+# Preview only
+dub submit --dry-run
+
+# Submit only current linear path (default)
+dub submit --path current
+
+# Submit the whole stack graph
+dub submit --path stack
+
+# Auto-fallback to current path when stack-mode is blocked
+dub submit --path stack --fix
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview submit actions without executing |
+| `--path current` | Submit only current linear path (default) |
+| `--path stack` | Submit the whole stack graph |
+| `--fix` | Auto-fallback to current path when stack-mode is blocked |
+
+**Aliases:** `dub ss`
+
+## Open PR in Browser
+
+Use `dub pr` to open a PR in your browser via `gh`:
+
+```bash
+# Current branch PR
+dub pr
+
+# Explicit branch / PR target
+dub pr feat/auth-login
+dub pr 123
+```

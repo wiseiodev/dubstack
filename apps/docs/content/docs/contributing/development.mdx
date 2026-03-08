@@ -1,0 +1,70 @@
+---
+title: Contributing
+description: How to contribute to DubStack — setup, workflow, conventions, and coding agent guidance.
+---
+
+DubStack accepts contributions from both humans and coding agents. The goal is predictable, safe changes to stacked-branch workflows.
+
+## Prerequisites
+
+- Node `>=22`
+- `pnpm` (`pnpm@10.29.1`)
+
+```bash
+pnpm install
+```
+
+## Development Workflow
+
+1. Read `AGENTS.md` (required for repo-specific conventions).
+2. Make focused source changes in `src/`.
+3. Add/update tests near the changed behavior.
+4. Run verification commands.
+5. Open a PR using the repository PR template.
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm checks
+```
+
+Before submitting stacked PRs, run `dub ready` to validate health + submit preflight. Changes are not ready to merge unless all three verification commands pass.
+
+## Formatting and Naming
+
+- Biome is the source of truth for formatting/linting.
+- Use 2 spaces (not tabs) for indentation.
+- Use single quotes in JavaScript/TypeScript.
+- Use kebab-case file names.
+
+## Using a Coding Agent
+
+If you use Codex, Claude Code, Cursor Agent, or similar:
+
+- Point the agent to `AGENTS.md` and `.agents/` docs first.
+- Keep edits minimal and scoped to the requested behavior.
+- Require tests for behavior changes.
+- Do not use git worktrees unless a maintainer explicitly asks.
+- Prefer safe, non-destructive git operations.
+
+## Commit Messages (Conventional Commits)
+
+```text
+type(scope): short description
+
+# Examples:
+feat(submit): support draft PR creation
+fix(restack): preserve parent mapping after rebase
+test(create): cover ensureState auto-init
+docs(contributing): add coding-agent workflow
+```
+
+Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
+
+## Pull Requests
+
+- Keep PRs focused and reviewable.
+- Include behavioral impact and risk in PR description.
+- If UX or command semantics change, update docs in the same PR.
+- `main` is configured for squash merge only + linear history + required checks.
+- For stacked PRs, merge in order and prefer `dub merge-next` to avoid out-of-order merges.

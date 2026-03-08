@@ -1,0 +1,83 @@
+---
+title: AI Commands
+description: AI-powered assistance — dub ai ask, dub ai env, dub config ai-assistant, and dub history.
+---
+
+DubStack includes an AI assistant that understands your stack context, plus commands for managing AI configuration and inspecting command history.
+
+## dub ai ask
+
+Ask DubStack's AI assistant using streaming output. The assistant automatically receives a context packet including current branch/stack signals, git status, doctor summary, and recent command history.
+
+```bash
+dub ai ask "Summarize what this stack is changing"
+```
+
+### Automatic Context
+
+The AI assistant can invoke a constrained shell tool limited to a strict allow-list of safe, read-only commands (for example `git status`, `dub doctor`, `dub ready`) when command output is needed. It cannot execute arbitrary shell commands; requests outside the allow-list are rejected.
+
+### Provider Selection
+
+- If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access (`gemini-3-flash`).
+- Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway (`google/gemini-3-flash`).
+- If both are set, DubStack prefers `DUBSTACK_GEMINI_API_KEY`.
+
+## dub ai env
+
+Write DubStack AI keys into your shell profile (macOS/Linux).
+
+```bash
+# Write Gemini key
+dub ai env --gemini-key "<your-key>"
+
+# Write Gateway key
+dub ai env --gateway-key "<your-key>"
+
+# Write both
+dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>"
+
+# Target a specific profile file
+dub ai env --gemini-key "<your-key>" --profile ~/.zshrc
+```
+
+| Flag | Description |
+|---|---|
+| `--gemini-key <key>` | Set `DUBSTACK_GEMINI_API_KEY` |
+| `--gateway-key <key>` | Set `DUBSTACK_AI_GATEWAY_API_KEY` |
+| `--profile <path>` | Target specific profile file (auto-detects zsh/bash otherwise) |
+
+## dub config ai-assistant
+
+Enable or disable the repo-local AI assistant flag.
+
+```bash
+# Check current value
+dub config ai-assistant
+
+# Enable
+dub config ai-assistant on
+
+# Disable
+dub config ai-assistant off
+```
+
+## dub history
+
+Inspect recent Dub command history used for troubleshooting context.
+
+```bash
+# Show last 20 entries
+dub history
+
+# Show more
+dub history --limit 50
+
+# Machine-readable output
+dub history --json
+```
+
+| Flag | Description |
+|---|---|
+| `--limit <number>` | Number of entries to show (default: 20) |
+| `--json` | Output in JSON format |

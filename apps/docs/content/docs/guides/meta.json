@@ -1,0 +1,9 @@
+{
+  "title": "Guides",
+  "pages": [
+    "stacking-workflow",
+    "conflict-resolution",
+    "ai-assistant",
+    "migration-from-graphite"
+  ]
+}

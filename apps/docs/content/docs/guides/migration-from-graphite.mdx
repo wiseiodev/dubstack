@@ -1,0 +1,38 @@
+---
+title: Graphite Migration
+description: Map Graphite commands to DubStack equivalents.
+---
+
+If you have `gt` muscle memory, use this as a fast map. DubStack follows the same mental model.
+
+## Command Mapping
+
+| Graphite | DubStack |
+|---|---|
+| `gt create` | `dub create` |
+| `gt modify` | `dub modify` / `dub m` |
+| `gt submit` / `gt ss` | `dub submit` / `dub ss` |
+| `gt sync` | `dub sync` |
+| `gt checkout` / `gt co` | `dub checkout` / `dub co` |
+| `gt log` / `gt ls` | `dub log` / `dub ls` |
+| `gt up` / `gt down` | `dub up` / `dub down` |
+| `gt top` / `gt bottom` | `dub top` / `dub bottom` |
+| `gt info` | `dub info` |
+| `gt pr` | `dub pr` |
+| `gt restack` | `dub restack` |
+| `gt continue` | `dub continue` |
+| `gt abort` | `dub abort` |
+| `gt track --parent` | `dub track --parent` |
+| `gt untrack` | `dub untrack` |
+| `gt delete` | `dub delete` |
+| `gt parent` | `dub parent` |
+| `gt children` | `dub children` |
+| `gt trunk` | `dub trunk` |
+| `gt undo` | `dub undo` |
+
+## Key Differences
+
+- **Local-first** — DubStack stores all state locally in `.git/dubstack/`. Nothing is pushed to your remote from these files.
+- **AI features** — DubStack includes built-in AI for branch naming, commit messages, and stack-aware guidance via `dub ai ask`.
+- **Agent skills** — DubStack ships packaged skills for coding assistants via `dub skills add`.
+- **Safe merging** — `dub merge-next` handles retargeting child PRs before deleting merged branches.

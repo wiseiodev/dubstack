@@ -1,0 +1,55 @@
+---
+title: Troubleshooting
+description: Common issues and solutions for DubStack.
+---
+
+Common issues and how to resolve them.
+
+## Common Issues
+
+| Problem | Solution |
+|---------|----------|
+| gh CLI not found | Install GitHub CLI: [cli.github.com](https://cli.github.com) |
+| Not authenticated with GitHub | Run `gh auth login` |
+| Branch not part of stack | Create via `dub create` or run from a tracked branch |
+| Restack conflict | Resolve files, run `git add`, then `dub restack --continue` |
+| Rebase/restack interrupted | Use `dub continue` to resume or `dub abort` to cancel |
+| Branch not tracked | Run `dub track <branch> --parent <parent>` |
+| Need metadata-only removal | Use `dub untrack` (or `--downstack`) |
+| Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
+| Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
+| Wrong operation during create/restack | Use `dub undo` (single-level) |
+| PR merge blocked by order | Run `dub merge-check --pr <number>` and merge previous PR first |
+| Manual merge left stack inconsistent | Run `dub post-merge` |
+
+## Stale Branch Recovery
+
+When submit or sync gets blocked by stale tracked branches:
+
+```bash
+# 1) Inspect current health
+dub doctor
+
+# 2) Preview stale branch metadata
+dub prune
+
+# 3) Remove stale metadata if confirmed
+dub prune --apply
+
+# 4) Re-run pre-submit checks
+dub ready
+
+# 5) Submit current linear path
+dub submit --path current
+```
+
+## State Files
+
+DubStack stores local state in your repo. Nothing is pushed to your remote from these files.
+
+```text
+.git/dubstack/
+├── state.json
+├── undo.json
+└── restack-progress.json
+```

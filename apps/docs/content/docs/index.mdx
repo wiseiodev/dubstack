@@ -1,0 +1,149 @@
+---
+title: Introduction
+description: DubStack is a CLI for stacked diffs — dependent git branches that make code review faster and more focused.
+---
+
+DubStack is a CLI tool for managing stacked diffs — dependent git branches that make code review faster and more focused. It stores all state locally in `.git/dubstack/`, uses GitHub PRs directly via the `gh` CLI, and includes built-in AI assistance for branch naming, commit messages, and stack-aware guidance.
+
+## Prerequisites
+
+- **`git` installed** — Version control must be available on your system.
+- **`gh` CLI authenticated** — Run `gh auth login` to authenticate.
+- **`dub` installed** — See [Installation](/docs/getting-started/installation) for details.
+
+## Quick Start
+
+### 1. Start from Trunk
+
+```bash
+git checkout main
+git pull
+```
+
+### 2. Create a Stack
+
+Create three stacked branches with commits:
+
+```bash
+# Layer 1
+dub create feat/auth-types -am "feat: add auth types"
+
+# Layer 2 (parent: feat/auth-types)
+dub create feat/auth-login -am "feat: add login flow"
+
+# Layer 3 (parent: feat/auth-login)
+dub create feat/auth-tests -am "test: add auth tests"
+```
+
+### 3. Inspect and Navigate
+
+```bash
+# View stack tree
+dub log
+
+# Interactive checkout
+dub co
+
+# Move around current path
+dub up
+dub down
+dub top
+dub bottom
+```
+
+### 4. Submit Stack PRs
+
+```bash
+# Submit stack
+dub ss
+
+# Preview only
+dub ss --dry-run
+
+# Open PR in browser
+dub pr
+```
+
+### 5. Respond to Feedback
+
+When feedback lands on a middle branch:
+
+```bash
+dub co feat/auth-login
+
+# Amend current commit
+dub m -a -m "fix: address review feedback"
+
+# Or create a new commit
+dub m -c -a -m "fix: follow-up"
+
+# Push updates
+dub ss
+```
+
+### 6. Keep Stack in Sync
+
+```bash
+git checkout main
+git pull
+dub sync
+```
+
+### 7. Handle Restack Conflicts
+
+```bash
+dub restack
+# Resolve conflicts in files
+git add <resolved-files>
+dub restack --continue
+```
+
+### 8. Merge in Safe Order
+
+```bash
+# Merge next safe PR in stack order
+dub merge-next
+
+# Run again for the next layer
+dub merge-next
+
+# If merges happened manually
+dub post-merge
+```
+
+## Optional: Enable AI Assistant
+
+```bash
+# Add one API key to your shell profile
+dub ai env --gemini-key "<your-gemini-key>"
+# or:
+dub ai env --gateway-key "<your-ai-gateway-key>"
+
+# Reload your shell
+source ~/.zshrc
+
+# Enable assistant for this repo
+dub config ai-assistant on
+
+# Ask a question
+dub ai ask "Summarize this stack from trunk to current branch"
+```
+
+## Command Reference
+
+| Command | Purpose |
+|---|---|
+| `dub create <name> -am "msg"` | Stage all + create + commit |
+| `dub m` | Modify current branch commit(s) |
+| `dub log` | Show stack graph |
+| `dub co` | Interactive checkout |
+| `dub ss` | Submit stack PRs |
+| `dub pr` | Open PR in browser |
+| `dub sync` | Sync local state with remote |
+| `dub doctor` | Run stack health checks |
+| `dub ready` | Run pre-submit checklist |
+| `dub restack` | Rebase stack onto updated parents |
+| `dub merge-next` | Merge next safe PR + maintenance |
+| `dub continue` / `dub abort` | Resume/cancel operations |
+| `dub undo` | Undo last create/restack |
+| `dub ai ask "..."` | Ask AI assistant |

@@ -1,0 +1,69 @@
+---
+title: Agent Skills
+description: Packaged agent skills for coding assistants to use DubStack correctly.
+---
+
+DubStack ships packaged skills so coding assistants can use `dub` correctly for stacked PR workflows.
+
+## Included Skills
+
+### dubstack
+
+General CLI reference and workflow guidance for creating and navigating stacks, modifying branches and restacking, syncing with remote state, submitting PR stacks, and recovering from common errors.
+
+```bash
+npx skills add wiseiodev/dubstack/skills/dubstack
+```
+
+### dub-flow
+
+Task-oriented PR execution flow for agents that need to analyze staged changes, propose branch + commit naming, run `dub create` / `dub submit`, and open and polish PR metadata.
+
+```bash
+npx skills add wiseiodev/dubstack/skills/dub-flow
+```
+
+## Install via DubStack CLI
+
+```bash
+# Install all packaged skills
+dub skills add
+
+# Install specific skill
+dub skills add dubstack
+dub skills add dub-flow
+```
+
+## Remove Skills
+
+```bash
+dub skills remove dubstack
+dub skills remove dub-flow
+```
+
+## Dry Run
+
+Preview changes without modifying anything:
+
+```bash
+dub skills add --dry-run
+dub skills remove --dry-run
+```
+
+## What Agents Gain
+
+With these skills installed, agents are more reliable at:
+
+- Using stack-safe commands (`create`, `modify`, `sync`, `restack`, `submit`)
+- Choosing safer recovery paths after conflicts
+- Avoiding destructive or non-stack-aware git flows
+- Producing consistent PR workflow outputs
+
+## dub-flow Workflow Phases
+
+The `dub-flow` skill guides agents through a structured 4-phase PR creation process:
+
+1. **Analyze Changes** — Inspect staged diffs, determine scope (feature/fix/refactor/etc.)
+2. **Propose Naming** — Suggest branch name (`type/short-kebab-scope`) and conventional commit message
+3. **Confirm** — Present plan to user for approval before execution
+4. **Execute** — Run `dub create` + `dub ss`

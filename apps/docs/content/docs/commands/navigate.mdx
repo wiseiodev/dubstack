@@ -1,0 +1,39 @@
+---
+title: navigate
+description: Navigate between stack branches with up, down, top, and bottom.
+---
+
+## Usage
+
+```bash
+dub up
+dub down
+dub top
+dub bottom
+```
+
+## Description
+
+Move between branches in your stack without remembering branch names. Navigation follows the parent-child graph.
+
+## Commands
+
+| Command | Description |
+|---|---|
+| `dub up` | Move to the child branch |
+| `dub down` | Move to the parent branch |
+| `dub top` | Move to the topmost branch in the stack |
+| `dub bottom` | Move to the bottommost branch (just above trunk) |
+
+## Examples
+
+```bash
+# Move up one branch
+dub up
+
+# Jump to the top of the stack
+dub top
+
+# Go back to the base
+dub bottom
+```

@@ -1,0 +1,52 @@
+---
+title: Installation
+description: Install DubStack via Homebrew, npm, or from source.
+---
+
+Install DubStack via Homebrew, npm, or build from source.
+
+## Homebrew (recommended)
+
+```bash
+brew tap wiseiodev/dubstack
+brew install dubstack
+```
+
+Update:
+
+```bash
+brew update
+brew upgrade dubstack
+```
+
+## npm
+
+```bash
+npm install -g dubstack
+```
+
+## From Source
+
+```bash
+git clone https://github.com/wiseiodev/dubstack.git
+cd dubstack
+pnpm install
+pnpm build
+pnpm link --global
+```
+
+## Verify Installation
+
+After installing, verify DubStack is available:
+
+```bash
+dub --help
+```
+
+Initialize DubStack in your repository:
+
+```bash
+dub init
+```
+
+Note: `dub create` auto-initializes state if needed, so running `dub init` manually is optional but useful for explicit setup.

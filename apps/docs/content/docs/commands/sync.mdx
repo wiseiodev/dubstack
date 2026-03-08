@@ -1,0 +1,51 @@
+---
+title: dub sync
+description: Synchronize tracked branches with remote refs and optionally restack.
+---
+
+## Usage
+
+```bash
+# Sync current stack
+dub sync
+
+# Sync all tracked stacks
+dub sync --all
+
+# Non-interactive mode
+dub sync --no-interactive
+
+# Force destructive sync decisions
+dub sync --force
+
+# Include post-sync restack
+dub sync --restack
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--all` | Sync all tracked stacks |
+| `--no-interactive` | Deterministic non-interactive mode |
+| `--force` | Skip prompts for destructive actions |
+| `--restack` | Include post-sync restack |
+
+## Sync Behavior
+
+- Fetch tracked refs from `origin`
+- Attempt trunk fast-forward (or overwrite with `--force`)
+- Auto-clean local branches for merged PRs (and closed PRs confirmed in trunk)
+- Reconcile local/remote divergence states per branch
+- Optional restack when `--restack` is set
+
+## Restack
+
+Rebase stack branches onto updated parents:
+
+```bash
+dub restack
+
+# Continue after resolving conflicts
+dub restack --continue
+```
