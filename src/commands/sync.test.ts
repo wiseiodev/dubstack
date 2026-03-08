@@ -445,7 +445,7 @@ describe('sync', () => {
     expect(featB?.parent_revision).toBe('a-tip-sha-original');
   });
 
-  it('updates parent_revision via markBranchSynced for up-to-date branch', async () => {
+  it('updates parent_revision via markBranchSynced when base is ancestor', async () => {
     mockReadState.mockResolvedValue(
       makeState([
         { name: 'main', parent: null, type: 'root' },
@@ -453,6 +453,7 @@ describe('sync', () => {
       ]),
     );
     mockGetRefSha.mockResolvedValue('same-sha');
+    mockIsAncestor.mockResolvedValue(true);
 
     await sync('/repo', { interactive: false, restack: false });
 

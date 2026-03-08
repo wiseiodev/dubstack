@@ -24,6 +24,7 @@ interface RestackStep {
   branch: string;
   parent: string;
   parentOldTip: string;
+  parentNewTip?: string;
   status: 'pending' | 'done' | 'skipped' | 'conflicted';
 }
 
@@ -133,7 +134,9 @@ export async function restackContinue(cwd: string): Promise<RestackResult> {
   if (conflictedStep) {
     conflictedStep.status = 'done';
     const state = await readState(cwd);
-    const parentNewTip = await getBranchTip(conflictedStep.parent, cwd);
+    const parentNewTip =
+      conflictedStep.parentNewTip ??
+      (await getBranchTip(conflictedStep.parent, cwd));
     updateParentRevision(state, conflictedStep.branch, parentNewTip);
     await writeState(state, cwd);
   }
@@ -170,6 +173,7 @@ async function executeRestackSteps(
     } catch (error) {
       if (error instanceof DubError && error.message.includes('Conflict')) {
         step.status = 'conflicted';
+        step.parentNewTip = parentNewTip;
         await writeProgress(progress, cwd);
         return { status: 'conflict', rebased, conflictBranch: step.branch };
       }

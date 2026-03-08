@@ -670,7 +670,13 @@ async function markBranchSynced(
     version_number: priorBaseline?.version_number ?? null,
     source: options.source,
   };
-  entry.parent_revision = resolvedBaseSha;
+  try {
+    if (await isAncestor(resolvedBaseSha, headSha, cwd)) {
+      entry.parent_revision = resolvedBaseSha;
+    }
+  } catch {
+    // If ancestry check fails, keep existing parent_revision.
+  }
   entry.last_synced_at = new Date().toISOString();
   entry.sync_source = options.source;
 }

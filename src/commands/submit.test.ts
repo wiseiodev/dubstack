@@ -56,7 +56,12 @@ const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 
 function makeState(
-  branches: { name: string; parent: string | null; type?: 'root' }[],
+  branches: {
+    name: string;
+    parent: string | null;
+    type?: 'root';
+    parent_revision?: string;
+  }[],
 ): DubState {
   return {
     stacks: [
@@ -265,7 +270,7 @@ describe('submit', () => {
     expect(featBranch?.last_synced_at).toBeTruthy();
   });
 
-  it('sets parent_revision to base SHA on submit', async () => {
+  it('sets parent_revision to base SHA on submit when not already set', async () => {
     const state = makeState([
       { name: 'main', parent: null, type: 'root' },
       { name: 'feat/a', parent: 'main' },
@@ -286,5 +291,32 @@ describe('submit', () => {
       (b) => b.name === 'feat/a',
     );
     expect(featBranch?.parent_revision).toBe('main-sha');
+  });
+
+  it('preserves existing parent_revision on submit', async () => {
+    const state = makeState([
+      { name: 'main', parent: null, type: 'root' },
+      {
+        name: 'feat/a',
+        parent: 'main',
+        parent_revision: 'original-fork-sha',
+      },
+    ]);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(state);
+    mockGetPr.mockResolvedValue({
+      number: 10,
+      url: 'https://github.com/o/r/pull/10',
+      title: 'feat: thing',
+      body: '',
+    });
+
+    await submit('/repo', false);
+
+    const savedState = mockWriteState.mock.calls[0][0] as DubState;
+    const featBranch = savedState.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    expect(featBranch?.parent_revision).toBe('original-fork-sha');
   });
 });
