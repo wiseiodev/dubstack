@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /Users/wise/dev/dubstack && pnpm biome check --write --changed --no-errors-on-unmatched 2>/dev/null || true"
+            "command": "cd \"$(git rev-parse --show-toplevel)\" && pnpm biome check --write --changed --no-errors-on-unmatched 2>/dev/null || true"
           }
         ]
       }

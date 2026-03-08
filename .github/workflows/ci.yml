@@ -36,4 +36,5 @@ jobs:
         with:
           name: coverage-report
           path: packages/cli/coverage/
+          if-no-files-found: ignore
           retention-days: 30

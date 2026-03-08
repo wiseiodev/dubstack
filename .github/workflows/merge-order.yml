@@ -18,7 +18,8 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter=dubstack build
       - name: Validate DubStack merge order
         env:
           GH_TOKEN: ${{ github.token }}
-        run: pnpm --filter=dubstack run dev merge-check --pr ${{ github.event.pull_request.number }}
+        run: node packages/cli/dist/index.js merge-check --pr ${{ github.event.pull_request.number }}

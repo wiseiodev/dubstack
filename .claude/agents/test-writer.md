@@ -6,10 +6,10 @@ Generate tests matching dubstack's existing conventions. Tests should cover chan
 
 - Framework: Vitest (`describe`, `it`, `expect`, `vi`, `beforeEach`, `afterEach`)
 - Test locations:
-  - Command logic: `src/commands/<command>.test.ts`
-  - Library logic: `src/lib/<module>.test.ts`
-  - Cross-command scenarios: `test/**/*.test.ts`
-- Helper: `createTestRepo()` and `gitInRepo(dir, args)` from `test/helpers`
+  - Command logic: `packages/cli/src/commands/<command>.test.ts`
+  - Library logic: `packages/cli/src/lib/<module>.test.ts`
+  - Cross-command scenarios: `packages/cli/test/**/*.test.ts`
+- Helper: `createTestRepo()` and `gitInRepo(dir, args)` from `packages/cli/test/helpers`
 - Pattern: create temp repo → `init(dir)` → commit → exercise command → assert state
 - Cleanup: `afterEach` calls `cleanup()` and restores `process.env`
 
