@@ -98,6 +98,10 @@ dub ss
 
 # 5) Open PR for current branch
 dub pr
+
+# 6) Open docs or the current repository homepage
+dub docs
+dub repo
 ```
 
 For a more detailed walkthrough, see [`QUICKSTART.md`](./QUICKSTART.md).
@@ -119,6 +123,22 @@ dub init
 Notes:
 - `dub create` auto-initializes state if needed.
 - Running `dub init` manually is still useful for explicit setup.
+
+### `dub docs`
+
+Open the DubStack docs site in your browser.
+
+```bash
+dub docs
+```
+
+### `dub repo`
+
+Open the current repository GitHub page in your browser.
+
+```bash
+dub repo
+```
 
 ### `dub create [branch]`
 
@@ -611,6 +631,36 @@ dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
 
+### `dub config ai-provider [auto|gemini|gateway|bedrock]`
+
+Manage the repo-local AI provider selection.
+
+```bash
+# inspect current provider
+dub config ai-provider
+
+# pin this repository to Bedrock
+dub config ai-provider bedrock
+
+# return to backward-compatible auto selection
+dub config ai-provider auto
+```
+
+### `dub config ai-model [model] --provider <provider>`
+
+Manage repo-local model overrides by provider.
+
+```bash
+# inspect current Bedrock override
+dub config ai-model --provider bedrock
+
+# set a repo-local override
+dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
+
+# clear the repo-local override
+dub config ai-model --provider bedrock --clear
+```
+
 ### `dub ai ask <prompt...>`
 
 Ask DubStack's AI assistant using streaming output (`streamText`).
@@ -625,10 +675,14 @@ In TTY mode, response text streams live while status/tool activity lines are ren
 To inspect your repository, `dub ai ask` can invoke a constrained shell tool limited to a strict allow-list of safe, read-only commands (for example `git status`, `dub doctor`, `dub ready`) when command output is needed.
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
 
-Provider/key selection:
-- If `DUBSTACK_GEMINI_API_KEY` is set, DubStack uses direct Google provider access with model from `DUBSTACK_GEMINI_MODEL` (default: `gemini-3-flash-preview`).
-- Otherwise, if `DUBSTACK_AI_GATEWAY_API_KEY` is set, DubStack uses Vercel AI Gateway with model from `DUBSTACK_AI_GATEWAY_MODEL` (default: `google/gemini-3-flash`).
-- If both are set, DubStack prefers `DUBSTACK_GEMINI_API_KEY`.
+Provider/model selection:
+- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `gateway`, or `bedrock`.
+- Repo-local model overrides from `dub config ai-model ...` win for that provider when present.
+- In `auto` mode, DubStack preserves the legacy fallback order: Gemini, then AI Gateway, then Bedrock.
+- Gemini uses `DUBSTACK_GEMINI_API_KEY` with optional `DUBSTACK_GEMINI_MODEL` override.
+- AI Gateway uses `DUBSTACK_AI_GATEWAY_API_KEY` with optional `DUBSTACK_AI_GATEWAY_MODEL` override.
+- Bedrock uses `DUBSTACK_BEDROCK_AWS_REGION`, `DUBSTACK_BEDROCK_MODEL`, and optional `DUBSTACK_BEDROCK_AWS_PROFILE`.
+- Bedrock support uses AWS credential-chain auth only. DubStack does not manage AWS secret key environment variables.
 
 Thinking is enabled by default for Gemini 3 Flash.
 
@@ -656,9 +710,25 @@ pnpm evals:export
 The first suite lives at `packages/cli/evals/dub-flow-metadata.eval.ts` and evaluates the pure `generateFlowMetadata(...)` helper used by `dub flow`.
 It mixes deterministic contract checks with an AI judge scorer so prompt changes are measured against staged diff fidelity, template preservation, and reviewer usefulness.
 
+### `dub ai setup`
+
+Run the guided setup flow for Gemini, AI Gateway, or Amazon Bedrock.
+
+```bash
+dub ai setup
+```
+
+The setup wizard helps you:
+- choose the repo-local provider
+- choose a curated model or enter a custom model ID
+- write global provider defaults into your shell profile
+- optionally store a repo-local model override
+
+When the wizard writes env vars, DubStack loads them into the current `dub` process and prints the exact command to run in your shell to activate them immediately.
+
 ### `dub ai env`
 
-Write DubStack AI keys/models into your shell profile (macOS/Linux shells).
+Write DubStack AI provider settings into your shell profile (macOS/Linux shells).
 
 ```bash
 # write Gemini key
@@ -673,6 +743,12 @@ dub ai env --gemini-model "gemini-2.5-pro-preview"
 # write Gateway model override
 dub ai env --gateway-model "google/gemini-2.5-pro"
 
+# write Bedrock profile + region + model
+dub ai env \
+  --bedrock-profile "bw-sso" \
+  --bedrock-region "us-west-2" \
+  --bedrock-model "us.anthropic.claude-sonnet-4-6"
+
 # write both
 dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>"
 
@@ -686,6 +762,8 @@ dub ai env --gemini-key "<your-key>" --profile ~/.zshrc
 Supported automatic profile detection:
 - `zsh` → `~/.zshrc`
 - `bash` → `~/.bashrc` (or `~/.bash_profile` fallback)
+
+After writing exports, DubStack prints the exact activation command to run in your shell so the new values take effect immediately in your terminal session.
 
 ### `dub history`
 

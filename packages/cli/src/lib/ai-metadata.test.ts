@@ -5,6 +5,7 @@ import {
   generateFlowMetadata,
   generatePrDescriptionSummary,
 } from './ai-metadata';
+import type { DubConfig } from './config';
 import { DubError } from './errors';
 
 let envSnapshot: NodeJS.ProcessEnv;
@@ -17,6 +18,17 @@ afterEach(() => {
   process.env = envSnapshot;
 });
 
+function createProviderConfig(): DubConfig['ai']['provider'] {
+  return {
+    selected: 'auto',
+    models: {
+      gemini: null,
+      gateway: null,
+      bedrock: null,
+    },
+  };
+}
+
 describe('generateCreateMetadata', () => {
   it('uses the Gemini provider when DUBSTACK_GEMINI_API_KEY is set', async () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
@@ -28,11 +40,16 @@ describe('generateCreateMetadata', () => {
     const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
     const createGateway = vi.fn();
 
-    const result = await generateCreateMetadata('diff --git a/file b/file', {
-      generateText,
-      createGoogleGenerativeAI,
-      createGateway,
-    });
+    const result = await generateCreateMetadata(
+      'diff --git a/file b/file',
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+      {},
+      createProviderConfig(),
+    );
 
     expect(result).toEqual({
       branch: 'feat/example',
@@ -60,11 +77,16 @@ describe('generateCreateMetadata', () => {
     const gatewayModel = vi.fn().mockReturnValue('gateway-model');
     const createGateway = vi.fn().mockReturnValue(gatewayModel);
 
-    await generateCreateMetadata('diff --git a/file b/file', {
-      generateText,
-      createGoogleGenerativeAI,
-      createGateway,
-    });
+    await generateCreateMetadata(
+      'diff --git a/file b/file',
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+      {},
+      createProviderConfig(),
+    );
 
     expect(createGoogleGenerativeAI).not.toHaveBeenCalled();
     expect(createGateway).toHaveBeenCalledWith({ apiKey: 'gateway-key' });
@@ -80,19 +102,29 @@ describe('generateCreateMetadata', () => {
     delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
 
     await expect(
-      generateCreateMetadata('diff --git a/file b/file', {
-        generateText: vi.fn(),
-        createGoogleGenerativeAI: vi.fn(),
-        createGateway: vi.fn(),
-      }),
+      generateCreateMetadata(
+        'diff --git a/file b/file',
+        {
+          generateText: vi.fn(),
+          createGoogleGenerativeAI: vi.fn(),
+          createGateway: vi.fn(),
+        },
+        {},
+        createProviderConfig(),
+      ),
     ).rejects.toThrow(DubError);
 
     await expect(
-      generateCreateMetadata('diff --git a/file b/file', {
-        generateText: vi.fn(),
-        createGoogleGenerativeAI: vi.fn(),
-        createGateway: vi.fn(),
-      }),
+      generateCreateMetadata(
+        'diff --git a/file b/file',
+        {
+          generateText: vi.fn(),
+          createGoogleGenerativeAI: vi.fn(),
+          createGateway: vi.fn(),
+        },
+        {},
+        createProviderConfig(),
+      ),
     ).rejects.toThrow('DUBSTACK_GEMINI_API_KEY');
   });
 
@@ -100,13 +132,18 @@ describe('generateCreateMetadata', () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
 
     await expect(
-      generateCreateMetadata('diff --git a/file b/file', {
-        generateText: vi.fn().mockResolvedValue({
-          text: '{"branch":"feat/example"}',
-        }),
-        createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
-        createGateway: vi.fn(),
-      }),
+      generateCreateMetadata(
+        'diff --git a/file b/file',
+        {
+          generateText: vi.fn().mockResolvedValue({
+            text: '{"branch":"feat/example"}',
+          }),
+          createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
+          createGateway: vi.fn(),
+        },
+        {},
+        createProviderConfig(),
+      ),
     ).rejects.toThrow("AI assistant metadata is missing 'message'.");
   });
 
@@ -126,6 +163,7 @@ describe('generateCreateMetadata', () => {
       {
         commitTemplate: 'feat(scope): summary\n\n## Testing\n- [ ] added',
       },
+      createProviderConfig(),
     );
 
     const call = vi.mocked(generateText).mock.calls[0]?.[0];
@@ -162,6 +200,8 @@ index 1111111..2222222 100644
         createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
         createGateway: vi.fn(),
       },
+      {},
+      createProviderConfig(),
     );
 
     const call = vi.mocked(generateText).mock.calls[0]?.[0];
@@ -174,13 +214,18 @@ index 1111111..2222222 100644
   it('normalizes extra whitespace in the commit subject while preserving the body', async () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
 
-    const result = await generateCreateMetadata('diff --git a/file b/file', {
-      generateText: vi.fn().mockResolvedValue({
-        text: '{"branch":"feat/example","message":"feat:   example subject\\n\\n## Testing\\n- [x] added"}',
-      }),
-      createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
-      createGateway: vi.fn(),
-    });
+    const result = await generateCreateMetadata(
+      'diff --git a/file b/file',
+      {
+        generateText: vi.fn().mockResolvedValue({
+          text: '{"branch":"feat/example","message":"feat:   example subject\\n\\n## Testing\\n- [x] added"}',
+        }),
+        createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
+        createGateway: vi.fn(),
+      },
+      {},
+      createProviderConfig(),
+    );
 
     expect(result.message).toBe(
       'feat: example subject\n\n## Testing\n- [x] added',
@@ -211,6 +256,8 @@ describe('generatePrDescriptionSummary', () => {
         createGoogleGenerativeAI,
         createGateway,
       },
+      {},
+      createProviderConfig(),
     );
 
     expect(result).toBe('## Summary\n\nAdds the new submit AI flow.');
@@ -237,6 +284,8 @@ describe('generatePrDescriptionSummary', () => {
           createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
           createGateway: vi.fn(),
         },
+        {},
+        createProviderConfig(),
       ),
     ).rejects.toThrow('AI assistant generated an empty PR description.');
   });
@@ -262,6 +311,7 @@ describe('generatePrDescriptionSummary', () => {
       {
         prTemplate: '## Summary\n\n## Testing',
       },
+      createProviderConfig(),
     );
 
     const call = vi.mocked(generateText).mock.calls[0]?.[0];
@@ -298,6 +348,8 @@ describe('generateFlowMetadata', () => {
         createGoogleGenerativeAI,
         createGateway,
       },
+      {},
+      createProviderConfig(),
     );
 
     expect(result).toEqual({
@@ -334,6 +386,7 @@ describe('generateFlowMetadata', () => {
         commitTemplate: 'feat(scope): summary\n\n## Testing\n- [ ] added',
         prTemplate: '## Summary\n\n## Testing',
       },
+      createProviderConfig(),
     );
 
     const createCall = vi.mocked(generateText).mock.calls[0]?.[0];

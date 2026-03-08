@@ -29,6 +29,14 @@ describe('readConfig', () => {
           submitDescription: false,
           flow: false,
         },
+        provider: {
+          selected: 'auto',
+          models: {
+            gemini: null,
+            gateway: null,
+            bedrock: null,
+          },
+        },
         shortcutFallback: {
           enabled: true,
           typoGuard: 'interactive',
@@ -68,6 +76,14 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.ai.provider).toEqual({
+      selected: 'auto',
+      models: {
+        gemini: null,
+        gateway: null,
+        bedrock: null,
+      },
+    });
   });
 
   it('fills in missing ai defaults when persisting partial config', async () => {
@@ -90,6 +106,72 @@ describe('writeConfig', () => {
       createMetadata: true,
       submitDescription: false,
       flow: false,
+    });
+    expect(config.ai.provider).toEqual({
+      selected: 'auto',
+      models: {
+        gemini: null,
+        gateway: null,
+        bedrock: null,
+      },
+    });
+  });
+
+  it('persists ai provider selection and per-provider model overrides', async () => {
+    await writeConfig(
+      {
+        ai: {
+          provider: {
+            selected: 'bedrock',
+            models: {
+              bedrock: 'us.anthropic.claude-sonnet-4-6',
+            },
+          },
+        },
+      },
+      dir,
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.ai.provider).toEqual({
+      selected: 'bedrock',
+      models: {
+        gemini: null,
+        gateway: null,
+        bedrock: 'us.anthropic.claude-sonnet-4-6',
+      },
+    });
+  });
+
+  it('normalizes invalid provider settings back to defaults', async () => {
+    const dubDir = path.join(dir, '.git', 'dubstack');
+    fs.mkdirSync(dubDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dubDir, 'config.json'),
+      JSON.stringify({
+        ai: {
+          provider: {
+            selected: 'unknown',
+            models: {
+              gemini: 123,
+              gateway: '',
+              bedrock: '   ',
+            },
+          },
+        },
+      }),
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.ai.provider).toEqual({
+      selected: 'auto',
+      models: {
+        gemini: null,
+        gateway: null,
+        bedrock: null,
+      },
     });
   });
 });

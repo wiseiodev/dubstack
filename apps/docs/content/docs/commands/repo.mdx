@@ -1,0 +1,14 @@
+---
+title: dub repo
+description: Open the current repository GitHub page in your browser.
+---
+
+## Usage
+
+```bash
+dub repo
+```
+
+`dub repo` resolves the current branch upstream remote first, falls back to `origin`, normalizes common SSH and HTTPS GitHub remotes, and opens the repository homepage in your default browser.
+
+If the current repository does not use GitHub remotes, DubStack fails clearly instead of opening the wrong URL.

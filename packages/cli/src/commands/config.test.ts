@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
 import { readConfig } from '../lib/config';
-import { configAiAssistant, configAiDefaults } from './config';
+import {
+  configAiAssistant,
+  configAiDefaults,
+  configAiModel,
+  configAiProvider,
+} from './config';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -79,6 +84,71 @@ describe('config ai-defaults', () => {
   it('throws for invalid default state values', async () => {
     await expect(configAiDefaults(dir, 'create', 'maybe')).rejects.toThrow(
       "Value must be either 'on' or 'off'.",
+    );
+  });
+});
+
+describe('config ai-provider', () => {
+  it('returns current provider when selection is omitted', async () => {
+    const result = await configAiProvider(dir);
+
+    expect(result).toEqual({ provider: 'auto', changed: false });
+  });
+
+  it('writes selected provider when set', async () => {
+    const result = await configAiProvider(dir, 'bedrock');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ provider: 'bedrock', changed: true });
+    expect(config.ai.provider.selected).toBe('bedrock');
+  });
+
+  it('throws for invalid provider names', async () => {
+    await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
+      "AI provider must be one of 'auto', 'gemini', 'gateway', or 'bedrock'.",
+    );
+  });
+});
+
+describe('config ai-model', () => {
+  it('returns current model override when model is omitted', async () => {
+    const result = await configAiModel(dir, 'bedrock');
+
+    expect(result).toEqual({ model: null, changed: false });
+  });
+
+  it('writes a provider-specific model override', async () => {
+    const result = await configAiModel(
+      dir,
+      'bedrock',
+      'us.anthropic.claude-sonnet-4-6',
+    );
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      model: 'us.anthropic.claude-sonnet-4-6',
+      changed: true,
+    });
+    expect(config.ai.provider.models.bedrock).toBe(
+      'us.anthropic.claude-sonnet-4-6',
+    );
+  });
+
+  it('clears a provider-specific model override', async () => {
+    await configAiModel(dir, 'gateway', 'google/gemini-3-flash');
+
+    const result = await configAiModel(dir, 'gateway', undefined, {
+      clear: true,
+    });
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ model: null, changed: true });
+    expect(config.ai.provider.models.gateway).toBeNull();
+  });
+
+  it('throws when setting an empty model override', async () => {
+    await expect(configAiModel(dir, 'gemini', '   ')).rejects.toThrow(
+      'Model override cannot be empty.',
     );
   });
 });

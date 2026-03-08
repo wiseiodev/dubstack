@@ -1,5 +1,6 @@
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { LanguageModel } from 'ai';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, stepCountIs, streamText } from 'ai';
 import { createBashTool } from 'bash-tool';
 import { createLocalBashSandbox } from '../lib/ai-bash-sandbox';
@@ -8,6 +9,7 @@ import {
   buildAiUserPrompt,
   collectAiContext,
 } from '../lib/ai-context';
+import { buildAiProviderOptions, resolveAiProvider } from '../lib/ai-provider';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import { createTerminalRenderer } from '../lib/terminal-render';
@@ -22,6 +24,9 @@ interface AskAiDependencies {
   createBashTool: typeof createBashTool;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
+  createAmazonBedrock?: typeof createAmazonBedrock;
+  fromIni?: typeof fromIni;
+  fromNodeProviderChain?: typeof fromNodeProviderChain;
   collectAiContext: typeof collectAiContext;
 }
 
@@ -31,7 +36,7 @@ interface AskAiOptions {
 }
 
 interface AskAiResult {
-  provider: 'google' | 'gateway';
+  provider: 'google' | 'gateway' | 'bedrock';
   modelId: string;
   webBrowsingRequested: boolean;
   webBrowsingUsed: boolean;
@@ -42,17 +47,11 @@ const DEFAULT_DEPS: AskAiDependencies = {
   createBashTool,
   createGoogleGenerativeAI,
   createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
   collectAiContext,
 };
-
-const THINKING_PROVIDER_OPTIONS = {
-  google: {
-    thinkingConfig: {
-      thinkingLevel: 'high' as const,
-      includeThoughts: true,
-    },
-  },
-} as const;
 
 export async function askAi(
   prompt: string,
@@ -73,7 +72,10 @@ export async function askAi(
 
   const output = options.output ?? process.stdout;
   const deps = options.deps ?? DEFAULT_DEPS;
-  const resolved = resolveModel(deps);
+  const resolved = resolveAiProvider({
+    deps,
+    providerConfig: config.ai.provider,
+  });
   const context = await deps.collectAiContext(cwd);
   const contextPrompt = buildAiUserPrompt(normalizedPrompt, context);
   const bashToolkit = await deps.createBashTool({
@@ -94,7 +96,9 @@ export async function askAi(
       tools: {
         bash: bashToolkit.tools.bash,
       },
-      providerOptions: buildProviderOptions({ withWebBrowsing }) as never,
+      providerOptions: buildAiProviderOptions(resolved, {
+        withWebBrowsing,
+      }) as never,
     });
     return renderStream(result, output);
   };
@@ -121,18 +125,6 @@ export async function askAi(
     webBrowsingRequested,
     webBrowsingUsed,
   };
-}
-
-function buildProviderOptions(options: {
-  withWebBrowsing: boolean;
-}): Record<string, unknown> {
-  const googleOptions: Record<string, unknown> = {
-    ...(THINKING_PROVIDER_OPTIONS.google as unknown as Record<string, unknown>),
-  };
-  if (options.withWebBrowsing) {
-    googleOptions.useSearchGrounding = true;
-  }
-  return { google: googleOptions };
 }
 
 async function renderStream(
@@ -233,39 +225,5 @@ function isBrowsingUnsupportedError(error: unknown): boolean {
   return (
     normalized.includes('unsupported') &&
     (normalized.includes('grounding') || normalized.includes('brows'))
-  );
-}
-
-function resolveModel(deps: AskAiDependencies): {
-  provider: 'google' | 'gateway';
-  model: LanguageModel;
-  modelId: string;
-} {
-  const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
-  if (geminiApiKey) {
-    const geminiModel =
-      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
-    const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
-    return {
-      provider: 'google',
-      model: google(geminiModel),
-      modelId: geminiModel,
-    };
-  }
-
-  const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
-  if (gatewayApiKey) {
-    const gatewayModel =
-      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
-    const gateway = deps.createGateway({ apiKey: gatewayApiKey });
-    return {
-      provider: 'gateway',
-      model: gateway(gatewayModel),
-      modelId: gatewayModel,
-    };
-  }
-
-  throw new DubError(
-    "AI assistant requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env --gemini-key <key>' or 'dub ai env --gateway-key <key>'.",
   );
 }

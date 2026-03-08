@@ -1,4 +1,6 @@
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import {
@@ -49,6 +51,9 @@ const DEFAULT_DEPS: CreateDependencies = {
   generateText,
   createGoogleGenerativeAI,
   createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
 };
 
 /**
@@ -162,6 +167,7 @@ export async function create(
       {
         commitTemplate: templates.commitTemplate,
       },
+      config.ai.provider,
     );
     branchName = generated.branch;
     commitMessage = generated.message;

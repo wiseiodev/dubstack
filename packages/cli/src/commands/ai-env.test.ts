@@ -5,12 +5,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { configureAiEnv } from './ai-env';
 
 let tempDir: string;
+let envSnapshot: NodeJS.ProcessEnv;
 
 beforeEach(async () => {
+  envSnapshot = { ...process.env };
   tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'dub-ai-env-'));
 });
 
 afterEach(async () => {
+  process.env = envSnapshot;
   await fs.promises.rm(tempDir, { recursive: true, force: true });
 });
 
@@ -27,6 +30,8 @@ describe('configureAiEnv', () => {
 
     expect(result.profilePath).toBe(profile);
     expect(result.updated).toEqual(['DUBSTACK_GEMINI_API_KEY']);
+    expect(result.activationCommand).toBe(`source '${profile}'`);
+    expect(process.env.DUBSTACK_GEMINI_API_KEY).toBe('gemini-secret');
     expect(updated).toContain("export DUBSTACK_GEMINI_API_KEY='gemini-secret'");
   });
 
@@ -106,6 +111,42 @@ describe('configureAiEnv', () => {
     );
   });
 
+  it('writes Bedrock profile, region, and model exports', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await fs.promises.writeFile(profile, '# existing\n');
+
+    const result = await configureAiEnv({
+      bedrockProfile: 'bw-sso',
+      bedrockRegion: 'us-west-2',
+      bedrockModel: 'us.anthropic.claude-sonnet-4-6',
+      profile,
+    });
+    const updated = await fs.promises.readFile(profile, 'utf8');
+
+    expect(result.updated).toEqual([
+      'DUBSTACK_BEDROCK_AWS_PROFILE',
+      'DUBSTACK_BEDROCK_AWS_REGION',
+      'DUBSTACK_BEDROCK_MODEL',
+    ]);
+    expect(updated).toContain("export DUBSTACK_BEDROCK_AWS_PROFILE='bw-sso'");
+    expect(updated).toContain("export DUBSTACK_BEDROCK_AWS_REGION='us-west-2'");
+    expect(updated).toContain(
+      "export DUBSTACK_BEDROCK_MODEL='us.anthropic.claude-sonnet-4-6'",
+    );
+    expect(process.env.DUBSTACK_BEDROCK_AWS_PROFILE).toBe('bw-sso');
+    expect(process.env.DUBSTACK_BEDROCK_AWS_REGION).toBe('us-west-2');
+    expect(process.env.DUBSTACK_BEDROCK_MODEL).toBe(
+      'us.anthropic.claude-sonnet-4-6',
+    );
+  });
+
+  it('rejects empty Bedrock region values', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await expect(
+      configureAiEnv({ profile, bedrockRegion: '   ' }),
+    ).rejects.toThrow('Bedrock region cannot be empty');
+  });
+
   it('rejects empty model values', async () => {
     const profile = path.join(tempDir, '.zshrc');
     await expect(
@@ -126,7 +167,7 @@ describe('configureAiEnv', () => {
   it('throws when no key or model is provided', async () => {
     const profile = path.join(tempDir, '.zshrc');
     await expect(configureAiEnv({ profile })).rejects.toThrow(
-      'Provide at least one key or model',
+      'Provide at least one key, model, or Bedrock setting',
     );
   });
 });
