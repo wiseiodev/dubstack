@@ -115,9 +115,16 @@ export function stripAiSummarySection(body: string): string {
 
   while (true) {
     const startIdx = result.indexOf(AI_SUMMARY_START);
-    const endIdx = result.indexOf(AI_SUMMARY_END);
 
-    if (startIdx === -1 || endIdx === -1) {
+    if (startIdx === -1) {
+      return normalizeBodyWhitespace(result);
+    }
+
+    const endIdx = result.indexOf(
+      AI_SUMMARY_END,
+      startIdx + AI_SUMMARY_START.length,
+    );
+    if (endIdx === -1) {
       return normalizeBodyWhitespace(result);
     }
 

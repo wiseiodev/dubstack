@@ -570,6 +570,7 @@ describe('submit', () => {
     expect(result.created).toEqual([]);
     expect(mockCreatePr).not.toHaveBeenCalled();
     expect(mockUpdatePrBody).toHaveBeenCalled();
+    expect(mockGetLastCommitMessage).not.toHaveBeenCalled();
   });
 
   it('saves pr_number and pr_link to state', async () => {

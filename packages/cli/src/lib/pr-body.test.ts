@@ -238,6 +238,28 @@ describe('AI summary helpers', () => {
       'User intro\n\nUser middle\n\nUser footer',
     );
   });
+
+  it('ignores unmatched end markers that appear before a valid ai summary block', () => {
+    const body = [
+      'User intro',
+      '',
+      '<!-- dubstack-ai-summary:end -->',
+      '',
+      buildAiSummarySection('Generated summary'),
+      '',
+      'User footer',
+    ].join('\n');
+
+    expect(stripAiSummarySection(body)).toBe(
+      [
+        'User intro',
+        '',
+        '<!-- dubstack-ai-summary:end -->',
+        '',
+        'User footer',
+      ].join('\n'),
+    );
+  });
 });
 
 describe('parseDubstackMetadata', () => {

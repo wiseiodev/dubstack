@@ -220,7 +220,7 @@ export async function flow(
     }
   }
 
-  await resolvedDeps.create(generated.branch, cwd, {});
+  await resolvedDeps.create(generated.branch, cwd, { noAi: true });
   await withTempMarkdownFile(
     'commit-message',
     commitMessage,

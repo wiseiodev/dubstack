@@ -49,6 +49,7 @@ describe('flow', () => {
           ai: {
             defaults: {
               flow: true,
+              createMetadata: true,
             },
           },
         }),
@@ -79,7 +80,9 @@ describe('flow', () => {
     expect(renderer.renderPreview).toHaveBeenCalled();
     expect(getDiffFileNames).toHaveBeenCalledWith('/repo', true);
     expect(getDiffNumStat).toHaveBeenCalledWith('/repo', true);
-    expect(create).toHaveBeenCalledWith('feat/flow-preview', '/repo', {});
+    expect(create).toHaveBeenCalledWith('feat/flow-preview', '/repo', {
+      noAi: true,
+    });
     expect(commitStagedFromFile).toHaveBeenCalledWith(
       expect.any(String),
       '/repo',

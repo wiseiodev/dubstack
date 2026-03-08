@@ -375,7 +375,6 @@ async function updateAllPrBodies(
     const branch = branches[i];
     const pr = prMap.get(branch.name);
     if (!pr) continue;
-    const commitMessage = await getLastCommitMessage(branch.name, cwd);
 
     const prevPr =
       i > 0 ? (prMap.get(branches[i - 1].name)?.number ?? null) : null;
@@ -403,7 +402,7 @@ async function updateAllPrBodies(
               {
                 branch: branch.name,
                 baseBranch: branch.parent as string,
-                commitMessage,
+                commitMessage: await getLastCommitMessage(branch.name, cwd),
                 diff: await getDiffForPrDescription(
                   branch.name,
                   branch.parent as string,
