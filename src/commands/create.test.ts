@@ -3,7 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { writeConfig } from '../lib/config';
-import { getCurrentBranch } from '../lib/git';
+import { getBranchTip, getCurrentBranch } from '../lib/git';
 import { readState } from '../lib/state';
 import { readUndoEntry } from '../lib/undo-log';
 import { create } from './create';
@@ -95,6 +95,15 @@ describe('create', () => {
     expect(entry.previousBranch).toBe('main');
     expect(entry.createdBranches).toEqual(['feat/first']);
     expect(entry.previousState.stacks).toHaveLength(0);
+  });
+
+  it('sets parent_revision to parent tip SHA on creation', async () => {
+    const parentTip = await getBranchTip('main', dir);
+    await create('feat/first', dir);
+
+    const state = await readState(dir);
+    const child = state.stacks[0].branches.find((b) => b.name === 'feat/first');
+    expect(child?.parent_revision).toBe(parentTip);
   });
 });
 

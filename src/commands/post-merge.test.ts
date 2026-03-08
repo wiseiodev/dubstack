@@ -134,6 +134,50 @@ describe('postMerge', () => {
     expect(featB?.parent).toBe('main');
   });
 
+  it('preserves parent_revision on reparented children', async () => {
+    const stateWithRevision: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: 1,
+              pr_link: 'https://x/1',
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              parent_revision: 'a-tip-sha-original',
+              pr_number: 2,
+              pr_link: 'https://x/2',
+            },
+          ],
+        },
+      ],
+    };
+    mockReadState.mockResolvedValue(stateWithRevision);
+
+    const result = await postMerge('/repo', {
+      restack: false,
+      submit: false,
+    });
+
+    expect(result.cleaned).toEqual(['feat/a']);
+    const saved = mockWriteState.mock.calls[0][0] as DubState;
+    const featB = saved.stacks[0].branches.find((b) => b.name === 'feat/b');
+    expect(featB?.parent).toBe('main');
+    expect(featB?.parent_revision).toBe('a-tip-sha-original');
+  });
+
   it('supports dry-run without mutating state', async () => {
     const result = await postMerge('/repo', {
       dryRun: true,

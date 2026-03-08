@@ -1,5 +1,10 @@
 node_modules
 dist
+coverage
 .git/dubstack
 
 .worktrees
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

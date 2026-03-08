@@ -12,6 +12,8 @@ export interface Branch {
   type?: 'root';
   /** Name of the parent branch. `null` only for root branches. */
   parent: string | null;
+  /** SHA of parent branch tip when this branch was created/last rebased */
+  parent_revision?: string | null;
   /** GitHub PR number. Populated after `dub submit`. */
   pr_number: number | null;
   /** GitHub PR URL. Populated after `dub submit`. */
@@ -174,12 +176,14 @@ export function getParent(
  * @param state - The state to mutate (modified in place)
  * @param child - Name of the new branch
  * @param parent - Name of the parent branch
+ * @param parentRevision - Optional SHA of the parent branch tip
  * @throws {DubError} If child branch already exists in state
  */
 export function addBranchToStack(
   state: DubState,
   child: string,
   parent: string,
+  parentRevision?: string,
 ): void {
   if (findStackForBranch(state, child)) {
     throw new DubError(`Branch '${child}' is already tracked in a stack.`);
@@ -188,6 +192,7 @@ export function addBranchToStack(
   const childBranch: Branch = {
     name: child,
     parent,
+    ...(parentRevision != null ? { parent_revision: parentRevision } : {}),
     pr_number: null,
     pr_link: null,
     last_submitted_version: null,

@@ -18,4 +18,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm checks
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm test:coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30

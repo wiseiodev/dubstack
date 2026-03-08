@@ -376,6 +376,94 @@ describe('sync', () => {
     }
   });
 
+  it('preserves parent_revision when auto-cleaning reparents children', async () => {
+    mockReadState.mockResolvedValue({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'feat/a-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                version_number: null,
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              parent_revision: 'a-tip-sha-original',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'feat/b-sha',
+                base_sha: 'feat/a-sha',
+                base_branch: 'feat/a',
+                version_number: null,
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+      ],
+    });
+    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
+      branch === 'feat/a' ? 'MERGED' : 'OPEN',
+    );
+
+    const result = await sync('/repo', {
+      interactive: false,
+      restack: false,
+    });
+
+    expect(result.cleaned).toContain('feat/a');
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featB = writtenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/b',
+    );
+    expect(featB?.parent).toBe('main');
+    expect(featB?.parent_revision).toBe('a-tip-sha-original');
+  });
+
+  it('updates parent_revision via markBranchSynced when base is ancestor', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+    mockIsAncestor.mockResolvedValue(true);
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featA = writtenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    expect(featA?.parent_revision).toBe('same-sha');
+  });
+
   it('handles parent-mismatch status in non-interactive mode by skipping', async () => {
     mockReadState.mockResolvedValue(
       makeState([
