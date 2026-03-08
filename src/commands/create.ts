@@ -7,6 +7,7 @@ import {
   branchExists,
   commitStaged,
   createBranch,
+  getBranchTip,
   getCurrentBranch,
   getDiff,
   hasStagedChanges,
@@ -165,8 +166,9 @@ export async function create(
     cwd,
   );
 
+  const parentRevision = await getBranchTip(parent, cwd);
   await createBranch(branchName, cwd);
-  addBranchToStack(state, branchName, parent);
+  addBranchToStack(state, branchName, parent, parentRevision);
   await writeState(state, cwd);
 
   if (commitMessage) {

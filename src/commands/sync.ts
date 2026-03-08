@@ -670,6 +670,7 @@ async function markBranchSynced(
     version_number: priorBaseline?.version_number ?? null,
     source: options.source,
   };
+  entry.parent_revision = resolvedBaseSha;
   entry.last_synced_at = new Date().toISOString();
   entry.sync_source = options.source;
 }

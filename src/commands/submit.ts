@@ -156,6 +156,7 @@ export async function submit(
             version_number: null,
             source: 'submit',
           };
+          stateBranch.parent_revision = baseSha;
           stateBranch.last_synced_at = new Date().toISOString();
           stateBranch.sync_source = 'submit';
         }

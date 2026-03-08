@@ -113,6 +113,36 @@ describe('writeState and readState roundtrip', () => {
     expect(loaded.stacks[0].branches[0].sync_source).toBeNull();
   });
 
+  it('roundtrips parent_revision correctly', async () => {
+    await initState(dir);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              parent_revision: 'deadbeef',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    const loaded = await readState(dir);
+    expect(loaded.stacks[0].branches[1].parent_revision).toBe('deadbeef');
+  });
+
   it('creates parent directory if missing', async () => {
     const state: DubState = { stacks: [] };
     await writeState(state, dir);
@@ -236,6 +266,28 @@ describe('addBranchToStack', () => {
       name: 'feat/a',
       parent: 'main',
     });
+  });
+
+  it('stores parent_revision when provided', () => {
+    const state: DubState = { stacks: [] };
+
+    addBranchToStack(state, 'feat/a', 'main', 'abc123');
+
+    expect(state.stacks[0].branches[1]).toMatchObject({
+      name: 'feat/a',
+      parent: 'main',
+      parent_revision: 'abc123',
+    });
+  });
+
+  it('omits parent_revision when not provided (backward compat)', () => {
+    const state: DubState = { stacks: [] };
+
+    addBranchToStack(state, 'feat/a', 'main');
+
+    const branch = state.stacks[0].branches[1];
+    expect(branch.name).toBe('feat/a');
+    expect(branch).not.toHaveProperty('parent_revision');
   });
 
   it('throws when child already exists in a stack', () => {

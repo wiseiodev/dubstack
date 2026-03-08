@@ -16,6 +16,7 @@ import {
   readState,
   type Stack,
   topologicalOrder,
+  writeState,
 } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
 
@@ -131,6 +132,10 @@ export async function restackContinue(cwd: string): Promise<RestackResult> {
   const conflictedStep = progress.steps.find((s) => s.status === 'conflicted');
   if (conflictedStep) {
     conflictedStep.status = 'done';
+    const state = await readState(cwd);
+    const parentNewTip = await getBranchTip(conflictedStep.parent, cwd);
+    updateParentRevision(state, conflictedStep.branch, parentNewTip);
+    await writeState(state, cwd);
   }
 
   return executeRestackSteps(progress, cwd);
@@ -141,6 +146,7 @@ async function executeRestackSteps(
   cwd: string,
 ): Promise<RestackResult> {
   const rebased: string[] = [];
+  const state = await readState(cwd);
 
   for (const step of progress.steps) {
     if (step.status !== 'pending') {
@@ -159,6 +165,7 @@ async function executeRestackSteps(
       await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
       step.status = 'done';
       rebased.push(step.branch);
+      updateParentRevision(state, step.branch, parentNewTip);
       await writeProgress(progress, cwd);
     } catch (error) {
       if (error instanceof DubError && error.message.includes('Conflict')) {
@@ -170,6 +177,7 @@ async function executeRestackSteps(
     }
   }
 
+  await writeState(state, cwd);
   await clearProgress(cwd);
   await checkoutBranch(progress.originalBranch, cwd);
 
@@ -180,6 +188,20 @@ async function executeRestackSteps(
     status: rebased.length === 0 && allSkipped ? 'up-to-date' : 'success',
     rebased,
   };
+}
+
+function updateParentRevision(
+  state: { stacks: Stack[] },
+  branchName: string,
+  parentRevision: string,
+): void {
+  for (const stack of state.stacks) {
+    const branch = stack.branches.find((b) => b.name === branchName);
+    if (branch) {
+      branch.parent_revision = parentRevision;
+      return;
+    }
+  }
 }
 
 function getTargetStacks(stacks: Stack[], currentBranch: string): Stack[] {
@@ -206,11 +228,13 @@ async function buildRestackSteps(
     const ordered = topologicalOrder(stack);
     for (const branch of ordered) {
       if (branch.type === 'root' || !branch.parent) continue;
-      const mergeBase = await getMergeBase(branch.parent, branch.name, cwd);
+      const parentOldTip =
+        branch.parent_revision ??
+        (await getMergeBase(branch.parent, branch.name, cwd));
       steps.push({
         branch: branch.name,
         parent: branch.parent,
-        parentOldTip: mergeBase,
+        parentOldTip,
         status: 'pending',
       });
     }
