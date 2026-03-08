@@ -23,12 +23,24 @@ pnpm install
 5. Open a PR using the repository PR template.
 
 ```bash
+pnpm check:all
+
+# or run the steps individually
 pnpm test
 pnpm typecheck
 pnpm checks
 ```
 
 Before submitting stacked PRs, run `dub ready` to validate health + submit preflight. Changes are not ready to merge unless all three verification commands pass.
+
+If you change AI-generated metadata or prompt behavior, also run the local Evalite suite:
+
+```bash
+pnpm evals
+```
+
+Use `pnpm evals:watch` while iterating and `pnpm evals:export` to export the latest local report.
+`pnpm check:all` already includes unsafe Biome fixes, typecheck, tests, and evals.
 
 ## Formatting and Naming
 

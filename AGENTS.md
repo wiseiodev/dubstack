@@ -26,6 +26,10 @@ Use these commands from the repo root:
 - `pnpm typecheck`
 - `pnpm checks`
 - `pnpm checks:fix`
+- `pnpm check:all`
+- `pnpm evals`
+- `pnpm evals:watch`
+- `pnpm evals:export`
 - `pnpm build`
 
 ## 3) Repository Structure
@@ -41,6 +45,8 @@ Use these commands from the repo root:
 - Agent skills shipped by this repo:
   - `skills/dubstack`
   - `skills/dub-flow`
+- Project-only agent skills:
+  - `.agents/skills/dub-flow-evals`
 
 ## 4) Coding Conventions
 
@@ -72,6 +78,10 @@ Use these commands from the repo root:
 3. `pnpm test` — unit tests
 
 All three must pass. Do not skip any. Do not consider work done until all pass.
+
+If AI metadata generation or prompts changed, also run `pnpm evals`.
+
+When you want the full local gate in one command, run `pnpm check:all`.
 
 If behavior/output changed, add or update tests near the changed code:
 

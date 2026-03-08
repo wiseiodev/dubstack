@@ -22,12 +22,33 @@ source ~/.zshrc
 # 3) enable assistant for this repo
 dub config ai-assistant on
 
-# 4) ask a question
+# 4) optional: enable AI defaults
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+
+# 5) ask a question
 dub ai ask "Summarize this stack from trunk to current branch"
 
 # optional: inspect recent dub command history/context
 dub history --limit 20
 ```
+
+Optional template setup:
+
+```bash
+cat <<'EOF' > .gitmessage
+feat(scope): summary
+
+## Testing
+- [ ] added coverage
+EOF
+
+git config commit.template .gitmessage
+```
+
+- add a PR template in `.github/pull_request_template.md` or `.github/PULL_REQUEST_TEMPLATE/*.md`
+- DubStack AI will follow those templates for generated commit bodies and PR descriptions
 
 ## 1) Start from Trunk
 
@@ -66,6 +87,9 @@ dub create feat/new-layer -pm "feat: ..."
 # AI-generate branch + commit from staged changes
 dub create --ai
 
+# override repo AI defaults for one invocation
+dub create --no-ai feat/new-layer
+
 # stage all, then AI-generate branch + commit (supports -ai shorthand)
 dub create -ai
 ```
@@ -101,6 +125,9 @@ dub ss --dry-run
 
 # current-path submit (default behavior)
 dub ss --path current
+
+# AI-generate PR description body
+dub submit --ai
 ```
 
 Open PR in browser:
@@ -131,6 +158,18 @@ dub m -vv
 # push updates
 dub ss
 ```
+
+## Optional: Use The AI Flow
+
+```bash
+# stage all, preview generated metadata, create, and submit
+dub flow --ai -a
+
+# auto-approve after staging tracked files
+dub f -y -u
+```
+
+If you run `dub flow` in a non-interactive terminal, add `-y` because approval prompts require a TTY.
 
 ## 6) Keep Stack in Sync
 
@@ -260,7 +299,18 @@ dub undo
 | `dub undo` | Undo last create/restack |
 | `dub config ai-assistant on` | Enable repo-local AI assistant |
 | `dub ai ask "..."` | Ask AI assistant (streaming + constrained read-only repo shell tool) |
+| `dub flow --ai -a` | Stage, preview, create, and submit with AI |
 | `dub history` | Show recent Dub command history |
+
+## Local AI Evals
+
+```bash
+pnpm evals
+pnpm evals:watch
+pnpm evals:export
+```
+
+Use these when changing AI-generated flow metadata so branch naming, commit bodies, PR descriptions, and template preservation stay honest.
 
 ## Next Step
 

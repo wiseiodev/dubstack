@@ -24,6 +24,11 @@ describe('readConfig', () => {
     expect(config).toEqual({
       aiAssistantEnabled: false,
       ai: {
+        defaults: {
+          createMetadata: false,
+          submitDescription: false,
+          flow: false,
+        },
         shortcutFallback: {
           enabled: true,
           typoGuard: 'interactive',
@@ -58,5 +63,33 @@ describe('writeConfig', () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     const config = await readConfig(dir);
     expect(config.aiAssistantEnabled).toBe(true);
+    expect(config.ai.defaults).toEqual({
+      createMetadata: false,
+      submitDescription: false,
+      flow: false,
+    });
+  });
+
+  it('fills in missing ai defaults when persisting partial config', async () => {
+    await writeConfig(
+      {
+        ai: {
+          defaults: {
+            createMetadata: true,
+            submitDescription: false,
+            flow: false,
+          },
+        },
+      },
+      dir,
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.ai.defaults).toEqual({
+      createMetadata: true,
+      submitDescription: false,
+      flow: false,
+    });
   });
 });

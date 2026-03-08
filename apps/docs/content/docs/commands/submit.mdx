@@ -12,6 +12,9 @@ dub ss
 # Preview only
 dub submit --dry-run
 
+# Generate a PR description body with AI
+dub submit --ai
+
 # Submit only current linear path (default)
 dub submit --path current
 
@@ -27,11 +30,29 @@ dub submit --path stack --fix
 | Flag | Description |
 |---|---|
 | `--dry-run` | Preview submit actions without executing |
+| `--ai` | Generate a PR description body for this invocation |
+| `--no-ai` | Disable AI PR description generation for this invocation |
 | `--path current` | Submit only current linear path (default) |
 | `--path stack` | Submit the whole stack graph |
 | `--fix` | Auto-fallback to current path when stack-mode is blocked |
 
 **Aliases:** `dub ss`
+
+When AI submit defaults are enabled for the repository, `--no-ai` lets you force a manual PR body update for one run. AI submit only writes the PR description body; the PR title still comes from the last commit message.
+
+If your repository includes a GitHub pull request template, DubStack asks AI to preserve that template structure when generating the PR description body. Supported locations include `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, and `pull_request_template.md`.
+
+```bash
+mkdir -p .github
+cat <<'EOF' > .github/pull_request_template.md
+## Summary
+
+## Testing
+
+## Checklist
+- [ ] Ready for review
+EOF
+```
 
 ## Open PR in Browser
 

@@ -6,6 +6,11 @@ import { getDubDir } from './state';
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   ai: {
+    defaults: {
+      createMetadata: boolean;
+      submitDescription: boolean;
+      flow: boolean;
+    };
     shortcutFallback: {
       enabled: boolean;
       typoGuard: 'interactive';
@@ -24,9 +29,21 @@ export interface DubConfig {
   };
 }
 
+type DeepPartial<T> =
+  T extends Array<infer U>
+    ? Array<DeepPartial<U>>
+    : T extends object
+      ? { [K in keyof T]?: DeepPartial<T[K]> }
+      : T;
+
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   ai: {
+    defaults: {
+      createMetadata: false,
+      submitDescription: false,
+      flow: false,
+    },
     shortcutFallback: {
       enabled: true,
       typoGuard: 'interactive',
@@ -58,7 +75,7 @@ export async function readConfig(cwd: string): Promise<DubConfig> {
 
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<DubConfig>;
+    const parsed = JSON.parse(raw) as DeepPartial<DubConfig>;
     return normalizeConfig(parsed);
   } catch {
     throw new DubError(
@@ -68,7 +85,7 @@ export async function readConfig(cwd: string): Promise<DubConfig> {
 }
 
 export async function writeConfig(
-  config: Partial<DubConfig>,
+  config: DeepPartial<DubConfig>,
   cwd: string,
 ): Promise<void> {
   const configPath = await getConfigPath(cwd);
@@ -80,7 +97,8 @@ export async function writeConfig(
   fs.writeFileSync(configPath, `${JSON.stringify(normalized, null, 2)}\n`);
 }
 
-function normalizeConfig(config: Partial<DubConfig>): DubConfig {
+function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
+  const defaults = config.ai?.defaults;
   const fallback = config.ai?.shortcutFallback;
   const shellHistory = config.ai?.context?.shellHistory;
   const webBrowsing = config.ai?.webBrowsing;
@@ -91,6 +109,20 @@ function normalizeConfig(config: Partial<DubConfig>): DubConfig {
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
     ai: {
+      defaults: {
+        createMetadata:
+          typeof defaults?.createMetadata === 'boolean'
+            ? defaults.createMetadata
+            : DEFAULT_CONFIG.ai.defaults.createMetadata,
+        submitDescription:
+          typeof defaults?.submitDescription === 'boolean'
+            ? defaults.submitDescription
+            : DEFAULT_CONFIG.ai.defaults.submitDescription,
+        flow:
+          typeof defaults?.flow === 'boolean'
+            ? defaults.flow
+            : DEFAULT_CONFIG.ai.defaults.flow,
+      },
       shortcutFallback: {
         enabled:
           typeof fallback?.enabled === 'boolean'

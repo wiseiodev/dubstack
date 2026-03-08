@@ -3,7 +3,7 @@ title: Introduction
 description: DubStack is a CLI for stacked diffs — dependent git branches that make code review faster and more focused.
 ---
 
-DubStack is a CLI tool for managing stacked diffs — dependent git branches that make code review faster and more focused. It stores all state locally in `.git/dubstack/`, uses GitHub PRs directly via the `gh` CLI, and includes built-in AI assistance for branch naming, commit messages, and stack-aware guidance.
+DubStack is a CLI tool for managing stacked diffs — dependent git branches that make code review faster and more focused. It stores all state locally in `.git/dubstack/`, uses GitHub PRs directly via the `gh` CLI, and includes built-in AI assistance for stack-aware guidance, branch naming, commit messages, PR descriptions, and end-to-end flow previews.
 
 ## Prerequisites
 
@@ -125,8 +125,20 @@ source ~/.zshrc
 # Enable assistant for this repo
 dub config ai-assistant on
 
+# Optional: enable AI defaults
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+
 # Ask a question
 dub ai ask "Summarize this stack from trunk to current branch"
+
+# Generate metadata directly
+dub create --ai
+dub submit --ai
+
+# Run the full AI flow
+dub flow --ai -a
 ```
 
 ## Command Reference
@@ -147,3 +159,4 @@ dub ai ask "Summarize this stack from trunk to current branch"
 | `dub continue` / `dub abort` | Resume/cancel operations |
 | `dub undo` | Undo last create/restack |
 | `dub ai ask "..."` | Ask AI assistant |
+| `dub flow --ai -a` | Stage, preview, create, and submit with AI |

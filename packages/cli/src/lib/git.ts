@@ -1,6 +1,12 @@
 import { execa } from 'execa';
 import { DubError } from './errors';
 
+export interface DiffStatEntry {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
 /**
  * Checks whether the given directory is inside a git repository.
  * @returns `true` if inside a git worktree, `false` otherwise. Never throws.
@@ -354,6 +360,23 @@ export async function commitStaged(
 }
 
 /**
+ * Commits currently staged changes using a file-backed message.
+ * @throws {DubError} If the commit fails.
+ */
+export async function commitStagedFromFile(
+  filePath: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['commit', '--file', filePath], { cwd });
+  } catch {
+    throw new DubError(
+      'Commit failed. Ensure there are staged changes and git hooks pass.',
+    );
+  }
+}
+
+/**
  * Commits currently staged changes, opening the editor if no message is provided.
  * @param cwd - The working directory.
  * @param options - Commit options (message, noEdit).
@@ -468,6 +491,82 @@ export async function getDiff(cwd: string, staged: boolean): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/**
+ * Returns changed file paths for a diff.
+ */
+export async function getDiffFileNames(
+  cwd: string,
+  staged: boolean,
+): Promise<string[]> {
+  try {
+    const args = ['diff', '--name-only'];
+    if (staged) args.push('--cached');
+    const { stdout } = await execa('git', args, { cwd });
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns per-file line stats for a diff.
+ */
+export async function getDiffNumStat(
+  cwd: string,
+  staged: boolean,
+): Promise<DiffStatEntry[]> {
+  try {
+    const args = ['diff', '--numstat'];
+    if (staged) args.push('--cached');
+    const { stdout } = await execa('git', args, { cwd });
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [rawAdditions = '0', rawDeletions = '0', path = ''] =
+          line.split('\t');
+        return {
+          path,
+          additions: parseDiffCount(rawAdditions),
+          deletions: parseDiffCount(rawDeletions),
+        };
+      })
+      .filter((entry) => entry.path.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns the diff between two refs using merge-base three-dot semantics.
+ */
+export async function getDiffBetween(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<string> {
+  try {
+    const { stdout } = await execa('git', ['diff', `${baseRef}...${headRef}`], {
+      cwd,
+    });
+    return stdout;
+  } catch {
+    throw new DubError(
+      `Failed to diff '${headRef}' against '${baseRef}'. Verify both refs exist and are reachable.`,
+    );
+  }
+}
+
+function parseDiffCount(raw: string): number {
+  if (raw === '-') return 0;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
 }
 
 /**

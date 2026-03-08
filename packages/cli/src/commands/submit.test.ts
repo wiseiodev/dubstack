@@ -1,8 +1,11 @@
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/git.js', () => ({
   getBranchTip: vi.fn(),
   getCurrentBranch: vi.fn(),
+  getDiff: vi.fn(),
+  getDiffBetween: vi.fn(),
   getLastCommitMessage: vi.fn(),
   pushBranch: vi.fn(),
 }));
@@ -24,9 +27,20 @@ vi.mock('../lib/state.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../lib/config.js', () => ({
+  readConfig: vi.fn(),
+}));
+
+vi.mock('../lib/metadata-templates.js', () => ({
+  readMetadataTemplates: vi.fn(),
+}));
+
+import { readConfig } from '../lib/config';
 import {
   getBranchTip,
   getCurrentBranch,
+  getDiff,
+  getDiffBetween,
   getLastCommitMessage,
   pushBranch,
 } from '../lib/git';
@@ -37,12 +51,15 @@ import {
   getPr,
   updatePrBody,
 } from '../lib/github';
+import { readMetadataTemplates } from '../lib/metadata-templates';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
 import { submit } from './submit';
 
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 const mockGetBranchTip = getBranchTip as ReturnType<typeof vi.fn>;
+const mockGetDiff = getDiff as ReturnType<typeof vi.fn>;
+const mockGetDiffBetween = getDiffBetween as ReturnType<typeof vi.fn>;
 const mockGetLastCommitMessage = getLastCommitMessage as ReturnType<
   typeof vi.fn
 >;
@@ -54,6 +71,10 @@ const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
 const mockUpdatePrBody = updatePrBody as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
+const mockReadConfig = readConfig as ReturnType<typeof vi.fn>;
+const mockReadMetadataTemplates = readMetadataTemplates as ReturnType<
+  typeof vi.fn
+>;
 
 function makeState(
   branches: {
@@ -81,15 +102,330 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
+  mockReadConfig.mockResolvedValue({
+    aiAssistantEnabled: false,
+    ai: {
+      defaults: {
+        submitDescription: false,
+      },
+    },
+  });
   mockWriteState.mockResolvedValue(undefined);
   mockPushBranch.mockResolvedValue(undefined);
   mockGetBranchTip.mockImplementation(
     async (branch: string) => `${branch}-sha`,
   );
+  mockGetDiff.mockResolvedValue('diff --git a/file.ts b/file.ts');
+  mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
+  mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
   mockUpdatePrBody.mockResolvedValue(undefined);
+  mockReadMetadataTemplates.mockResolvedValue({
+    prTemplate: null,
+    commitTemplate: null,
+  });
 });
 
 describe('submit', () => {
+  it('uses the repo default to enable AI PR descriptions when no flag is passed', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: true,
+        },
+      },
+    });
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing title',
+      body: 'User intro',
+    });
+    const generateText = vi.fn().mockResolvedValue({
+      text: '## Summary\n\nGenerated PR description',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    let updatedBody = '';
+    mockUpdatePrBody.mockImplementationOnce(async (_number, bodyFile) => {
+      updatedBody = await readFile(bodyFile, 'utf8');
+    });
+
+    await submit(
+      '/repo',
+      false,
+      {},
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'google-model',
+      }),
+    );
+    expect(updatedBody).toContain('Generated PR description');
+    expect(updatedBody).toContain('User intro');
+  });
+
+  it('allows --no-ai to override an enabled repo default', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: true,
+        },
+      },
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing title',
+      body: 'User intro',
+    });
+    const generateText = vi.fn();
+    const createGoogleGenerativeAI = vi.fn();
+    const createGateway = vi.fn();
+
+    await submit(
+      '/repo',
+      false,
+      { noAi: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it('preserves user-authored body content and replaces only the ai-managed summary', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: false,
+        },
+      },
+    });
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing title',
+      body: [
+        'User intro',
+        '',
+        '<!-- dubstack-ai-summary:start -->',
+        'Old summary',
+        '<!-- dubstack-ai-summary:end -->',
+        '',
+        'Extra note',
+      ].join('\n'),
+    });
+    const generateText = vi.fn().mockResolvedValue({
+      text: 'New generated summary',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    let updatedBody = '';
+    mockUpdatePrBody.mockImplementationOnce(async (_number, bodyFile) => {
+      updatedBody = await readFile(bodyFile, 'utf8');
+    });
+
+    await submit(
+      '/repo',
+      false,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(updatedBody).toContain('User intro');
+    expect(updatedBody).toContain('Extra note');
+    expect(updatedBody).toContain('New generated summary');
+    expect(updatedBody).not.toContain('Old summary');
+  });
+
+  it('uses the branch diff against the parent even for the current branch', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: false,
+        },
+      },
+    });
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing title',
+      body: 'User intro',
+    });
+    const generateText = vi.fn().mockResolvedValue({
+      text: 'Generated PR summary',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    await submit(
+      '/repo',
+      false,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(mockGetDiffBetween).toHaveBeenCalledWith('main', 'feat/a', '/repo');
+    expect(mockGetDiff).not.toHaveBeenCalled();
+  });
+
+  it('surfaces diff lookup failures when ai descriptions are requested', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: false,
+        },
+      },
+    });
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing title',
+      body: 'User intro',
+    });
+    mockGetDiffBetween.mockRejectedValueOnce(new Error('bad refs'));
+
+    await expect(
+      submit(
+        '/repo',
+        false,
+        { ai: true },
+        {
+          generateText: vi.fn(),
+          createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
+          createGateway: vi.fn(),
+        },
+      ),
+    ).rejects.toThrow(
+      "Failed to generate an AI PR summary for 'feat/a' because its diff could not be loaded.",
+    );
+  });
+
+  it('creates new PRs with the last commit message as the title even when AI descriptions are enabled', async () => {
+    mockReadConfig.mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          submitDescription: false,
+        },
+      },
+    });
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage.mockResolvedValue('feat: exact squash title');
+    mockCreatePr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: exact squash title',
+      body: '',
+    });
+    const generateText = vi.fn().mockResolvedValue({
+      text: 'Generated PR summary',
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+
+    await submit(
+      '/repo',
+      false,
+      { ai: true },
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+      },
+    );
+
+    expect(mockCreatePr).toHaveBeenCalledWith(
+      'feat/a',
+      'main',
+      'feat: exact squash title',
+      expect.any(String),
+      '/repo',
+    );
+  });
+
+  it('rejects combining --ai and --no-ai', async () => {
+    await expect(
+      submit('/repo', false, {
+        ai: true,
+        noAi: true,
+      }),
+    ).rejects.toThrow("'--ai' cannot be combined with '--no-ai'.");
+  });
+
   it('throws when branch is not in any stack', async () => {
     mockGetCurrentBranch.mockResolvedValue('orphan');
     mockReadState.mockResolvedValue({ stacks: [] });
@@ -234,6 +570,7 @@ describe('submit', () => {
     expect(result.created).toEqual([]);
     expect(mockCreatePr).not.toHaveBeenCalled();
     expect(mockUpdatePrBody).toHaveBeenCalled();
+    expect(mockGetLastCommitMessage).not.toHaveBeenCalled();
   });
 
   it('saves pr_number and pr_link to state', async () => {

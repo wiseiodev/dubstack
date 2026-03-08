@@ -143,6 +143,9 @@ dub create feat/my-change -pm "feat: ..."
 # AI-generate branch + conventional commit from staged changes
 dub create --ai
 
+# override repo AI defaults for one invocation
+dub create --no-ai feat/my-change
+
 # stage all, then AI-generate branch + commit (supports -ai shorthand)
 dub create -ai
 ```
@@ -153,6 +156,9 @@ Flags:
 - `-u, --update`: stage tracked-file updates before commit (requires `-m` or `--ai`)
 - `-p, --patch`: select hunks interactively before commit (requires `-m` or `--ai`)
 - `-i, --ai`: AI-generate branch + conventional commit from staged changes
+- `--no-ai`: disable AI generation for this invocation
+
+If the repo configures `git config commit.template`, DubStack includes that template when generating AI commit messages so the body follows the repo's expected structure.
 
 ### `dub modify` / `dub m`
 
@@ -370,6 +376,9 @@ dub ss
 # preview only
 dub submit --dry-run
 
+# AI-generate PR description body
+dub submit --ai
+
 # submit only current linear path (default)
 dub submit --path current
 
@@ -379,6 +388,37 @@ dub submit --path stack
 # auto-fallback to current path when stack-mode is blocked
 dub submit --path stack --fix
 ```
+
+Notes:
+- `--no-ai` disables AI PR description generation for one invocation.
+- AI submit only writes the PR description body; the PR title still comes from the last commit message.
+- If the repo has a PR template in a supported GitHub template location, DubStack preserves that structure when generating AI PR descriptions.
+
+### `dub flow` / `dub f`
+
+Stage, preview, create, and submit an AI-assisted change.
+
+```bash
+# stage all, preview, create, commit, and submit
+dub flow --ai -a
+
+# auto-approve after staging tracked files
+dub flow -y -u
+
+# preview only
+dub f --dry-run
+```
+
+`dub flow` requires an interactive terminal for approval. In non-interactive environments, pass `-y` to auto-approve after the preview is rendered.
+
+Flags:
+- `-a, --all`
+- `-u, --update`
+- `-p, --patch`
+- `-y, --yes`
+- `-i, --ai`
+- `--no-ai`
+- `--dry-run`
 
 ### `dub pr [branch-or-number]`
 
@@ -557,6 +597,20 @@ dub config ai-assistant on
 dub config ai-assistant off
 ```
 
+### `dub config ai-defaults <create|submit|flow> [on|off]`
+
+Manage repo-local defaults for AI-assisted authoring.
+
+```bash
+# inspect current value
+dub config ai-defaults create
+
+# enable AI by default
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+```
+
 ### `dub ai ask <prompt...>`
 
 Ask DubStack's AI assistant using streaming output (`streamText`).
@@ -566,6 +620,7 @@ dub ai ask "Summarize what this stack is changing"
 ```
 
 `dub ai ask` automatically includes a context packet (current branch/stack signals, git status, doctor summary, and recent Dub command history) so it can give better recovery guidance.
+In TTY mode, response text streams live while status/tool activity lines are rendered separately for readability.
 
 To inspect your repository, `dub ai ask` can invoke a constrained shell tool limited to a strict allow-list of safe, read-only commands (for example `git status`, `dub doctor`, `dub ready`) when command output is needed.
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
@@ -576,6 +631,30 @@ Provider/key selection:
 - If both are set, DubStack prefers `DUBSTACK_GEMINI_API_KEY`.
 
 Thinking is enabled by default for Gemini 3 Flash.
+
+Template support:
+- PR templates: `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, `pull_request_template.md`
+- commit templates: configured with `git config commit.template <path>`
+
+When templates are present, DubStack uses them as the formatting contract for AI-generated commit messages and PR descriptions.
+
+## AI Evals
+
+DubStack uses [Evalite](https://v1.evalite.dev/getting-started) for local AI quality checks around generated metadata.
+
+```bash
+# run the curated dub flow metadata suite
+pnpm evals
+
+# rerun on file changes while iterating on prompts/scorers
+pnpm evals:watch
+
+# export the latest local report
+pnpm evals:export
+```
+
+The first suite lives at `packages/cli/evals/dub-flow-metadata.eval.ts` and evaluates the pure `generateFlowMetadata(...)` helper used by `dub flow`.
+It mixes deterministic contract checks with an AI judge scorer so prompt changes are measured against staged diff fidelity, template preservation, and reviewer usefulness.
 
 ### `dub ai env`
 

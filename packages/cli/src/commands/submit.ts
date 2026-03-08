@@ -1,10 +1,15 @@
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGateway, generateText } from 'ai';
+import {
+  type AiMetadataDependencies,
+  generatePrDescriptionSummary,
+} from '../lib/ai-metadata';
+import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import {
   getBranchTip,
   getCurrentBranch,
+  getDiffBetween,
   getLastCommitMessage,
   pushBranch,
 } from '../lib/git';
@@ -16,6 +21,7 @@ import {
   type PrInfo,
   updatePrBody,
 } from '../lib/github';
+import { readMetadataTemplates } from '../lib/metadata-templates';
 import {
   buildMetadataBlock,
   buildStackTable,
@@ -30,6 +36,7 @@ import {
   topologicalOrder,
   writeState,
 } from '../lib/state';
+import { withTempMarkdownFile } from '../lib/temp-text-file';
 
 export type SubmitPathMode = 'current' | 'stack';
 
@@ -39,8 +46,11 @@ interface SubmitBranchingBlocker {
 }
 
 export interface SubmitOptions {
+  ai?: boolean;
+  noAi?: boolean;
   path?: SubmitPathMode;
   fix?: boolean;
+  summaryOverrides?: Map<string, string>;
 }
 
 export interface SubmitPlan {
@@ -62,6 +72,14 @@ export interface SubmitResult {
   fallbackApplied: boolean;
 }
 
+type SubmitDependencies = AiMetadataDependencies;
+
+const DEFAULT_DEPS: SubmitDependencies = {
+  generateText,
+  createGoogleGenerativeAI,
+  createGateway,
+};
+
 /**
  * Pushes branches in the current stack and creates/updates GitHub PRs.
  *
@@ -73,8 +91,27 @@ export async function submit(
   cwd: string,
   dryRun: boolean,
   options: SubmitOptions = {},
+  deps: SubmitDependencies = DEFAULT_DEPS,
 ): Promise<SubmitResult> {
+  if (options.ai && options.noAi) {
+    throw new DubError("'--ai' cannot be combined with '--no-ai'.");
+  }
+
   const plan = await getSubmitPlan(cwd, options);
+  const config = await readConfig(cwd);
+  const useAi =
+    options.ai === true
+      ? true
+      : options.noAi === true
+        ? false
+        : config.ai.defaults.submitDescription;
+
+  if (useAi && !config.aiAssistantEnabled) {
+    throw new DubError(
+      "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
+    );
+  }
+  const templates = useAi ? await readMetadataTemplates(cwd) : null;
 
   await ensureGhInstalled();
   await checkGhAuth();
@@ -124,19 +161,25 @@ export async function submit(
       result.updated.push(branch.name);
     } else {
       const title = await getLastCommitMessage(branch.name, cwd);
-      const tmpFile = writeTempBody('');
-      try {
-        const created = await createPr(branch.name, base, title, tmpFile, cwd);
-        prMap.set(branch.name, created);
-        result.created.push(branch.name);
-      } finally {
-        cleanupTempFile(tmpFile);
-      }
+      const created = await withTempMarkdownFile(
+        'pr-body',
+        '',
+        async (tmpFile) => {
+          return createPr(branch.name, base, title, tmpFile, cwd);
+        },
+      );
+      prMap.set(branch.name, created);
+      result.created.push(branch.name);
     }
   }
 
   if (!dryRun) {
-    await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd);
+    await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd, {
+      useAi,
+      deps,
+      summaryOverrides: options.summaryOverrides,
+      prTemplate: templates?.prTemplate ?? null,
+    });
 
     for (const branch of plan.branches) {
       const pr = prMap.get(branch.name);
@@ -313,6 +356,12 @@ async function updateAllPrBodies(
   prMap: Map<string, PrInfo>,
   stackId: string,
   cwd: string,
+  options: {
+    useAi: boolean;
+    deps: SubmitDependencies;
+    summaryOverrides?: Map<string, string>;
+    prTemplate: string | null;
+  },
 ): Promise<void> {
   const tableEntries = new Map<string, { number: number; title: string }>();
   for (const branch of branches) {
@@ -344,28 +393,51 @@ async function updateAllPrBodies(
     );
 
     const existingBody = pr.body;
-    const finalBody = composePrBody(existingBody, stackTable, metadataBlock);
+    const aiSummaryOverride = options.summaryOverrides?.get(branch.name);
+    const aiSummary =
+      typeof aiSummaryOverride === 'string'
+        ? aiSummaryOverride
+        : options.useAi
+          ? await generatePrDescriptionSummary(
+              {
+                branch: branch.name,
+                baseBranch: branch.parent as string,
+                commitMessage: await getLastCommitMessage(branch.name, cwd),
+                diff: await getDiffForPrDescription(
+                  branch.name,
+                  branch.parent as string,
+                  cwd,
+                ),
+              },
+              options.deps,
+              {
+                prTemplate: options.prTemplate,
+              },
+            )
+          : '';
+    const finalBody = composePrBody(
+      existingBody,
+      aiSummary,
+      stackTable,
+      metadataBlock,
+    );
 
-    const tmpFile = writeTempBody(finalBody);
-    try {
+    await withTempMarkdownFile('pr-body', finalBody, async (tmpFile) => {
       await updatePrBody(pr.number, tmpFile, cwd);
-    } finally {
-      cleanupTempFile(tmpFile);
-    }
+    });
   }
 }
 
-function writeTempBody(content: string): string {
-  const tmpDir = os.tmpdir();
-  const tmpFile = path.join(tmpDir, `dubstack-body-${Date.now()}.md`);
-  fs.writeFileSync(tmpFile, content);
-  return tmpFile;
-}
-
-function cleanupTempFile(filePath: string): void {
+async function getDiffForPrDescription(
+  branchName: string,
+  baseBranch: string,
+  cwd: string,
+): Promise<string> {
   try {
-    fs.unlinkSync(filePath);
+    return await getDiffBetween(baseBranch, branchName, cwd);
   } catch {
-    // Best-effort cleanup
+    throw new DubError(
+      `Failed to generate an AI PR summary for '${branchName}' because its diff could not be loaded.`,
+    );
   }
 }

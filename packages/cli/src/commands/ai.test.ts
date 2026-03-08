@@ -32,6 +32,9 @@ function fullStreamFrom(
     | { type: 'reasoning-start' }
     | { type: 'reasoning-delta'; text: string }
     | { type: 'reasoning-end' }
+    | { type: 'tool-input-start'; toolName: string }
+    | { type: 'tool-input-delta'; toolName: string; text: string }
+    | { type: 'tool-input-end'; toolName: string }
     | { type: 'error'; error: unknown }
   >,
 ) {
@@ -246,17 +249,67 @@ describe('askAi', () => {
     expect(result.modelId).toBe('google/gemini-2.5-pro');
   });
 
-  it('streams a TTY thinking preview with spinner frames', async () => {
+  it('streams text output as chunks arrive while still showing TTY status lines', async () => {
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+
+    const output = createOutputCapture({ isTTY: true });
+    const writesAfterFirstChunk: string[] = [];
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: 'reasoning-start' } as const;
+          yield { type: 'reasoning-delta', text: 'Planning edits' } as const;
+          yield {
+            type: 'text-delta',
+            text: '# Summary\n',
+          } as const;
+          writesAfterFirstChunk.push(output.writes.join(''));
+          yield { type: 'text-delta', text: '\n- Done.' } as const;
+          yield { type: 'reasoning-end' } as const;
+        },
+      },
+    });
+    const googleModel = vi.fn().mockReturnValue('google-model');
+    const createGoogleGenerativeAI = vi.fn().mockReturnValue(googleModel);
+    const createGateway = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+
+    await askAi('Explain this stack', dir, {
+      output: output.stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    const rendered = output.writes.join('');
+    expect(rendered).toContain('AI: thinking');
+    expect(rendered).not.toContain('\r');
+    expect(writesAfterFirstChunk[0]).toContain('# Summary');
+    expect(rendered).toContain('# Summary');
+    expect(rendered).toContain('- Done.');
+  });
+
+  it('prints explicit tool activity lines in TTY mode', async () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
 
     const streamText = vi.fn().mockReturnValue({
       fullStream: fullStreamFrom([
-        { type: 'reasoning-start' },
-        { type: 'reasoning-delta', text: 'Planning edits' },
-        { type: 'reasoning-delta', text: ' and checks' },
-        { type: 'reasoning-end' },
+        { type: 'tool-input-start', toolName: 'bash' },
+        {
+          type: 'tool-input-delta',
+          toolName: 'bash',
+          text: 'git status --short',
+        },
+        { type: 'tool-input-end', toolName: 'bash' },
         { type: 'text-delta', text: 'Done.' },
       ]),
     });
@@ -279,9 +332,8 @@ describe('askAi', () => {
     });
 
     const rendered = output.writes.join('');
-    expect(rendered).toContain('thinking:');
-    expect(rendered).toContain('\r');
-    expect(rendered.endsWith('Done.\n')).toBe(true);
+    expect(rendered).toContain('AI: running bash');
+    expect(rendered).toContain('git status --short');
   });
 
   it('throws when the stream emits an error part', async () => {

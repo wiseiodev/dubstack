@@ -36,9 +36,19 @@ source ~/.zshrc
 # Enable assistant for this repo
 dub config ai-assistant on
 
+# Optional: enable AI defaults
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+
 # Ask a question
 dub ai ask "Summarize this stack from trunk to current branch"
 ```
+
+If you want DubStack AI to follow your repository's formatting, also set up:
+
+- a PR template in `.github/pull_request_template.md` or `.github/PULL_REQUEST_TEMPLATE/*.md`
+- a commit template via `git config commit.template .gitmessage`
 
 ## 1. Start from Trunk
 
@@ -89,6 +99,16 @@ dub ss --dry-run
 
 # Open PR in browser
 dub pr
+```
+
+## Optional: Use the AI Flow
+
+```bash
+# Stage all, preview generated metadata, create, and submit
+dub flow --ai -a
+
+# Auto-approve after staging tracked files
+dub flow -y -u
 ```
 
 ## 5. Respond to Feedback
@@ -156,3 +176,4 @@ dub post-merge
 | `dub continue` / `dub abort` | Resume/cancel operations |
 | `dub undo` | Undo last create/restack |
 | `dub ai ask "..."` | Ask AI assistant |
+| `dub flow --ai -a` | Run the AI-assisted authoring flow |

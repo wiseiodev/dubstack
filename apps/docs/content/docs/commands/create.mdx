@@ -24,6 +24,9 @@ dub create feat/my-change -pm "feat: ..."
 # AI-generate branch + conventional commit from staged changes
 dub create --ai
 
+# Override repo AI defaults for one command
+dub create --no-ai feat/my-change
+
 # Stage all, then AI-generate branch + commit
 dub create -ai
 ```
@@ -37,10 +40,15 @@ dub create -ai
 | `-u, --update` | Stage tracked-file updates before commit (requires `-m` or `--ai`) |
 | `-p, --patch` | Select hunks interactively before commit (requires `-m` or `--ai`) |
 | `-i, --ai` | AI-generate branch + conventional commit from staged changes |
+| `--no-ai` | Disable AI generation for this invocation, even if repo defaults enable it |
 
 ## AI Mode
 
 When using `--ai` or `-ai`, DubStack analyzes your staged changes and generates a descriptive branch name and conventional commit message. This requires an AI key configured via `dub ai env`.
+
+If your repository enables AI create defaults, `--no-ai` lets you force manual mode for a single invocation.
+
+If your repository configures a commit message template with `git config commit.template`, DubStack includes that template when generating AI commit messages so the body follows the repo's expected sections and formatting.
 
 ```bash
 # AI with explicit staging
@@ -48,6 +56,16 @@ dub create --ai
 
 # Stage all + AI (shorthand)
 dub create -ai
+
+# Example commit template setup
+cat <<'EOF' > .gitmessage
+feat(scope): summary
+
+## Testing
+- [ ] added coverage
+EOF
+
+git config commit.template .gitmessage
 ```
 
 ## Notes
