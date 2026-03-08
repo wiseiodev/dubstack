@@ -1,0 +1,367 @@
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { LanguageModel } from 'ai';
+import { createGateway, streamText } from 'ai';
+import chalk from 'chalk';
+import type { ConflictContext } from '../lib/conflict-context';
+import { gatherConflictContext } from '../lib/conflict-context';
+import type { FileResolution } from '../lib/conflict-ui';
+import {
+  applyResolution,
+  promptBatchAction,
+  promptFileAction,
+  renderBatchPreview,
+  showScopeWarning,
+  validateResolutionPaths,
+} from '../lib/conflict-ui';
+import { DubError } from '../lib/errors';
+import { abortCommand } from './abort';
+import { continueCommand } from './continue';
+
+export interface AiResolveDeps {
+  streamText: typeof streamText;
+  createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createGateway: typeof createGateway;
+  gatherConflictContext: typeof gatherConflictContext;
+  renderBatchPreview: typeof renderBatchPreview;
+  promptBatchAction: typeof promptBatchAction;
+  promptFileAction: typeof promptFileAction;
+  applyResolution: typeof applyResolution;
+  showScopeWarning: typeof showScopeWarning;
+  validateResolutionPaths: typeof validateResolutionPaths;
+  continueCommand: typeof continueCommand;
+  abortCommand: typeof abortCommand;
+}
+
+const DEFAULT_DEPS: AiResolveDeps = {
+  streamText,
+  createGoogleGenerativeAI,
+  createGateway,
+  gatherConflictContext,
+  renderBatchPreview,
+  promptBatchAction,
+  promptFileAction,
+  applyResolution,
+  showScopeWarning,
+  validateResolutionPaths,
+  continueCommand,
+  abortCommand,
+};
+
+const PROVIDER_OPTIONS = {
+  google: {
+    thinkingConfig: {
+      thinkingLevel: 'high' as const,
+      includeThoughts: true,
+    },
+  },
+} as const;
+
+export async function aiResolve(
+  cwd: string,
+  options: { dryRun?: boolean; abort?: boolean },
+  deps: AiResolveDeps = DEFAULT_DEPS,
+): Promise<void> {
+  const sigintHandler = () => {
+    console.log(
+      '\nCancelled. Conflict state preserved — resolve manually or re-run `dub ai resolve`.',
+    );
+    process.exit(130);
+  };
+  process.on('SIGINT', sigintHandler);
+
+  try {
+    if (options.abort) {
+      await deps.abortCommand(cwd);
+      console.log(chalk.green('Operation aborted.'));
+      return;
+    }
+
+    const context = await deps.gatherConflictContext(cwd);
+
+    if (context.conflictedFiles.length === 0) {
+      throw new DubError('No conflicted files detected.');
+    }
+
+    if (context.scopeWarning) {
+      const proceed = await deps.showScopeWarning(context.scopeWarning);
+      if (!proceed) return;
+    }
+
+    const model = resolveModel(deps);
+    const resolutions = await streamResolutions(context, model, deps);
+
+    deps.validateResolutionPaths(resolutions, context.conflictedFiles, cwd);
+
+    if (options.dryRun) {
+      deps.renderBatchPreview(resolutions);
+      console.log(chalk.dim('\nDry run — no changes applied.'));
+      return;
+    }
+
+    await applyAndContinue(cwd, resolutions, model, deps, 0);
+  } finally {
+    process.removeListener('SIGINT', sigintHandler);
+  }
+}
+
+function buildConflictSystemPrompt(): string {
+  return [
+    'You are an AI assistant helping resolve git merge conflicts.',
+    'Analyze the conflict markers and propose a clean resolution for each file.',
+    'Output a JSON array of objects with: path, resolvedContent, confidence (high/medium/low), explanation.',
+    'Never silently drop changes from either side.',
+    'Explain what both sides changed and why in the explanation field.',
+    "Flag uncertain resolutions with 'low' confidence.",
+    'Return ONLY the JSON array, no markdown fences or extra text.',
+  ].join(' ');
+}
+
+function buildConflictUserPrompt(
+  context: ConflictContext,
+  errorFeedback?: string,
+): string {
+  const sections: string[] = [];
+
+  if (errorFeedback) {
+    sections.push(`Previous resolution attempt failed: ${errorFeedback}`);
+    sections.push('');
+  }
+
+  sections.push(
+    `Operation: ${context.operation}`,
+    `Branch: ${context.conflictedBranch} (rebasing onto ${context.parentBranch})`,
+  );
+
+  if (context.restackStep) {
+    sections.push(`Restack step: ${JSON.stringify(context.restackStep)}`);
+    if (context.remainingSteps !== undefined) {
+      sections.push(`Remaining steps: ${context.remainingSteps}`);
+    }
+  }
+
+  sections.push(
+    '',
+    '--- Upstream commits (base being rebased onto) ---',
+    context.upstreamCommits || '(none)',
+    '',
+    '--- Replayed commits (branch being rebased) ---',
+    context.replayedCommits || '(none)',
+    '',
+    '--- Conflicted files with markers ---',
+  );
+
+  for (const file of context.conflictedFiles) {
+    sections.push(`\n=== ${file} ===`);
+    sections.push(context.conflictMarkers[file] ?? '(content unavailable)');
+  }
+
+  return sections.join('\n');
+}
+
+async function streamResolutions(
+  context: ConflictContext,
+  model: LanguageModel,
+  deps: AiResolveDeps,
+  errorFeedback?: string,
+): Promise<FileResolution[]> {
+  console.log(
+    chalk.dim(
+      `Analyzing ${context.conflictedFiles.length} conflicted file(s)...`,
+    ),
+  );
+
+  const result = deps.streamText({
+    model,
+    system: buildConflictSystemPrompt(),
+    prompt: buildConflictUserPrompt(context, errorFeedback),
+    providerOptions: PROVIDER_OPTIONS as never,
+  });
+
+  let fullText = '';
+  for await (const part of result.fullStream) {
+    if (part.type === 'text-delta') {
+      fullText += part.text ?? '';
+    } else if (part.type === 'error') {
+      throw part.error instanceof Error
+        ? part.error
+        : new DubError('AI stream failed unexpectedly.');
+    }
+  }
+
+  const resolutions = parseResolutions(fullText);
+
+  for (const res of resolutions) {
+    res.originalContent = context.conflictMarkers[res.path] ?? '';
+  }
+
+  return resolutions;
+}
+
+function parseResolutions(text: string): FileResolution[] {
+  let jsonStr = text.trim();
+
+  // Strip markdown code fences if present
+  const fenceMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+  if (fenceMatch) {
+    jsonStr = fenceMatch[1].trim();
+  }
+
+  // Extract JSON array
+  const arrayStart = jsonStr.indexOf('[');
+  const arrayEnd = jsonStr.lastIndexOf(']');
+  if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+    jsonStr = jsonStr.slice(arrayStart, arrayEnd + 1);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    throw new DubError(
+      'Could not parse AI response. Try again or resolve conflicts manually.',
+    );
+  }
+
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new DubError(
+      'AI returned no resolutions. Resolve conflicts manually.',
+    );
+  }
+
+  return (parsed as unknown[]).map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new DubError(
+        'AI returned an invalid resolution format. Resolve conflicts manually.',
+      );
+    }
+    const item = raw as Record<string, unknown>;
+    return {
+      path: String(item.path ?? ''),
+      originalContent: '',
+      resolvedContent: String(item.resolvedContent ?? ''),
+      confidence: validateConfidence(item.confidence),
+      explanation: String(item.explanation ?? ''),
+    };
+  });
+}
+
+function validateConfidence(value: unknown): 'high' | 'medium' | 'low' {
+  if (value === 'high' || value === 'medium' || value === 'low') return value;
+  return 'low';
+}
+
+async function applyAndContinue(
+  cwd: string,
+  resolutions: FileResolution[],
+  model: LanguageModel,
+  deps: AiResolveDeps,
+  retryCount: number,
+): Promise<void> {
+  deps.renderBatchPreview(resolutions);
+
+  const action = await deps.promptBatchAction();
+
+  if (action === 'abort') {
+    await deps.abortCommand(cwd);
+    console.log(chalk.yellow('Operation aborted.'));
+    return;
+  }
+
+  if (action === 'apply-all') {
+    for (const res of resolutions) {
+      await deps.applyResolution(res.path, res.resolvedContent, cwd);
+    }
+  } else {
+    for (const res of resolutions) {
+      deps.renderBatchPreview([res]);
+      const fileAction = await deps.promptFileAction(res.path);
+
+      if (fileAction === 'abort') {
+        await deps.abortCommand(cwd);
+        console.log(chalk.yellow('Operation aborted.'));
+        return;
+      }
+
+      if (fileAction === 'apply') {
+        await deps.applyResolution(res.path, res.resolvedContent, cwd);
+      }
+    }
+  }
+
+  try {
+    await deps.continueCommand(cwd);
+    console.log(
+      chalk.green('Conflicts resolved and operation continued successfully.'),
+    );
+  } catch (err) {
+    if (retryCount >= 1) {
+      console.log(
+        chalk.yellow(
+          'AI could not fully resolve the conflicts. Please resolve manually and run `dub continue`.',
+        ),
+      );
+      return;
+    }
+
+    try {
+      const errMsg =
+        err instanceof Error ? err.message : 'Unknown error during continue';
+      console.log(chalk.yellow('New conflicts detected. Retrying with AI...'));
+      const retryContext = await deps.gatherConflictContext(cwd);
+      if (retryContext.conflictedFiles.length === 0) {
+        console.log(
+          chalk.yellow(
+            'AI could not fully resolve the conflicts. Please resolve manually and run `dub continue`.',
+          ),
+        );
+        return;
+      }
+      const retryResolutions = await streamResolutions(
+        retryContext,
+        model,
+        deps,
+        errMsg,
+      );
+      deps.validateResolutionPaths(
+        retryResolutions,
+        retryContext.conflictedFiles,
+        cwd,
+      );
+      await applyAndContinue(
+        cwd,
+        retryResolutions,
+        model,
+        deps,
+        retryCount + 1,
+      );
+    } catch {
+      console.log(
+        chalk.yellow(
+          'AI could not fully resolve the conflicts. Please resolve manually and run `dub continue`.',
+        ),
+      );
+    }
+  }
+}
+
+function resolveModel(deps: AiResolveDeps): LanguageModel {
+  const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
+  if (geminiApiKey) {
+    const geminiModel =
+      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
+    const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
+    return google(geminiModel);
+  }
+
+  const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
+  if (gatewayApiKey) {
+    const gatewayModel =
+      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
+    const gateway = deps.createGateway({ apiKey: gatewayApiKey });
+    return gateway(gatewayModel);
+  }
+
+  throw new DubError(
+    "AI requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env' to configure.",
+  );
+}

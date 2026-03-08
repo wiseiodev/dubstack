@@ -520,8 +520,12 @@ Examples:
 program
   .command('continue')
   .description('Continue the active restack or git rebase operation')
-  .action(async () => {
-    const result = await continueCommand(process.cwd());
+  .option('--ai', 'Use AI to resolve conflicts before continuing')
+  .action(async (options: { ai?: boolean }) => {
+    const result = await continueCommand(process.cwd(), { ai: options.ai });
+    if (result.continued === 'ai-resolve') {
+      return;
+    }
     if (result.continued === 'rebase') {
       console.log(chalk.green('✔ Continued git rebase.'));
       return;
@@ -990,6 +994,21 @@ program
           );
         },
       ),
+  )
+  .addCommand(
+    new Command('resolve')
+      .description(
+        'AI-assisted conflict resolution for rebase/restack conflicts',
+      )
+      .option('--dry-run', 'Show proposed resolutions without applying')
+      .option('--abort', 'Abort the active rebase/restack operation')
+      .action(async (options: { dryRun?: boolean; abort?: boolean }) => {
+        const { aiResolve } = await import('./commands/ai-resolve');
+        await aiResolve(process.cwd(), {
+          dryRun: options.dryRun,
+          abort: options.abort,
+        });
+      }),
   );
 
 program
