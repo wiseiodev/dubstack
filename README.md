@@ -435,7 +435,8 @@ dub pr 123
 
 ### `dub sync`
 
-Synchronize tracked branches with remote refs.
+Synchronize tracked branches with remote refs and repair stack state after
+manual merges.
 
 ```bash
 # sync current stack
@@ -450,16 +451,31 @@ dub sync --no-interactive
 # force destructive sync decisions
 dub sync --force
 
-# include post-sync restack
-dub sync --restack
+# keep sync conservative if you need to skip rebases
+dub sync --no-restack
 ```
 
 Current sync behavior includes:
 - fetch tracked refs from `origin`
 - attempt trunk fast-forward (or overwrite with `--force`)
 - auto-clean local branches for merged PRs (and closed PRs confirmed in trunk)
+- retarget surviving child PRs after merged-parent cleanup
+- refresh affected branch PRs after post-merge maintenance
 - reconcile local/remote divergence states per branch
-- optional restack when `--restack` is set
+- restack by default unless `--no-restack` is set
+
+Recommended post-merge flow:
+
+```bash
+# merged in GitHub or another UI
+dub sync
+```
+
+If sync hits a real conflict, prefer:
+
+```bash
+dub continue --ai
+```
 
 ### `dub doctor`
 

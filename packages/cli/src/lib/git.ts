@@ -563,6 +563,32 @@ export async function getDiffBetween(
   }
 }
 
+/**
+ * Returns whether a branch has unique patch content not already present upstream.
+ *
+ * Uses `git cherry`, which marks patch-equivalent commits with `-` and unique
+ * commits with `+`.
+ */
+export async function hasUniquePatchCommits(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<boolean> {
+  try {
+    const { stdout } = await execa('git', ['cherry', baseRef, headRef], {
+      cwd,
+    });
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .some((line) => line.startsWith('+'));
+  } catch {
+    throw new DubError(
+      `Failed to compare patch-equivalent commits for '${headRef}' against '${baseRef}'.`,
+    );
+  }
+}
+
 function parseDiffCount(raw: string): number {
   if (raw === '-') return 0;
   const value = Number(raw);

@@ -36,6 +36,7 @@ vi.mock('../lib/github.js', () => ({
   ensureGhInstalled: vi.fn(),
   getBranchPrLifecycleState: vi.fn(),
   getBranchPrSyncInfo: vi.fn(),
+  retargetPrBase: vi.fn(),
 }));
 
 import {
@@ -56,12 +57,18 @@ import {
   ensureGhInstalled,
   getBranchPrLifecycleState,
   getBranchPrSyncInfo,
+  retargetPrBase,
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
 import { restack } from './restack';
+import { submit } from './submit';
 import { sync } from './sync';
+
+vi.mock('./submit.js', () => ({
+  submit: vi.fn(),
+}));
 
 const mockBranchExists = branchExists as ReturnType<typeof vi.fn>;
 const mockCheckoutBranch = checkoutBranch as ReturnType<typeof vi.fn>;
@@ -90,8 +97,10 @@ const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
   typeof vi.fn
 >;
 const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as ReturnType<typeof vi.fn>;
+const mockRetargetPrBase = retargetPrBase as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
+const mockSubmit = submit as ReturnType<typeof vi.fn>;
 
 function makeState(
   branches: { name: string; parent: string | null; type?: 'root' }[],
@@ -141,10 +150,19 @@ beforeEach(() => {
     state: 'OPEN',
     baseRefName: 'main',
   });
+  mockRetargetPrBase.mockResolvedValue(undefined);
   mockDetectActiveOperation.mockResolvedValue('none');
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
   mockWriteState.mockResolvedValue(undefined);
+  mockSubmit.mockResolvedValue({
+    pushed: ['feat/a'],
+    created: [],
+    updated: ['feat/a'],
+    path: 'current',
+    dryRun: false,
+    fallbackApplied: false,
+  });
 });
 
 describe('sync', () => {
@@ -174,7 +192,7 @@ describe('sync', () => {
     expect(mockRestack).not.toHaveBeenCalled();
   });
 
-  it('does not restack unless --restack is explicitly requested', async () => {
+  it('restacks by default', async () => {
     mockReadState.mockResolvedValue(
       makeState([
         { name: 'main', parent: null, type: 'root' },
@@ -184,8 +202,8 @@ describe('sync', () => {
     mockGetRefSha.mockResolvedValue('same-sha');
 
     const result = await sync('/repo', { interactive: false });
-    expect(result.restacked).toBe(false);
-    expect(mockRestack).not.toHaveBeenCalled();
+    expect(result.restacked).toBe(true);
+    expect(mockRestack).toHaveBeenCalled();
   });
 
   it('restores missing local branch from remote', async () => {
@@ -376,6 +394,58 @@ describe('sync', () => {
     }
   });
 
+  it('refreshes the surviving child branch after cleaning a merged parent while on trunk', async () => {
+    mockGetCurrentBranch.mockResolvedValue('main');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+        { name: 'feat/c', parent: 'feat/b' },
+      ]),
+    );
+    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
+      branch === 'feat/a' ? 'MERGED' : 'OPEN',
+    );
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/b') {
+        return { state: 'OPEN', baseRefName: 'feat/a' };
+      }
+      if (branch === 'feat/c') {
+        return { state: 'OPEN', baseRefName: 'feat/b' };
+      }
+      return { state: 'NONE', baseRefName: null };
+    });
+    mockSubmit.mockImplementation(async (_cwd, _dryRun, options) => {
+      const lastCheckout = mockCheckoutBranch.mock.calls.at(-1)?.[0];
+      if (lastCheckout !== 'feat/b') {
+        throw new Error(
+          `expected surviving child checkout, got ${lastCheckout}`,
+        );
+      }
+      if (options?.path !== 'stack') {
+        throw new Error(`expected full-stack refresh, got ${options?.path}`);
+      }
+      return {
+        pushed: ['feat/b', 'feat/c'],
+        created: [],
+        updated: ['feat/b', 'feat/c'],
+        path: 'stack',
+        dryRun: false,
+        fallbackApplied: false,
+      };
+    });
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    expect(mockRetargetPrBase).toHaveBeenCalledWith('feat/b', 'main', '/repo');
+    expect(mockSubmit).toHaveBeenCalledWith('/repo', false, {
+      path: 'stack',
+      fix: true,
+    });
+    expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/b', '/repo');
+  });
+
   it('preserves parent_revision when auto-cleaning reparents children', async () => {
     mockReadState.mockResolvedValue({
       stacks: [
@@ -462,6 +532,12 @@ describe('sync', () => {
       (b) => b.name === 'feat/a',
     );
     expect(featA?.parent_revision).toBe('same-sha');
+    expect(featA?.last_reconciled_version).toEqual({
+      head_sha: 'same-sha',
+      base_sha: 'same-sha',
+      base_branch: 'main',
+      source: 'sync-noop',
+    });
   });
 
   it('handles parent-mismatch status in non-interactive mode by skipping', async () => {
@@ -488,6 +564,31 @@ describe('sync', () => {
 
     expect(result.branches[0].status).toBe('needs-remote-sync');
     expect(result.branches[0].action).toBe('skipped');
+  });
+
+  it('does not retarget PR bases when parent authority is unresolved', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'local-parent' },
+      ]),
+    );
+    mockGetRefSha
+      .mockResolvedValueOnce('local-sha')
+      .mockResolvedValueOnce('remote-sha');
+    mockIsAncestor.mockResolvedValue(false);
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'OPEN',
+      baseRefName: 'remote-parent',
+    });
+
+    await sync('/repo', {
+      interactive: false,
+      force: false,
+      restack: false,
+    });
+
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
   });
 
   it('throws actionable recovery guidance when restack phase conflicts', async () => {

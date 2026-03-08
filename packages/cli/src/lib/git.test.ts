@@ -15,6 +15,7 @@ import {
   getDiffBetween,
   getMergeBase,
   hasStagedChanges,
+  hasUniquePatchCommits,
   isGitRepo,
   isValidBranchName,
   isWorkingTreeClean,
@@ -190,6 +191,34 @@ describe('getDiffBetween', () => {
   it('throws when either ref is invalid', async () => {
     await expect(getDiffBetween('main', 'missing-branch', dir)).rejects.toThrow(
       DubError,
+    );
+  });
+});
+
+describe('hasUniquePatchCommits', () => {
+  it('returns true when a branch has unique work not present upstream', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat']);
+    fs.writeFileSync(path.join(dir, 'feat.txt'), 'feature');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'feat-commit']);
+
+    await expect(hasUniquePatchCommits('main', 'feat', dir)).resolves.toBe(
+      true,
+    );
+  });
+
+  it('returns false when the branch changes were squash-merged upstream', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat']);
+    fs.writeFileSync(path.join(dir, 'feat.txt'), 'feature');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'feat-commit']);
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    await gitInRepo(dir, ['merge', '--squash', 'feat']);
+    await gitInRepo(dir, ['commit', '-m', 'squash feat']);
+
+    await expect(hasUniquePatchCommits('main', 'feat', dir)).resolves.toBe(
+      false,
     );
   });
 });

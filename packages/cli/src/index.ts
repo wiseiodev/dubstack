@@ -496,7 +496,11 @@ program
 program
   .command('sync')
   .description('Sync tracked branches with remote and reconcile divergence')
-  .option('--restack', 'Restack branches after sync')
+  .option(
+    '--restack',
+    'Restack branches after sync (disable with --no-restack)',
+    true,
+  )
   .option(
     '-f, --force',
     'Skip prompts for branch reset/reconcile sync decisions',
@@ -538,7 +542,7 @@ Examples:
       );
       console.log(
         chalk.dim(
-          '  Resolve conflicts, stage changes, then run: dub restack --continue',
+          '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub restack --continue)',
         ),
       );
     } else {
@@ -571,7 +575,9 @@ program
         ),
       );
       console.log(
-        chalk.dim('  Resolve conflicts, stage changes, then run: dub continue'),
+        chalk.dim(
+          '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
+        ),
       );
       return;
     }

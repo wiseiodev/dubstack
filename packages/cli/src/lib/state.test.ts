@@ -143,6 +143,46 @@ describe('writeState and readState roundtrip', () => {
     expect(loaded.stacks[0].branches[1].parent_revision).toBe('deadbeef');
   });
 
+  it('normalizes and roundtrips reconciliation metadata', async () => {
+    await initState(dir);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              last_reconciled_version: {
+                head_sha: 'feat-head',
+                base_sha: 'main-head',
+                base_branch: 'main',
+                source: 'sync-adopt-remote',
+              },
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    const loaded = await readState(dir);
+    expect(loaded.stacks[0].branches[1].last_reconciled_version).toEqual({
+      head_sha: 'feat-head',
+      base_sha: 'main-head',
+      base_branch: 'main',
+      source: 'sync-adopt-remote',
+    });
+  });
+
   it('creates parent directory if missing', async () => {
     const state: DubState = { stacks: [] };
     await writeState(state, dir);

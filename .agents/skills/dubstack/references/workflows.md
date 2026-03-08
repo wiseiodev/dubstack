@@ -50,7 +50,13 @@ dub sync --no-interactive
 If you want automatic restack after sync:
 
 ```bash
-dub sync --restack
+dub sync
+```
+
+If you need to skip rebases for one run:
+
+```bash
+dub sync --no-restack
 ```
 
 If you explicitly want destructive reconciliation:
@@ -82,11 +88,13 @@ dub merge-next
 dub merge-next
 ```
 
-If manual merges happened:
+If manual merges happened in GitHub or another UI:
 
 ```bash
-dub post-merge
+dub sync
 ```
+
+`dub post-merge` remains available when you want the explicit repair command.
 
 ## 6) Conflict Recovery During Restack
 

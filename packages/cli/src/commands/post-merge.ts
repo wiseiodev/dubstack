@@ -4,8 +4,6 @@ import {
   checkGhAuth,
   ensureGhInstalled,
   getBranchPrLifecycleState,
-  getBranchPrSyncInfo,
-  retargetPrBase,
 } from '../lib/github';
 import {
   findStackForBranch,
@@ -14,7 +12,12 @@ import {
   writeState,
 } from '../lib/state';
 import { restack } from './restack';
-import { submit } from './submit';
+import {
+  hasNonRootBranches,
+  resolvePreferredBranch,
+  retargetOpenPrBranches,
+  submitRefreshedStacks,
+} from './stack-maintenance';
 
 export interface PostMergeResult {
   cleaned: string[];
@@ -67,6 +70,7 @@ export async function postMerge(
     dryRun,
   };
   let preferredBranch: string | null = null;
+  const reparentedBranchNames = new Set<string>();
 
   for (const stack of workingStacks) {
     const mergedBottom = await getMergedBottomBranches(stack, cwd);
@@ -74,21 +78,15 @@ export async function postMerge(
       result.cleaned.push(branchName);
       const reparented = removeBranchFromStack(stack, branchName);
       result.reparented.push(...reparented);
-    }
-  }
-
-  for (const stack of workingStacks) {
-    for (const branch of stack.branches) {
-      if (branch.type === 'root' || !branch.parent) continue;
-      const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
-      if (prInfo.state !== 'OPEN') continue;
-      if (prInfo.baseRefName === branch.parent) continue;
-      result.retargeted.push(branch.name);
-      if (!dryRun) {
-        await retargetPrBase(branch.name, branch.parent, cwd);
+      for (const entry of reparented) {
+        reparentedBranchNames.add(entry.branch);
       }
     }
   }
+  result.retargeted = await retargetOpenPrBranches(workingStacks, cwd, {
+    dryRun,
+    branches: [...reparentedBranchNames],
+  });
 
   if (!dryRun) {
     await writeState(state, cwd);
@@ -106,7 +104,7 @@ export async function postMerge(
       if (restackResult.status === 'conflict') {
         throw new DubError(
           `Post-merge restack hit conflicts on '${restackResult.conflictBranch ?? 'unknown'}'.\n` +
-            "Resolve conflicts, then run 'dub continue'. Run 'dub abort' to cancel.",
+            "Resolve conflicts, then run 'dub continue --ai' to let DubStack try the small conflict for you. Run 'dub continue' to resume manually or 'dub abort' to cancel.",
         );
       }
     }
@@ -125,14 +123,17 @@ export async function postMerge(
   }
 
   if (!dryRun && shouldSubmit) {
-    const submitResult = options.all
-      ? await submitAllStacks(cwd, workingStacks)
-      : await submit(cwd, false, {
-          path: 'current',
-          fix: true,
-        });
-    result.submitted = true;
-    result.submittedBranches = submitResult.pushed;
+    const hasRefreshableBranches = workingStacks.some(hasNonRootBranches);
+    if (hasRefreshableBranches) {
+      result.submittedBranches = await submitRefreshedStacks(
+        cwd,
+        workingStacks,
+        {
+          all: options.all ?? false,
+        },
+      );
+      result.submitted = true;
+    }
   }
   if (!dryRun && preferredBranch) {
     await checkoutBranch(preferredBranch, cwd);
@@ -141,29 +142,6 @@ export async function postMerge(
   result.cleaned.sort();
   result.retargeted.sort();
   return result;
-}
-
-async function submitAllStacks(
-  cwd: string,
-  stacks: Stack[],
-): Promise<{ pushed: string[] }> {
-  const submitTargets = stacks
-    .map(
-      (stack) => stack.branches.find((branch) => branch.type !== 'root')?.name,
-    )
-    .filter((branchName): branchName is string => Boolean(branchName));
-  const pushed = new Set<string>();
-  for (const branchName of submitTargets) {
-    await checkoutBranch(branchName, cwd);
-    const submitResult = await submit(cwd, false, {
-      path: 'current',
-      fix: true,
-    });
-    for (const branch of submitResult.pushed) {
-      pushed.add(branch);
-    }
-  }
-  return { pushed: [...pushed].sort() };
 }
 
 async function getMergedBottomBranches(
@@ -216,32 +194,4 @@ function removeBranchFromStack(
     (branch) => branch.name !== branchName,
   );
   return reparented;
-}
-
-function hasNonRootBranches(stack: Stack): boolean {
-  return stack.branches.some((branch) => branch.type !== 'root');
-}
-
-function resolvePreferredBranch(
-  workingStacks: Stack[],
-  originalBranch: string,
-  scopeStacks: Stack[],
-): string | null {
-  const inWorking = findStackForBranch(
-    { stacks: workingStacks },
-    originalBranch,
-  );
-  if (inWorking) {
-    return originalBranch;
-  }
-
-  const scopedIds = new Set(scopeStacks.map((stack) => stack.id));
-  const preferredStack =
-    workingStacks.find((stack) => scopedIds.has(stack.id)) ?? workingStacks[0];
-  if (!preferredStack) return null;
-  return (
-    preferredStack.branches.find((branch) => branch.type !== 'root')?.name ??
-    preferredStack.branches.find((branch) => branch.type === 'root')?.name ??
-    null
-  );
 }
