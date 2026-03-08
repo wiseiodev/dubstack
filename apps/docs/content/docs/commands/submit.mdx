@@ -40,6 +40,8 @@ dub submit --path stack --fix
 
 When AI submit defaults are enabled for the repository, `--no-ai` lets you force a manual PR body update for one run. AI submit only writes the PR description body; the PR title still comes from the last commit message.
 
+Configure the provider with `dub ai setup` or `dub ai env`, then enable the assistant with `dub config ai-assistant on`.
+
 If your repository includes a GitHub pull request template, DubStack asks AI to preserve that template structure when generating the PR description body. Supported locations include `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, and `pull_request_template.md`.
 
 ```bash

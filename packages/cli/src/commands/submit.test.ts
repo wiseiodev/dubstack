@@ -76,6 +76,45 @@ const mockReadMetadataTemplates = readMetadataTemplates as ReturnType<
   typeof vi.fn
 >;
 
+function makeConfig(overrides?: {
+  aiAssistantEnabled?: boolean;
+  submitDescription?: boolean;
+}) {
+  return {
+    aiAssistantEnabled: overrides?.aiAssistantEnabled ?? false,
+    ai: {
+      defaults: {
+        createMetadata: false,
+        submitDescription: overrides?.submitDescription ?? false,
+        flow: false,
+      },
+      provider: {
+        selected: 'auto' as const,
+        models: {
+          gemini: null,
+          gateway: null,
+          bedrock: null,
+        },
+      },
+      shortcutFallback: {
+        enabled: true,
+        typoGuard: 'interactive' as const,
+        nonTtyPolicy: 'error-with-suggestion' as const,
+      },
+      context: {
+        shellHistory: {
+          enabled: true,
+          maxCommands: 200,
+        },
+      },
+      webBrowsing: {
+        mode: 'model-native' as const,
+        fallback: 'graceful' as const,
+      },
+    },
+  };
+}
+
 function makeState(
   branches: {
     name: string;
@@ -102,14 +141,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
-  mockReadConfig.mockResolvedValue({
-    aiAssistantEnabled: false,
-    ai: {
-      defaults: {
-        submitDescription: false,
-      },
-    },
-  });
+  mockReadConfig.mockResolvedValue(makeConfig());
   mockWriteState.mockResolvedValue(undefined);
   mockPushBranch.mockResolvedValue(undefined);
   mockGetBranchTip.mockImplementation(
@@ -127,14 +159,9 @@ beforeEach(() => {
 
 describe('submit', () => {
   it('uses the repo default to enable AI PR descriptions when no flag is passed', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: true,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(
+      makeConfig({ aiAssistantEnabled: true, submitDescription: true }),
+    );
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
@@ -181,14 +208,9 @@ describe('submit', () => {
   });
 
   it('allows --no-ai to override an enabled repo default', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: true,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(
+      makeConfig({ aiAssistantEnabled: true, submitDescription: true }),
+    );
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
       makeState([
@@ -221,14 +243,7 @@ describe('submit', () => {
   });
 
   it('preserves user-authored body content and replaces only the ai-managed summary', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: false,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(makeConfig({ aiAssistantEnabled: true }));
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
@@ -280,14 +295,7 @@ describe('submit', () => {
   });
 
   it('uses the branch diff against the parent even for the current branch', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: false,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(makeConfig({ aiAssistantEnabled: true }));
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
@@ -325,14 +333,7 @@ describe('submit', () => {
   });
 
   it('surfaces diff lookup failures when ai descriptions are requested', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: false,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(makeConfig({ aiAssistantEnabled: true }));
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
@@ -366,14 +367,7 @@ describe('submit', () => {
   });
 
   it('creates new PRs with the last commit message as the title even when AI descriptions are enabled', async () => {
-    mockReadConfig.mockResolvedValue({
-      aiAssistantEnabled: true,
-      ai: {
-        defaults: {
-          submitDescription: false,
-        },
-      },
-    });
+    mockReadConfig.mockResolvedValue(makeConfig({ aiAssistantEnabled: true }));
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(

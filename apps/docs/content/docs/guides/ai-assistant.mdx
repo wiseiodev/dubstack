@@ -1,32 +1,126 @@
 ---
 title: AI Commands
-description: Complete guide to DubStack AI setup, shortcuts, metadata generation, flow, templates, and conflict resolution.
+description: Complete guide to DubStack AI setup, provider selection, metadata generation, flow, templates, and conflict resolution.
 ---
 
 DubStack includes an AI assistant for repository-aware questions, AI-generated branch and commit metadata, AI-generated PR descriptions, and conflict-resolution help.
 
-## Setup
+## Quick Setup
+
+The easiest setup path is the guided wizard:
 
 ```bash
-# Add one API key to your shell profile
-dub ai env --gemini-key "<your-key>"
-# or:
-dub ai env --gateway-key "<your-key>"
-
-# Reload your shell
+dub ai setup
 source ~/.zshrc
-
-# Enable AI for this repository
 dub config ai-assistant on
 ```
 
-You can also set repo-local defaults for AI-assisted authoring:
+You can then pin the provider for the current repository:
+
+```bash
+dub config ai-provider gemini
+# or:
+dub config ai-provider gateway
+# or:
+dub config ai-provider bedrock
+```
+
+Optional repo-local AI defaults:
 
 ```bash
 dub config ai-defaults create on
 dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
+
+## Providers
+
+### Gemini
+
+- Auth: `DUBSTACK_GEMINI_API_KEY`
+- Optional global model default: `DUBSTACK_GEMINI_MODEL`
+- Good fit when you want direct Google access from DubStack
+
+### AI Gateway
+
+- Auth: `DUBSTACK_AI_GATEWAY_API_KEY`
+- Optional global model default: `DUBSTACK_AI_GATEWAY_MODEL`
+- Good fit when your team standardizes on Vercel AI Gateway
+
+### Amazon Bedrock
+
+- Required: `DUBSTACK_BEDROCK_AWS_REGION`
+- Required: `DUBSTACK_BEDROCK_MODEL`
+- Optional: `DUBSTACK_BEDROCK_AWS_PROFILE`
+- Good fit for AWS SSO, instance roles, ECS roles, EKS service accounts, and other AWS credential-chain environments
+
+Bedrock support in DubStack is intentionally secure-auth only. DubStack does not introduce its own secret-key environment variable flow for AWS credentials.
+
+## Provider Selection and Precedence
+
+DubStack resolves AI providers in this order:
+
+1. Repo-local provider selection from `dub config ai-provider ...`
+2. Repo-local provider-specific model override from `dub config ai-model ...`
+3. Global provider defaults from shell profile exports
+4. Auto fallback order: Gemini, then AI Gateway, then Bedrock
+
+Examples:
+
+```bash
+# Inspect current provider choice
+dub config ai-provider
+
+# Pin this repo to Bedrock
+dub config ai-provider bedrock
+
+# Set a repo-local Bedrock model override
+dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
+
+# Clear the repo-local override and fall back to env defaults
+dub config ai-model --provider bedrock --clear
+```
+
+## `dub ai setup`
+
+`dub ai setup` is the guided onboarding flow for all supported providers.
+
+It helps you:
+
+- choose the repo-local provider
+- choose a curated model or enter a custom model ID
+- write global provider defaults into your shell profile
+- optionally store a repo-local model override
+
+For Bedrock, the wizard prompts for AWS profile and region instead of API secrets.
+When the wizard writes env vars, DubStack loads them into the current `dub` process and prints the exact shell command to run so your terminal session can pick them up immediately.
+
+## `dub ai env`
+
+Use `dub ai env` when you want explicit shell-profile edits without the wizard.
+
+```bash
+# Gemini
+dub ai env --gemini-key "<your-key>"
+dub ai env --gemini-model "gemini-3-flash-preview"
+
+# AI Gateway
+dub ai env --gateway-key "<your-key>"
+dub ai env --gateway-model "google/gemini-3-flash"
+
+# Bedrock
+dub ai env \
+  --bedrock-profile "bw-sso" \
+  --bedrock-region "us-west-2" \
+  --bedrock-model "us.anthropic.claude-sonnet-4-6"
+```
+
+Supported automatic profile detection:
+
+- `zsh` → `~/.zshrc`
+- `bash` → `~/.bashrc` (or `~/.bash_profile`)
+
+After writing exports, DubStack prints the exact activation command to run in your shell so the new values take effect right away.
 
 ## Direct Assistant Usage
 
@@ -96,30 +190,6 @@ dub f --dry-run
 - the commands DubStack will run
 
 Use `-y` to auto-approve. Use `--dry-run` to preview without creating or submitting anything.
-If you run `dub flow` in a non-interactive terminal, `-y` is required because approval prompts need a TTY.
-
-`dub ai ask` streams response text as it arrives and renders tool/status lines separately when the output stream is a TTY.
-
-## Defaults and Precedence
-
-DubStack resolves AI usage in this order:
-
-1. command flag such as `--ai` or `--no-ai`
-2. repo-local default from `dub config ai-defaults ...`
-3. built-in fallback of off
-
-Examples:
-
-```bash
-# Enable AI by default for create
-dub config ai-defaults create on
-
-# Force manual mode one time
-dub create --no-ai feat/manual-branch
-
-# Enable AI by default for submit PR descriptions
-dub config ai-defaults submit on
-```
 
 ## Templates
 
@@ -127,7 +197,7 @@ DubStack can use repository templates as the formatting contract for AI-generate
 
 ### Pull Request Templates
 
-DubStack checks common GitHub PR template locations, including:
+Supported locations include:
 
 - `.github/pull_request_template.md`
 - `.github/PULL_REQUEST_TEMPLATE.md`
@@ -135,40 +205,15 @@ DubStack checks common GitHub PR template locations, including:
 - `docs/pull_request_template.md`
 - `pull_request_template.md`
 
-When a PR template exists, `dub submit --ai` and `dub flow` ask the AI to preserve that structure instead of inventing a generic PR description.
-
-Example:
-
-```bash
-mkdir -p .github
-cat <<'EOF' > .github/pull_request_template.md
-## Summary
-
-## Testing
-
-## Checklist
-- [ ] Ready for review
-EOF
-```
-
 ### Commit Message Templates
 
 DubStack also reads the repository commit message template from git config:
 
 ```bash
-cat <<'EOF' > .gitmessage
-feat(scope): summary
-
-## Testing
-- [ ] added coverage
-EOF
-
 git config commit.template .gitmessage
 ```
 
-When a commit template is configured, `dub create --ai` and `dub flow` preserve that shape in the generated commit message body. The first line still needs to be a valid Conventional Commit subject.
-
-If no template is present, DubStack falls back to its default AI formatting.
+When templates are present, DubStack asks the model to preserve that structure instead of inventing a generic format.
 
 ## Conflict Resolution
 
@@ -178,17 +223,12 @@ Use AI to help resolve conflicts:
 dub ai resolve
 ```
 
-If you are already in a continue flow:
-
-```bash
-dub continue --ai
-```
-
 ## Notes
 
 - AI requires `dub config ai-assistant on` in the current repository.
 - If AI is explicitly requested and unavailable, DubStack fails clearly instead of silently downgrading.
 - PR titles remain commit-derived for squash-merge safety.
+- `dub docs` opens the docs site, and `dub repo` opens the current repository GitHub page in your browser.
 
 ## Local Evals
 
@@ -199,5 +239,3 @@ pnpm evals
 pnpm evals:watch
 pnpm evals:export
 ```
-
-The first suite targets the same pure `generateFlowMetadata(...)` helper used by `dub flow`, combining structural contract checks with an AI judge scorer.

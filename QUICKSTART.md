@@ -11,28 +11,47 @@ This guide gets you from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# 1) add one API key to your shell profile
-dub ai env --gemini-key "<your-gemini-key>"
-# or:
-dub ai env --gateway-key "<your-ai-gateway-key>"
+# 1) guided setup for Gemini, AI Gateway, or Amazon Bedrock
+dub ai setup
 
-# 2) reload your shell
+# 2) reload your shell using the command DubStack prints
 source ~/.zshrc
 
 # 3) enable assistant for this repo
 dub config ai-assistant on
 
-# 4) optional: enable AI defaults
+# 4) pin the provider for this repository
+dub config ai-provider gemini
+# or:
+dub config ai-provider gateway
+# or:
+dub config ai-provider bedrock
+
+# 5) optional: enable AI defaults
 dub config ai-defaults create on
 dub config ai-defaults submit on
 dub config ai-defaults flow on
 
-# 5) ask a question
+# 6) ask a question
 dub ai ask "Summarize this stack from trunk to current branch"
 
 # optional: inspect recent dub command history/context
 dub history --limit 20
 ```
+
+For Bedrock teams using AWS SSO or role-based auth, the secure non-interactive setup looks like this:
+
+```bash
+dub ai env \
+  --bedrock-profile "bw-sso" \
+  --bedrock-region "us-west-2" \
+  --bedrock-model "us.anthropic.claude-sonnet-4-6"
+
+dub config ai-provider bedrock
+```
+
+DubStack does not add or manage AWS secret key environment variables for Bedrock.
+`dub ai setup` and `dub ai env` print the exact activation command to run after updating your shell profile.
 
 Optional template setup:
 
@@ -136,6 +155,10 @@ Open PR in browser:
 dub pr          # current branch PR
 dub pr 123      # explicit PR
 dub pr feat/x   # explicit branch
+
+# product shortcuts
+dub docs        # DubStack docs
+dub repo        # current repository GitHub page
 ```
 
 ## 5) Respond to Feedback
@@ -284,6 +307,8 @@ dub undo
 | `dub co` | Interactive checkout |
 | `dub ss` | Submit stack PRs |
 | `dub pr` | Open PR in browser |
+| `dub docs` | Open the DubStack docs site |
+| `dub repo` | Open the current repository GitHub page |
 | `dub sync` | Sync local state with remote |
 | `dub doctor` | Run stack health checks |
 | `dub ready` | Run pre-submit checklist |
@@ -298,6 +323,8 @@ dub undo
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
 | `dub config ai-assistant on` | Enable repo-local AI assistant |
+| `dub config ai-provider bedrock` | Pin the repo-local AI provider |
+| `dub ai setup` | Guided provider/model/env setup |
 | `dub ai ask "..."` | Ask AI assistant (streaming + constrained read-only repo shell tool) |
 | `dub flow --ai -a` | Stage, preview, create, and submit with AI |
 | `dub history` | Show recent Dub command history |

@@ -1,7 +1,10 @@
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import type { LanguageModel } from 'ai';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, streamText } from 'ai';
 import chalk from 'chalk';
+import { buildAiProviderOptions, resolveAiProvider } from '../lib/ai-provider';
+import { readConfig } from '../lib/config';
 import type { ConflictContext } from '../lib/conflict-context';
 import { gatherConflictContext } from '../lib/conflict-context';
 import type { FileResolution } from '../lib/conflict-ui';
@@ -21,6 +24,10 @@ export interface AiResolveDeps {
   streamText: typeof streamText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
+  createAmazonBedrock?: typeof createAmazonBedrock;
+  fromIni?: typeof fromIni;
+  fromNodeProviderChain?: typeof fromNodeProviderChain;
+  readConfig: typeof readConfig;
   gatherConflictContext: typeof gatherConflictContext;
   renderBatchPreview: typeof renderBatchPreview;
   promptBatchAction: typeof promptBatchAction;
@@ -36,6 +43,10 @@ const DEFAULT_DEPS: AiResolveDeps = {
   streamText,
   createGoogleGenerativeAI,
   createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
+  readConfig,
   gatherConflictContext,
   renderBatchPreview,
   promptBatchAction,
@@ -46,15 +57,6 @@ const DEFAULT_DEPS: AiResolveDeps = {
   continueCommand,
   abortCommand,
 };
-
-const PROVIDER_OPTIONS = {
-  google: {
-    thinkingConfig: {
-      thinkingLevel: 'high' as const,
-      includeThoughts: true,
-    },
-  },
-} as const;
 
 export async function aiResolve(
   cwd: string,
@@ -76,7 +78,10 @@ export async function aiResolve(
       return;
     }
 
-    const context = await deps.gatherConflictContext(cwd);
+    const [config, context] = await Promise.all([
+      deps.readConfig(cwd),
+      deps.gatherConflictContext(cwd),
+    ]);
 
     if (context.conflictedFiles.length === 0) {
       throw new DubError('No conflicted files detected.');
@@ -87,8 +92,11 @@ export async function aiResolve(
       if (!proceed) return;
     }
 
-    const model = resolveModel(deps);
-    const resolutions = await streamResolutions(context, model, deps);
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: config.ai.provider,
+    });
+    const resolutions = await streamResolutions(context, resolved, deps);
 
     deps.validateResolutionPaths(resolutions, context.conflictedFiles, cwd);
 
@@ -98,7 +106,7 @@ export async function aiResolve(
       return;
     }
 
-    await applyAndContinue(cwd, resolutions, model, deps, 0);
+    await applyAndContinue(cwd, resolutions, resolved, deps, 0);
   } finally {
     process.removeListener('SIGINT', sigintHandler);
   }
@@ -160,7 +168,7 @@ function buildConflictUserPrompt(
 
 async function streamResolutions(
   context: ConflictContext,
-  model: LanguageModel,
+  resolved: ReturnType<typeof resolveAiProvider>,
   deps: AiResolveDeps,
   errorFeedback?: string,
 ): Promise<FileResolution[]> {
@@ -171,10 +179,12 @@ async function streamResolutions(
   );
 
   const result = deps.streamText({
-    model,
+    model: resolved.model,
     system: buildConflictSystemPrompt(),
     prompt: buildConflictUserPrompt(context, errorFeedback),
-    providerOptions: PROVIDER_OPTIONS as never,
+    providerOptions: buildAiProviderOptions(resolved, {
+      withWebBrowsing: false,
+    }) as never,
   });
 
   let fullText = '';
@@ -253,7 +263,7 @@ function validateConfidence(value: unknown): 'high' | 'medium' | 'low' {
 async function applyAndContinue(
   cwd: string,
   resolutions: FileResolution[],
-  model: LanguageModel,
+  resolved: ReturnType<typeof resolveAiProvider>,
   deps: AiResolveDeps,
   retryCount: number,
 ): Promise<void> {
@@ -318,7 +328,7 @@ async function applyAndContinue(
       }
       const retryResolutions = await streamResolutions(
         retryContext,
-        model,
+        resolved,
         deps,
         errMsg,
       );
@@ -330,7 +340,7 @@ async function applyAndContinue(
       await applyAndContinue(
         cwd,
         retryResolutions,
-        model,
+        resolved,
         deps,
         retryCount + 1,
       );
@@ -342,26 +352,4 @@ async function applyAndContinue(
       );
     }
   }
-}
-
-function resolveModel(deps: AiResolveDeps): LanguageModel {
-  const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
-  if (geminiApiKey) {
-    const geminiModel =
-      process.env.DUBSTACK_GEMINI_MODEL?.trim() || 'gemini-3-flash-preview';
-    const google = deps.createGoogleGenerativeAI({ apiKey: geminiApiKey });
-    return google(geminiModel);
-  }
-
-  const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
-  if (gatewayApiKey) {
-    const gatewayModel =
-      process.env.DUBSTACK_AI_GATEWAY_MODEL?.trim() || 'google/gemini-3-flash';
-    const gateway = deps.createGateway({ apiKey: gatewayApiKey });
-    return gateway(gatewayModel);
-  }
-
-  throw new DubError(
-    "AI requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY. Run 'dub ai env' to configure.",
-  );
 }

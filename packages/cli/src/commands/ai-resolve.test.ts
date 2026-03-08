@@ -58,6 +58,42 @@ function createMockDeps(overrides?: Partial<AiResolveDeps>): AiResolveDeps {
     streamText: vi.fn().mockReturnValue(aiResponse(defaultResolution)),
     createGoogleGenerativeAI: vi.fn().mockReturnValue(googleModel),
     createGateway: vi.fn(),
+    createAmazonBedrock: vi.fn().mockReturnValue(vi.fn()),
+    fromIni: vi.fn().mockReturnValue('ini-credentials'),
+    fromNodeProviderChain: vi.fn().mockReturnValue('default-chain'),
+    readConfig: vi.fn().mockResolvedValue({
+      aiAssistantEnabled: true,
+      ai: {
+        defaults: {
+          createMetadata: false,
+          submitDescription: false,
+          flow: false,
+        },
+        provider: {
+          selected: 'auto',
+          models: {
+            gemini: null,
+            gateway: null,
+            bedrock: null,
+          },
+        },
+        shortcutFallback: {
+          enabled: true,
+          typoGuard: 'interactive',
+          nonTtyPolicy: 'error-with-suggestion',
+        },
+        context: {
+          shellHistory: {
+            enabled: true,
+            maxCommands: 200,
+          },
+        },
+        webBrowsing: {
+          mode: 'model-native',
+          fallback: 'graceful',
+        },
+      },
+    }),
     gatherConflictContext: vi.fn().mockResolvedValue(createMockContext()),
     renderBatchPreview: vi.fn(),
     promptBatchAction: vi.fn().mockResolvedValue('apply-all'),

@@ -6,6 +6,7 @@ import {
   type AiMetadataDependencies,
   generateFlowMetadata,
 } from '../src/lib/ai-metadata';
+import type { DubConfig } from '../src/lib/config';
 
 interface FlowEvalInput {
   name: string;
@@ -31,6 +32,17 @@ interface FlowEvalOutput {
   branch: string;
   commitMessage: string;
   prDescription: string;
+}
+
+function createProviderConfig(): DubConfig['ai']['provider'] {
+  return {
+    selected: 'auto',
+    models: {
+      gemini: null,
+      gateway: null,
+      bedrock: null,
+    },
+  };
 }
 
 const LARGE_MIXED_MONOREPO_DIFF = `diff --git a/.agents/skills/beads/SKILL.md b/.agents/skills/beads/SKILL.md
@@ -343,6 +355,7 @@ evalite('dub flow metadata generation', {
         commitTemplate: input.commitTemplate,
         prTemplate: input.prTemplate,
       },
+      createProviderConfig(),
     );
   },
   scorers: [

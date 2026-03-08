@@ -21,6 +21,7 @@ import {
   getPr,
   getPrByNumber,
   getPrStateByNumber,
+  getRepositoryWebUrl,
   mergePr,
   openPrInBrowser,
   retargetPrBase,
@@ -306,6 +307,74 @@ describe('openPrInBrowser', () => {
       'gh',
       ['pr', 'view', 'feat/a', '--web'],
       { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+});
+
+describe('getRepositoryWebUrl', () => {
+  it('uses the upstream remote when available', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: 'origin/feat/a' })
+      .mockResolvedValueOnce({
+        stdout: 'git@github.com:wiseiodev/dubstack.git',
+      });
+
+    await expect(getRepositoryWebUrl('/repo')).resolves.toBe(
+      'https://github.com/wiseiodev/dubstack',
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['remote', 'get-url', 'origin'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('falls back to origin when the current branch has no upstream', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/wiseiodev/dubstack.git',
+      });
+
+    await expect(getRepositoryWebUrl('/repo')).resolves.toBe(
+      'https://github.com/wiseiodev/dubstack',
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['remote', 'get-url', 'origin'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('accepts ssh:// GitHub remotes', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'ssh://git@github.com/wiseiodev/dubstack.git',
+      });
+
+    await expect(getRepositoryWebUrl('/repo')).resolves.toBe(
+      'https://github.com/wiseiodev/dubstack',
+    );
+  });
+
+  it('throws for non-GitHub remotes', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'git@gitlab.com:wiseiodev/dubstack.git',
+      });
+
+    await expect(getRepositoryWebUrl('/repo')).rejects.toThrow(
+      'does not point to GitHub',
     );
   });
 });

@@ -249,6 +249,74 @@ describe('askAi', () => {
     expect(result.modelId).toBe('google/gemini-2.5-pro');
   });
 
+  it('uses Bedrock when selected in repo config', async () => {
+    await writeConfig(
+      {
+        aiAssistantEnabled: true,
+        ai: {
+          provider: {
+            selected: 'bedrock',
+            models: {
+              bedrock: 'repo-bedrock-model',
+            },
+          },
+        },
+      },
+      dir,
+    );
+    delete process.env.DUBSTACK_GEMINI_API_KEY;
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+    process.env.DUBSTACK_BEDROCK_AWS_PROFILE = 'bw-sso';
+    process.env.DUBSTACK_BEDROCK_AWS_REGION = 'us-west-2';
+    process.env.DUBSTACK_BEDROCK_MODEL = 'env-bedrock-model';
+
+    const streamText = vi.fn().mockReturnValue({
+      fullStream: streamFrom(['bedrock']),
+    });
+    const createGoogleGenerativeAI = vi.fn();
+    const createGateway = vi.fn();
+    const bedrockModel = vi.fn().mockReturnValue('bedrock-model');
+    const createAmazonBedrock = vi.fn().mockReturnValue(bedrockModel);
+    const fromIni = vi.fn().mockReturnValue('ini-provider');
+    const fromNodeProviderChain = vi.fn();
+    const collectAiContext = vi.fn().mockResolvedValue(fakeContext);
+    const { createBashTool } = createBashToolMock();
+    const output = createOutputCapture();
+
+    const result = await askAi('Explain this stack', dir, {
+      output: output.stream,
+      deps: {
+        streamText,
+        createGoogleGenerativeAI,
+        createGateway,
+        createAmazonBedrock,
+        fromIni,
+        fromNodeProviderChain,
+        collectAiContext,
+        createBashTool,
+      },
+    });
+
+    expect(createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(createGateway).not.toHaveBeenCalled();
+    expect(fromIni).toHaveBeenCalledWith({ profile: 'bw-sso' });
+    expect(fromNodeProviderChain).not.toHaveBeenCalled();
+    expect(createAmazonBedrock).toHaveBeenCalledWith({
+      region: 'us-west-2',
+      credentialProvider: 'ini-provider',
+    });
+    expect(bedrockModel).toHaveBeenCalledWith('repo-bedrock-model');
+    expect(result.provider).toBe('bedrock');
+    expect(result.modelId).toBe('repo-bedrock-model');
+    expect(streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'bedrock-model',
+        providerOptions: {},
+      }),
+    );
+    expect(output.writes.join('')).toBe('bedrock\n');
+  });
+
   it('streams text output as chunks arrive while still showing TTY status lines', async () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
@@ -405,11 +473,13 @@ describe('askAi', () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     delete process.env.DUBSTACK_GEMINI_API_KEY;
     delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+    delete process.env.DUBSTACK_BEDROCK_AWS_REGION;
+    delete process.env.DUBSTACK_BEDROCK_MODEL;
 
     await expect(
       askAi('hello', dir, {
         output: createOutputCapture().stream,
       }),
-    ).rejects.toThrow('DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY');
+    ).rejects.toThrow('DUBSTACK_BEDROCK_AWS_REGION + DUBSTACK_BEDROCK_MODEL');
   });
 });
