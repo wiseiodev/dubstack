@@ -228,13 +228,21 @@ function parseResolutions(text: string): FileResolution[] {
     );
   }
 
-  return parsed.map((item: Record<string, unknown>) => ({
-    path: String(item.path ?? ''),
-    originalContent: '',
-    resolvedContent: String(item.resolvedContent ?? ''),
-    confidence: validateConfidence(item.confidence),
-    explanation: String(item.explanation ?? ''),
-  }));
+  return (parsed as unknown[]).map((raw) => {
+    if (typeof raw !== 'object' || raw === null) {
+      throw new DubError(
+        'AI returned an invalid resolution format. Resolve conflicts manually.',
+      );
+    }
+    const item = raw as Record<string, unknown>;
+    return {
+      path: String(item.path ?? ''),
+      originalContent: '',
+      resolvedContent: String(item.resolvedContent ?? ''),
+      confidence: validateConfidence(item.confidence),
+      explanation: String(item.explanation ?? ''),
+    };
+  });
 }
 
 function validateConfidence(value: unknown): 'high' | 'medium' | 'low' {

@@ -36,6 +36,8 @@ function confidenceColor(level: FileResolution['confidence']): string {
  * Compute a simple line-by-line diff between two strings.
  * Returns unified-diff style hunks with context lines.
  */
+const DIFF_MAX_LINES = 3000;
+
 export function computeDiff(
   oldText: string,
   newText: string,
@@ -43,6 +45,22 @@ export function computeDiff(
 ): DiffHunk[] {
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
+
+  // Guard against OOM on very large files — fall back to full-file diff
+  if (oldLines.length > DIFF_MAX_LINES || newLines.length > DIFF_MAX_LINES) {
+    return [
+      {
+        oldStart: 1,
+        oldCount: oldLines.length,
+        newStart: 1,
+        newCount: newLines.length,
+        lines: [
+          ...oldLines.map((l) => `-${l}`),
+          ...newLines.map((l) => `+${l}`),
+        ],
+      },
+    ];
+  }
 
   // Build longest common subsequence table
   const m = oldLines.length;
@@ -299,8 +317,25 @@ export async function applyResolution(
   if (!filePath.startsWith(cwd + path.sep)) {
     throw new DubError(`Refusing to write outside repository: ${file}`);
   }
+
+  // Reject symlinks to prevent writes outside the repo
+  try {
+    const stat = fs.lstatSync(filePath);
+    if (stat.isSymbolicLink()) {
+      throw new DubError(`Refusing to write to symlinked path: ${file}`);
+    }
+  } catch (err) {
+    if (err instanceof DubError) throw err;
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new DubError(
+        `Conflicted file "${file}" does not exist. Aborting for safety.`,
+      );
+    }
+    throw err;
+  }
+
   fs.writeFileSync(filePath, content, 'utf-8');
-  await execa('git', ['add', file], { cwd });
+  await execa('git', ['add', '--', file], { cwd });
   console.log(chalk.green(`✔ Resolved ${file}`));
 }
 

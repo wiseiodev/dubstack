@@ -117,6 +117,8 @@ describe('applyResolution', () => {
     const file = 'test.ts';
     const content = 'resolved content';
 
+    // File must exist on disk for symlink/existence checks
+    fs.writeFileSync(path.join(dir, file), 'conflicted content');
     mockExeca.mockResolvedValueOnce({ stdout: '' });
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
@@ -125,7 +127,9 @@ describe('applyResolution', () => {
     const written = fs.readFileSync(path.join(dir, file), 'utf-8');
     expect(written).toBe(content);
 
-    expect(mockExeca).toHaveBeenCalledWith('git', ['add', file], { cwd: dir });
+    expect(mockExeca).toHaveBeenCalledWith('git', ['add', '--', file], {
+      cwd: dir,
+    });
 
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('Resolved test.ts');

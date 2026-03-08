@@ -15,19 +15,25 @@ export async function continueCommand(
   options?: { ai?: boolean },
 ): Promise<ContinueCommandResult> {
   if (options?.ai) {
-    const { stdout } = await execa(
-      'git',
-      ['diff', '--name-only', '--diff-filter=U'],
-      { cwd },
-    );
-    const conflicted = stdout
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+    try {
+      const { stdout } = await execa(
+        'git',
+        ['diff', '--name-only', '--diff-filter=U'],
+        { cwd },
+      );
+      const conflicted = stdout
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
 
-    if (conflicted.length > 0) {
-      await aiResolve(cwd, {});
-      return { continued: 'ai-resolve' };
+      if (conflicted.length > 0) {
+        await aiResolve(cwd, {});
+        return { continued: 'ai-resolve' };
+      }
+    } catch {
+      throw new DubError(
+        'Failed to check for merge conflicts. Ensure you are in a git repository.',
+      );
     }
   }
 

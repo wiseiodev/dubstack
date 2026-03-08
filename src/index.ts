@@ -1001,7 +1001,7 @@ program
         'AI-assisted conflict resolution for rebase/restack conflicts',
       )
       .option('--dry-run', 'Show proposed resolutions without applying')
-      .option('--abort', 'Abort the current rebase operation')
+      .option('--abort', 'Abort the active rebase/restack operation')
       .action(async (options: { dryRun?: boolean; abort?: boolean }) => {
         const { aiResolve } = await import('./commands/ai-resolve');
         await aiResolve(process.cwd(), {

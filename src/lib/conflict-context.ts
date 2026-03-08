@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { execa } from 'execa';
 import { DubError } from './errors';
 import { getCurrentBranch } from './git';
@@ -49,7 +50,11 @@ export async function gatherConflictContext(
   let totalMarkerLines = 0;
   for (const file of conflictedFiles) {
     try {
-      const content = fs.readFileSync(`${cwd}/${file}`, 'utf-8');
+      const filePath = path.resolve(cwd, file);
+      if (!filePath.startsWith(cwd + path.sep) && filePath !== cwd) continue;
+      const stat = fs.lstatSync(filePath);
+      if (stat.isSymbolicLink()) continue;
+      const content = fs.readFileSync(filePath, 'utf-8');
       conflictMarkers[file] = content;
       totalMarkerLines += content.split('\n').length;
     } catch {
