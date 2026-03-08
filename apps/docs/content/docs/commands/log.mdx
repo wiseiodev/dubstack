@@ -1,25 +1,54 @@
 ---
-title: log
-description: Visualize the stack as a tree with branch status.
+title: dub log
+description: Visualize your stack as an ASCII tree.
 ---
 
 ## Usage
 
 ```bash
 dub log
+dub ls
+dub l
+
+# Show only current stack
+dub log --stack
+
+# Show all stacks explicitly
+dub log --all
+
+# Reverse branch ordering for quick top-down scan
+dub log --reverse
 ```
 
-## Description
+## Flags
 
-Displays a tree visualization of your stack, showing branch relationships, commit counts, and PR status.
+| Flag | Description |
+|---|---|
+| `--stack` | Show only current stack |
+| `--all` | Show all stacks explicitly |
+| `--reverse` | Reverse branch ordering |
 
-## Options
+**Aliases:** `dub ls`, `dub l`
 
-No additional options.
+## Example Output
 
-## Examples
+A typical stack looks like this:
+
+```text
+(main)
+  └─ feat/auth-types
+       └─ feat/auth-login
+            └─ feat/auth-tests   ← you are here
+```
+
+## Branch Info
+
+For detailed metadata about a specific branch:
 
 ```bash
-# View the stack tree
-dub log
+# Current branch
+dub info
+
+# Explicit branch
+dub info feat/auth-login
 ```

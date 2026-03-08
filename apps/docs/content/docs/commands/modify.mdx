@@ -1,26 +1,59 @@
 ---
-title: modify
-description: Amend the current branch with staged changes.
+title: dub modify
+description: Amend or create commits on the current branch, then automatically restack descendants.
 ---
 
 ## Usage
 
 ```bash
+# Amend current commit
 dub modify
+
+# Create a new commit
+dub modify -c -m "fix: ..."
+
+# Interactive staging
+dub modify -p
+
+# Stage all tracked updates
+dub modify -u
+
+# Show staged diff before modify
+dub modify -v
+
+# Show staged + unstaged diff before modify
+dub modify -vv
+
+# Interactive rebase of this branch's commits
+dub modify --interactive-rebase
 ```
 
-## Description
+## Flags
 
-Amends the current branch's HEAD commit with any staged changes and restacks descendant branches automatically.
+| Flag | Description |
+|---|---|
+| `-a, --all` | Stage all changes |
+| `-u, --update` | Stage tracked-file updates |
+| `-p, --patch` | Interactive hunk staging |
+| `-c, --commit` | Create a new commit instead of amending |
+| `-e, --edit` | Edit the commit message |
+| `-m, --message <msg>` | Commit message (repeatable) |
+| `-v, --verbose` | Show diff before modify (repeatable: `-vv` for staged+unstaged) |
+| `--interactive-rebase` | Interactive rebase of branch commits |
 
-## Options
+**Aliases:** `dub m`
 
-No additional options.
+## Common Patterns
 
-## Examples
+Address review feedback on a middle branch:
 
 ```bash
-# Stage changes and amend
-git add .
-dub modify
+# Jump to the branch
+dub co feat/auth-login
+
+# Edit files, then amend + restack descendants
+dub m -a -m "fix: address review feedback"
+
+# Push updates
+dub ss
 ```

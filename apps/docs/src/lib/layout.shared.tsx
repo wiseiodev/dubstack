@@ -1,17 +1,23 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
-
-// fill this with your actual GitHub info, for example:
-export const gitConfig = {
-  user: 'fuma-nama',
-  repo: 'fumadocs',
-  branch: 'main',
-};
+import { GitBranch } from 'lucide-react';
 
 export function baseOptions(): BaseLayoutProps {
   return {
     nav: {
-      title: 'My App',
+      title: (
+        <>
+          <GitBranch className='size-4 text-primary' />
+          <span className='font-bold'>DubStack</span>
+        </>
+      ),
+      url: '/',
     },
-    githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
+    githubUrl: 'https://github.com/wiseiodev/dubstack',
+    links: [
+      {
+        text: 'Docs',
+        url: '/docs',
+      },
+    ],
   };
 }

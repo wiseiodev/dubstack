@@ -1,30 +1,103 @@
 ---
-title: doctor
-description: Diagnose and repair DubStack state.
+title: Maintenance
+description: Health checks, cleanup, and safe merge commands — doctor, ready, prune, merge-check, merge-next, land, and post-merge.
 ---
 
-## Usage
+## dub doctor
+
+Run health checks for stack metadata and submit readiness:
 
 ```bash
 dub doctor
+
+# Check all stacks
+dub doctor --all
+
+# Skip remote fetch
+dub doctor --no-fetch
 ```
 
-## Description
+Checks include: in-progress operation detection, missing tracked branches, submit blockers, and local/remote SHA drift.
 
-Checks DubStack's state for inconsistencies and offers to repair them. Useful when state gets out of sync with the actual git branch structure.
+## dub ready
 
-## Options
-
-| Flag | Description |
-|---|---|
-| `--fix` | Automatically apply suggested repairs |
-
-## Examples
+Run pre-submit checklist (doctor + submit preflight):
 
 ```bash
-# Diagnose issues
+dub ready
+```
+
+## dub prune
+
+Preview or remove stale tracked branch metadata:
+
+```bash
+# Preview only
+dub prune
+
+# Apply removals
+dub prune --apply
+
+# Include every stack
+dub prune --all --apply
+```
+
+## dub merge-check
+
+Validate merge order for a stack PR:
+
+```bash
+# Check current branch PR
+dub merge-check
+
+# Check explicit PR number
+dub merge-check --pr 123
+```
+
+## dub merge-next / dub land
+
+Merge the next safe PR in your current stack path, pre-retarget direct child PRs, then run post-merge maintenance:
+
+```bash
+dub merge-next
+# alias
+dub land
+
+# Preview only
+dub merge-next --dry-run
+```
+
+## dub post-merge
+
+Repair stack metadata and retarget remaining PRs after manual merges:
+
+```bash
+dub post-merge
+
+# Preview only
+dub post-merge --dry-run
+
+# Include all stacks
+dub post-merge --all
+```
+
+## Stale Branch Recovery
+
+When submit or sync gets blocked by stale tracked branches:
+
+```bash
+# 1) Inspect current health
 dub doctor
 
-# Auto-fix issues
-dub doctor --fix
+# 2) Preview stale branch metadata
+dub prune
+
+# 3) Remove stale metadata if confirmed
+dub prune --apply
+
+# 4) Re-run pre-submit checks
+dub ready
+
+# 5) Submit current linear path
+dub submit --path current
 ```

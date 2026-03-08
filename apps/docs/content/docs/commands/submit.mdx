@@ -1,6 +1,6 @@
 ---
-title: submit
-description: Push branches and create or update GitHub PRs.
+title: dub submit
+description: Push branches and create or update pull requests for your stack.
 ---
 
 ## Usage
@@ -8,29 +8,40 @@ description: Push branches and create or update GitHub PRs.
 ```bash
 dub submit
 dub ss
+
+# Preview only
+dub submit --dry-run
+
+# Submit only current linear path (default)
+dub submit --path current
+
+# Submit the whole stack graph
+dub submit --path stack
+
+# Auto-fallback to current path when stack-mode is blocked
+dub submit --path stack --fix
 ```
 
-## Description
-
-Pushes the current branch to the remote and creates or updates a GitHub pull request. Uses the `gh` CLI under the hood.
-
-## Options
+## Flags
 
 | Flag | Description |
 |---|---|
-| `--path stack` | Submit all branches in the current linear stack path |
-| `--draft` | Create PRs as drafts |
-| `--no-edit` | Skip opening the PR editor |
+| `--dry-run` | Preview submit actions without executing |
+| `--path current` | Submit only current linear path (default) |
+| `--path stack` | Submit the whole stack graph |
+| `--fix` | Auto-fallback to current path when stack-mode is blocked |
 
-## Examples
+**Aliases:** `dub ss`
+
+## Open PR in Browser
+
+Use `dub pr` to open a PR in your browser via `gh`:
 
 ```bash
-# Submit current branch
-dub submit
+# Current branch PR
+dub pr
 
-# Submit the entire stack
-dub submit --path stack
-
-# Submit as draft
-dub ss --draft
+# Explicit branch / PR target
+dub pr feat/auth-login
+dub pr 123
 ```

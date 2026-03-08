@@ -1,30 +1,57 @@
 ---
-title: create
-description: Create a new branch that tracks the current branch as its parent.
+title: dub create
+description: Create a branch stacked on top of the current branch, with optional staging and commit.
 ---
 
 ## Usage
 
 ```bash
-dub create <branch-name>
+# Branch only
+dub create feat/my-change
+
+# Create + commit staged changes
+dub create feat/my-change -m "feat: ..."
+
+# Stage all + create + commit
+dub create feat/my-change -am "feat: ..."
+
+# Stage tracked-file updates + create + commit
+dub create feat/my-change -um "feat: ..."
+
+# Interactive hunk staging + create + commit
+dub create feat/my-change -pm "feat: ..."
+
+# AI-generate branch + conventional commit from staged changes
+dub create --ai
+
+# Stage all, then AI-generate branch + commit
+dub create -ai
 ```
 
-## Description
-
-Creates a new branch off the current branch and registers the parent-child relationship in DubStack's state. The new branch becomes the current working branch.
-
-## Options
+## Flags
 
 | Flag | Description |
 |---|---|
-| `--no-track` | Create the branch without adding it to the stack |
+| `-m, --message <message>` | Commit message |
+| `-a, --all` | Stage all changes before commit (requires `-m` or `--ai`) |
+| `-u, --update` | Stage tracked-file updates before commit (requires `-m` or `--ai`) |
+| `-p, --patch` | Select hunks interactively before commit (requires `-m` or `--ai`) |
+| `-i, --ai` | AI-generate branch + conventional commit from staged changes |
 
-## Examples
+## AI Mode
+
+When using `--ai` or `-ai`, DubStack analyzes your staged changes and generates a descriptive branch name and conventional commit message. This requires an AI key configured via `dub ai env`.
 
 ```bash
-# Create a new stacked branch
-dub create feature-auth
+# AI with explicit staging
+dub create --ai
 
-# Create another branch on top
-dub create feature-auth-tests
+# Stage all + AI (shorthand)
+dub create -ai
 ```
+
+## Notes
+
+- `dub create` auto-initializes DubStack state if needed.
+- The new branch is always stacked on the current branch.
+- Use `dub undo` to revert the last create operation.

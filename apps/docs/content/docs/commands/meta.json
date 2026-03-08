@@ -2,17 +2,18 @@
   "title": "Commands",
   "pages": [
     "create",
-    "restack",
+    "modify",
+    "checkout",
+    "log",
+    "navigate",
     "submit",
     "sync",
+    "restack",
     "merge-next",
     "post-merge",
     "undo",
-    "checkout",
-    "log",
-    "modify",
-    "navigate",
     "doctor",
+    "track",
     "skills"
   ]
 }

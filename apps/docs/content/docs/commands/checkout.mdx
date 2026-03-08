@@ -1,30 +1,68 @@
 ---
-title: checkout
-description: Interactive branch checkout within your stack.
+title: dub checkout
+description: Checkout a branch directly or use interactive search, plus stack navigation commands.
 ---
 
-## Usage
+## Checkout
 
 ```bash
-dub co
+# Checkout explicit branch
+dub checkout feat/auth-login
+
+# Interactive picker
+dub checkout
+
+# Checkout trunk for current tracked stack
+dub checkout --trunk
+
+# Include non-tracked local branches
+dub checkout --show-untracked
+
+# Scope to current stack
+dub checkout --stack
 ```
-
-## Description
-
-Opens an interactive branch picker showing all branches in your stack. Select a branch to check it out.
-
-## Options
 
 | Flag | Description |
 |---|---|
-| `<branch-name>` | Directly check out a named branch in the stack |
+| `--trunk` | Checkout stack trunk |
+| `--show-untracked` | Include non-tracked local branches in picker |
+| `--stack` | Restrict picker to current stack |
 
-## Examples
+**Aliases:** `dub co`
+
+## Stack Navigation
 
 ```bash
-# Interactive checkout
-dub co
+# Move one branch upstack
+dub up
 
-# Direct checkout
-dub co feature-auth
+# Move multiple levels upstack
+dub up 2
+
+# Move downstack
+dub down
+dub down 2
+
+# Jump to tip branch in current path
+dub top
+
+# Jump to first branch above root
+dub bottom
 ```
+
+## Orientation Commands
+
+Inspect where the current branch sits in its tracked stack:
+
+```bash
+dub parent      # Direct parent of current branch
+dub children    # Direct children
+dub trunk       # Stack root/trunk branch
+
+# With explicit branch argument
+dub parent feat/auth-login
+dub children feat/auth-types
+dub trunk feat/auth-tests
+```
+
+If branch metadata is missing, these commands print a remediation path using `dub track`.

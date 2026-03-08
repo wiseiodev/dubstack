@@ -9,11 +9,20 @@ Run development server:
 npm run dev
 # or
 pnpm dev
+# or, to reset stale Next build output first
+pnpm dev:clean
 # or
 yarn dev
 ```
 
 Open http://localhost:3000 with your browser to see the result.
+
+## Workflow Notes
+
+- Use `pnpm dev` for normal docs development.
+- Stop the docs dev server before running `pnpm turbo run build --filter=docs --force`.
+- If the local site looks stale or does not match the current source, run `pnpm clean` and restart the dev server.
+- `pnpm dev:clean` is a convenience command that clears `.next` before starting `next dev`.
 
 ## Explore
 

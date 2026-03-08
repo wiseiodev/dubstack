@@ -22,3 +22,5 @@ pnpm --filter=dubstack test  # Run CLI tests only
 ## Writing Tests
 
 Co-locate unit tests with their source files. Use the existing test patterns as a guide.
+
+When behavior or output changes, add or update tests near the changed code. All three verification commands (`pnpm test`, `pnpm typecheck`, `pnpm checks`) must pass before work is considered complete.

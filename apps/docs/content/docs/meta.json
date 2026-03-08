@@ -2,15 +2,10 @@
   "title": "Docs",
   "pages": [
     "index",
-    "---Getting Started---",
     "getting-started",
-    "---Commands---",
     "commands",
-    "---Guides---",
     "guides",
-    "---Concepts---",
     "concepts",
-    "---Contributing---",
     "contributing"
   ]
 }

@@ -1,22 +1,174 @@
 ---
-title: Stacking Workflow
-description: End-to-end guide to the stacked branch workflow with DubStack.
+title: Workflows
+description: Copy-paste workflow playbooks for common DubStack operations.
 ---
 
-This guide walks through a complete stacking workflow from creating your first branch to landing all PRs.
+Copy-paste playbooks for the most common stacked PR operations.
 
-## Planning Your Stack
+## 1. Create and Submit a New Stack
 
-Break your feature into small, reviewable pieces. Each piece becomes a branch in the stack.
+```bash
+git checkout main
+git pull
 
-## Creating the Stack
+dub create feat/base -am "feat: add base layer"
+dub create feat/middle -am "feat: add middle layer"
+dub create feat/top -am "feat: add top layer"
 
-Start from trunk and use `dub create` to build your stack one branch at a time.
+dub log
+dub ss
+```
 
-## Iterating on Feedback
+## 2. Update a Middle Branch After Review
 
-When reviewers request changes to a branch in the middle of your stack, make the changes and use `dub restack` to propagate them through descendant branches.
+```bash
+dub co feat/middle
 
-## Landing PRs
+# edit files...
+dub m -a -m "fix: address review feedback"
 
-Merge PRs in order from the bottom of the stack upward using `dub merge-next`, then run `dub post-merge` to clean up.
+# optional diff check before modify
+dub m -vv
+
+dub ss
+```
+
+## 3. Sync After Trunk Moves
+
+```bash
+git checkout main
+git pull
+
+dub sync
+```
+
+For deterministic non-interactive behavior:
+
+```bash
+dub sync --no-interactive
+```
+
+For explicit destructive reconciliation:
+
+```bash
+dub sync --force
+```
+
+## 4. Conflict Recovery During Restack
+
+```bash
+dub restack
+# conflict occurs
+
+# resolve files
+git add <resolved-files>
+
+dub restack --continue
+```
+
+If you are already mid-operation, use the unified recovery commands:
+
+```bash
+dub continue
+# or
+dub abort
+```
+
+## 5. Open PR Quickly
+
+```bash
+dub pr
+# or
+dub pr feat/top
+# or
+dub pr 123
+```
+
+## 6. Recover from Mistakes
+
+```bash
+dub undo
+```
+
+- `undo` supports one level.
+- Intended for reverting last `create` or `restack`.
+
+## 7. Repair Untracked Branch Metadata
+
+```bash
+# Branch created outside dub create
+git checkout feat/manual
+
+dub track feat/manual --parent main
+
+# Verify placement
+dub parent feat/manual
+dub trunk feat/manual
+```
+
+## 8. Remove Metadata or Delete Branches Safely
+
+```bash
+# Metadata-only removal
+dub untrack feat/top
+
+# Remove branch + descendants from metadata
+dub untrack feat/middle --downstack
+
+# Delete branch with confirmation
+dub delete feat/top
+
+# Delete branch and descendants non-interactively
+dub delete feat/middle --upstack --force --quiet
+```
+
+## 9. Stack Inspection Modes
+
+```bash
+dub log --stack
+dub log --all
+dub log --reverse
+```
+
+## 10. Stack Navigation Patterns
+
+```bash
+dub up
+dub up 2
+dub down
+dub down --steps 2
+dub top
+dub bottom
+```
+
+## 11. Checkout Patterns
+
+```bash
+# Interactive
+dub checkout
+
+# Interactive current stack only
+dub checkout --stack
+
+# Include untracked branches
+dub checkout --show-untracked
+
+# Jump to trunk
+dub checkout --trunk
+```
+
+## 12. Merge Stacks Safely (Bottom-Up)
+
+```bash
+# Merge next safe PR in stack order
+dub merge-next
+
+# Run again for the next layer
+dub merge-next
+```
+
+If you merged manually, normalize state and retarget remaining PRs:
+
+```bash
+dub post-merge
+```

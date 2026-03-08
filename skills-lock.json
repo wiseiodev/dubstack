@@ -15,6 +15,11 @@
       "source": "wiseiodev/dubstack",
       "sourceType": "github",
       "computedHash": "95eac34061564d5db87b946d9db5e39213f486609b3e3fef65cf23ecf2f1f2ef"
+    },
+    "playwright-cli": {
+      "source": "microsoft/playwright-cli",
+      "sourceType": "github",
+      "computedHash": "7075ab30f588019197a2f1518bb4c9d33d69d33352af079b5f9c60303ad3886e"
     }
   }
 }

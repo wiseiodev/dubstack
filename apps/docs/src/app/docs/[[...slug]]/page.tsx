@@ -8,7 +8,6 @@ import { createRelativeLink } from 'fumadocs-ui/mdx';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { LLMCopyButton, ViewOptions } from '@/components/ai/page-actions';
-import { gitConfig } from '@/lib/layout.shared';
 import { getPageImage, source } from '@/lib/source';
 import { getMDXComponents } from '@/mdx-components';
 
@@ -29,7 +28,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
         <LLMCopyButton markdownUrl={`${page.url}.mdx`} />
         <ViewOptions
           markdownUrl={`${page.url}.mdx`}
-          githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/content/docs/${page.path}`}
+          githubUrl={`https://github.com/wiseiodev/dubstack/blob/main/apps/docs/content/docs/${page.path}`}
         />
       </div>
       <DocsBody>
