@@ -333,6 +333,32 @@ describe('sync', () => {
     expect(result.branches[0].status).toBe(
       'updated-outside-dubstack-but-up-to-date',
     );
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featA = writtenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    expect(featA?.last_submitted_version?.source).toBe('imported');
+    expect(featA?.sync_source).toBe('imported');
+  });
+
+  it('preserves existing provenance on no-op sync runs', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featA = writtenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    expect(featA?.last_submitted_version?.source).toBe('submit');
+    expect(featA?.sync_source).toBe('submit');
+    expect(featA?.last_reconciled_version?.source).toBe('sync-noop');
   });
 
   it('cleans merged branch automatically without force', async () => {

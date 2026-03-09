@@ -302,6 +302,37 @@ describe('restack', () => {
 });
 
 describe('squash-merge-then-restack', () => {
+  it('preserves parent_revision when patch-equivalent work is skipped', async () => {
+    await create('feat/a', dir);
+    fs.writeFileSync(path.join(dir, 'file-a.txt'), 'feature a content');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'add file-a']);
+
+    const stateBeforeMerge = await readState(dir);
+    const featARevisionBefore = stateBeforeMerge.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    )?.parent_revision;
+    expect(featARevisionBefore).toBeTruthy();
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    await gitInRepo(dir, ['merge', '--squash', 'feat/a']);
+    await gitInRepo(dir, ['commit', '-m', 'squash A']);
+    const mainTipAfterSquash = await getBranchTip('main', dir);
+
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    const result = await restack(dir);
+
+    expect(result.status).toBe('up-to-date');
+    expect(result.rebased).toHaveLength(0);
+
+    const stateAfterRestack = await readState(dir);
+    const featAAfter = stateAfterRestack.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    expect(featAAfter?.parent_revision).toBe(featARevisionBefore);
+    expect(featAAfter?.parent_revision).not.toBe(mainTipAfterSquash);
+  });
+
   it('produces no false conflicts after squash-merge', async () => {
     // Create main → feat/a with a commit on file-a.txt
     await create('feat/a', dir);

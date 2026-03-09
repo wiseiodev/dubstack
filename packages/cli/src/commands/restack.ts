@@ -173,7 +173,6 @@ async function executeRestackSteps(
     );
     if (!hasUniquePatches) {
       step.status = 'skipped';
-      updateParentRevision(state, step.branch, parentNewTip);
       await writeProgress(progress, cwd);
       continue;
     }

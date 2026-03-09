@@ -707,12 +707,14 @@ async function markBranchSynced(
     }
   }
   if (!resolvedBaseBranch || !resolvedBaseSha) return;
+  const preservedSource =
+    priorBaseline?.source ?? entry.sync_source ?? 'imported';
   entry.last_submitted_version = {
     head_sha: headSha,
     base_sha: resolvedBaseSha,
     base_branch: resolvedBaseBranch,
     version_number: priorBaseline?.version_number ?? null,
-    source: options.source === 'sync-noop' ? 'imported' : 'sync',
+    source: options.source === 'sync-noop' ? preservedSource : 'sync',
   };
   entry.last_reconciled_version = {
     head_sha: headSha,
@@ -728,7 +730,7 @@ async function markBranchSynced(
     // If ancestry check fails, keep existing parent_revision.
   }
   entry.last_synced_at = new Date().toISOString();
-  entry.sync_source = options.source === 'sync-noop' ? 'imported' : 'sync';
+  entry.sync_source = options.source === 'sync-noop' ? preservedSource : 'sync';
 }
 
 function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {
