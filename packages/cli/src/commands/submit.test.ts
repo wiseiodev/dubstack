@@ -597,6 +597,12 @@ describe('submit', () => {
       base_branch: 'main',
       source: 'submit',
     });
+    expect(featBranch?.last_reconciled_version).toEqual({
+      head_sha: 'feat/a-sha',
+      base_sha: 'main-sha',
+      base_branch: 'main',
+      source: 'submit',
+    });
     expect(featBranch?.sync_source).toBe('submit');
     expect(featBranch?.last_synced_at).toBeTruthy();
   });

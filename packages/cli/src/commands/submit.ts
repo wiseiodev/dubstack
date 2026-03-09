@@ -205,6 +205,12 @@ export async function submit(
             version_number: null,
             source: 'submit',
           };
+          stateBranch.last_reconciled_version = {
+            head_sha: headSha,
+            base_sha: baseSha,
+            base_branch: branch.parent as string,
+            source: 'submit',
+          };
           if (stateBranch.parent_revision == null) {
             stateBranch.parent_revision = baseSha;
           }

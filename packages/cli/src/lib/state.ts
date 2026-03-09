@@ -26,6 +26,13 @@ export interface Branch {
     version_number: number | null;
     source: 'submit' | 'sync' | 'imported';
   } | null;
+  /** Last known effective branch/base relationship after sync maintenance. */
+  last_reconciled_version?: {
+    head_sha: string;
+    base_sha: string;
+    base_branch: string;
+    source: 'submit' | 'sync-adopt-remote' | 'sync-noop' | 'sync-restack';
+  } | null;
   /** ISO timestamp of the most recent successful sync for this branch. */
   last_synced_at?: string | null;
   /** Source of the branch's current sync baseline metadata. */
@@ -196,6 +203,7 @@ export function addBranchToStack(
     pr_number: null,
     pr_link: null,
     last_submitted_version: null,
+    last_reconciled_version: null,
     last_synced_at: null,
     sync_source: null,
   };
@@ -211,6 +219,7 @@ export function addBranchToStack(
       pr_number: null,
       pr_link: null,
       last_submitted_version: null,
+      last_reconciled_version: null,
       last_synced_at: null,
       sync_source: null,
     };
@@ -234,6 +243,7 @@ function normalizeBranch(branch: Branch): Branch {
   return {
     ...branch,
     last_submitted_version: branch.last_submitted_version ?? null,
+    last_reconciled_version: branch.last_reconciled_version ?? null,
     last_synced_at: branch.last_synced_at ?? null,
     sync_source: branch.sync_source ?? null,
   };

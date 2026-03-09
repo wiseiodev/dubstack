@@ -210,7 +210,7 @@ Common sync variants:
 dub sync --all
 dub sync --no-interactive
 dub sync --force
-dub sync --restack
+dub sync --no-restack
 ```
 
 ## 7) Preflight And Cleanup
@@ -255,7 +255,13 @@ History note:
 - `main` is configured for linear, squash-style merges.
 - For stacks that target intermediate base branches, merge the top stack branch into `main` after lower layers merge so the full stack lands on `main`.
 
-If merges happened manually:
+If merges happened manually in GitHub or another UI, the happy path is:
+
+```bash
+dub sync
+```
+
+`dub post-merge` is still available as an explicit repair command:
 
 ```bash
 dub post-merge

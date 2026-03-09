@@ -38,6 +38,12 @@ import type {
   SyncResult,
 } from '../lib/sync/types';
 import { restack } from './restack';
+import {
+  hasNonRootBranches,
+  resolvePreferredBranch,
+  retargetOpenPrBranches,
+  submitRefreshedStacks,
+} from './stack-maintenance';
 
 function isInteractiveShell(): boolean {
   return Boolean(process.stdout.isTTY && process.stdin.isTTY);
@@ -88,7 +94,7 @@ export async function sync(
   await checkGhAuth();
 
   const options: SyncOptions = {
-    restack: rawOptions.restack ?? false,
+    restack: rawOptions.restack ?? true,
     force: rawOptions.force ?? false,
     all: rawOptions.all ?? false,
     interactive: rawOptions.interactive ?? isInteractiveShell(),
@@ -138,6 +144,10 @@ export async function sync(
   };
   const rootHasRemote = new Map<string, boolean>();
   let pendingError: Error | null = null;
+  let restoreTarget = originalBranch;
+  let needsSubmitRefresh = false;
+  let restackChanged = false;
+  const reparentedBranchNames = new Set<string>();
 
   try {
     console.log('🌲 Fetching branches from remote...');
@@ -218,7 +228,9 @@ export async function sync(
       }
       await checkoutBranch(roots[0] ?? originalBranch, cwd);
       await deleteBranch(branch, cwd);
-      removeBranchFromState(scopeStacks, branch);
+      for (const entry of removeBranchFromState(scopeStacks, branch)) {
+        reparentedBranchNames.add(entry.branch);
+      }
       result.cleaned.push(branch);
     }
     for (const skipped of cleanupPlan.skipped) {
@@ -301,7 +313,7 @@ export async function sync(
         printBranchOutcome(outcome);
         const restoredSha = await getRefSha(branch, cwd);
         await markBranchSynced(stateBranchMap, branch, restoredSha, cwd, {
-          source: 'sync',
+          source: 'sync-adopt-remote',
           baseBranch: stateBranchMap.get(branch)?.parent ?? null,
         });
         continue;
@@ -322,7 +334,7 @@ export async function sync(
           localSha ?? remoteSha ?? null,
           cwd,
           {
-            source: 'sync',
+            source: 'sync-noop',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           },
         );
@@ -344,7 +356,7 @@ export async function sync(
           localSha ?? remoteSha ?? null,
           cwd,
           {
-            source: 'imported',
+            source: 'sync-noop',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           },
         );
@@ -362,7 +374,7 @@ export async function sync(
         result.branches.push(outcome);
         printBranchOutcome(outcome);
         await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-          source: 'sync',
+          source: 'sync-adopt-remote',
           baseBranch: stateBranchMap.get(branch)?.parent ?? null,
         });
         continue;
@@ -390,7 +402,7 @@ export async function sync(
             message: `✔ Synced unsubmitted branch '${branch}' to remote with --force.`,
           };
           await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-            source: 'sync',
+            source: 'sync-adopt-remote',
             baseBranch: localParent,
           });
         } else if (!options.interactive) {
@@ -413,7 +425,7 @@ export async function sync(
               message: `✔ Synced unsubmitted branch '${branch}' to remote.`,
             };
             await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-              source: 'sync',
+              source: 'sync-adopt-remote',
               baseBranch: localParent,
             });
           } else {
@@ -447,7 +459,7 @@ export async function sync(
             message: `✔ Synced '${branch}' to remote and adopted remote parent '${prSyncInfo.baseRefName ?? 'unknown'}'.`,
           };
           await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-            source: 'sync',
+            source: 'sync-adopt-remote',
             baseBranch: prSyncInfo.baseRefName ?? localParent,
           });
         } else if (!options.interactive) {
@@ -482,7 +494,7 @@ export async function sync(
               message: `✔ Synced '${branch}' to remote and adopted remote parent.`,
             };
             await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-              source: 'sync',
+              source: 'sync-adopt-remote',
               baseBranch: prSyncInfo.baseRefName ?? localParent,
             });
           } else if (parentDecision === 'local') {
@@ -537,7 +549,7 @@ export async function sync(
           message: `✔ Synced '${branch}' to remote version.`,
         };
         await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-          source: 'sync',
+          source: 'sync-adopt-remote',
           baseBranch: stateBranchMap.get(branch)?.parent ?? null,
         });
       } else if (decision === 'keep-local') {
@@ -560,7 +572,7 @@ export async function sync(
         if (reconciled) {
           const newSha = await getRefSha(branch, cwd);
           await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
-            source: 'sync',
+            source: 'sync-restack',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
         }
@@ -580,6 +592,13 @@ export async function sync(
 
     await writeState(state, cwd);
 
+    const retargeted = await retargetOpenPrBranches(scopeStacks, cwd, {
+      branches: [...reparentedBranchNames],
+    });
+    if (retargeted.length > 0) {
+      needsSubmitRefresh = true;
+    }
+
     if (options.restack) {
       console.log('🥞 Restacking branches...');
       const rootsToRestack = options.all ? roots : [roots[0]].filter(Boolean);
@@ -591,12 +610,33 @@ export async function sync(
             `Sync paused: conflict while restacking '${restackResult.conflictBranch ?? 'unknown'}'.\n` +
               'Recovery:\n' +
               '  1. Resolve conflicts and stage files.\n' +
-              "  2. Run 'dub continue' to resume.\n" +
-              "  3. Run 'dub abort' to cancel recovery and roll back progress.",
+              "  2. Run 'dub continue --ai' to let DubStack try the small conflict for you.\n" +
+              "  3. Run 'dub continue' to resume manually.\n" +
+              "  4. Run 'dub abort' to cancel recovery and roll back progress.",
           );
+        }
+        if (restackResult.status === 'success') {
+          restackChanged = true;
         }
       }
       result.restacked = true;
+    }
+
+    if (result.cleaned.length > 0 || needsSubmitRefresh || restackChanged) {
+      const preferredBranch = resolvePreferredBranch(
+        scopeStacks,
+        originalBranch,
+        scopeStacks,
+      );
+      restoreTarget = preferredBranch ?? originalBranch;
+      if (needsSubmitRefresh && scopeStacks.some(hasNonRootBranches)) {
+        if (preferredBranch) {
+          await checkoutBranch(preferredBranch, cwd);
+        }
+        await submitRefreshedStacks(cwd, scopeStacks, {
+          all: options.all,
+        });
+      }
     }
   } catch (error) {
     pendingError = await wrapSyncError(error, cwd);
@@ -605,12 +645,12 @@ export async function sync(
   const activeOperation = await detectActiveOperation(cwd).catch(() => 'none');
   if (activeOperation === 'none') {
     try {
-      await checkoutBranch(originalBranch, cwd);
+      await checkoutBranch(restoreTarget, cwd);
     } catch {
       if (!pendingError) {
         pendingError = new DubError(
-          `Sync completed but could not restore original branch '${originalBranch}'.\n` +
-            `Run 'git checkout ${originalBranch}' to return to your original context.`,
+          `Sync completed but could not restore branch '${restoreTarget}'.\n` +
+            `Run 'git checkout ${restoreTarget}' to return to your working context.`,
         );
       }
     }
@@ -636,8 +676,9 @@ async function wrapSyncError(error: unknown, cwd: string): Promise<Error> {
   return new DubError(
     `${baseError.message}\n` +
       'Recovery:\n' +
-      "  1. Run 'dub continue' after resolving conflicts.\n" +
-      "  2. Run 'dub abort' to exit the in-progress operation safely.",
+      "  1. Run 'dub continue --ai' to let DubStack try the small conflict for you.\n" +
+      "  2. Run 'dub continue' after resolving conflicts manually.\n" +
+      "  3. Run 'dub abort' to exit the in-progress operation safely.",
   );
 }
 
@@ -646,7 +687,10 @@ async function markBranchSynced(
   branchName: string,
   headSha: string | null,
   cwd: string,
-  options: { source: 'sync' | 'imported'; baseBranch: string | null },
+  options: {
+    source: 'sync-adopt-remote' | 'sync-noop' | 'sync-restack';
+    baseBranch: string | null;
+  },
 ): Promise<void> {
   if (!headSha) return;
   const entry = branchMap.get(branchName);
@@ -663,11 +707,19 @@ async function markBranchSynced(
     }
   }
   if (!resolvedBaseBranch || !resolvedBaseSha) return;
+  const preservedSource =
+    priorBaseline?.source ?? entry.sync_source ?? 'imported';
   entry.last_submitted_version = {
     head_sha: headSha,
     base_sha: resolvedBaseSha,
     base_branch: resolvedBaseBranch,
     version_number: priorBaseline?.version_number ?? null,
+    source: options.source === 'sync-noop' ? preservedSource : 'sync',
+  };
+  entry.last_reconciled_version = {
+    head_sha: headSha,
+    base_sha: resolvedBaseSha,
+    base_branch: resolvedBaseBranch,
     source: options.source,
   };
   try {
@@ -678,7 +730,7 @@ async function markBranchSynced(
     // If ancestry check fails, keep existing parent_revision.
   }
   entry.last_synced_at = new Date().toISOString();
-  entry.sync_source = options.source;
+  entry.sync_source = options.source === 'sync-noop' ? preservedSource : 'sync';
 }
 
 function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {
@@ -706,6 +758,7 @@ function removeBranchFromState(
   stacks: Array<{ branches: Branch[] }>,
   branch: string,
 ) {
+  const reparented: Array<{ branch: string; parent: string | null }> = [];
   for (const stack of stacks) {
     const deleted = stack.branches.find((b) => b.name === branch);
     if (!deleted) continue;
@@ -713,8 +766,10 @@ function removeBranchFromState(
     for (const child of stack.branches) {
       if (child.parent === branch) {
         child.parent = newParent;
+        reparented.push({ branch: child.name, parent: child.parent });
       }
     }
     stack.branches = stack.branches.filter((b) => b.name !== branch);
   }
+  return reparented;
 }

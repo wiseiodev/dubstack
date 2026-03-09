@@ -195,10 +195,86 @@ describe('postMerge', () => {
 
     expect(mockRestack).toHaveBeenCalled();
     expect(mockSubmit).toHaveBeenCalledWith('/repo', false, {
-      path: 'current',
+      path: 'stack',
       fix: true,
     });
     expect(mockCheckoutBranch).toHaveBeenCalledWith('main', '/repo');
+  });
+
+  it('refreshes from the surviving child branch when the original branch is trunk', async () => {
+    mockGetCurrentBranch.mockResolvedValue('main');
+    mockReadState.mockResolvedValue({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: 1,
+              pr_link: 'https://x/1',
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              pr_number: 2,
+              pr_link: 'https://x/2',
+            },
+            {
+              name: 'feat/c',
+              parent: 'feat/b',
+              pr_number: 3,
+              pr_link: 'https://x/3',
+            },
+          ],
+        },
+      ],
+    });
+    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') return 'MERGED';
+      if (branch === 'feat/b' || branch === 'feat/c') return 'OPEN';
+      return 'NONE';
+    });
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/b') {
+        return { state: 'OPEN', baseRefName: 'feat/a' };
+      }
+      if (branch === 'feat/c') {
+        return { state: 'OPEN', baseRefName: 'feat/b' };
+      }
+      return { state: 'NONE', baseRefName: null };
+    });
+    mockSubmit.mockImplementation(async (_cwd, _dryRun, options) => {
+      const lastCheckout = mockCheckoutBranch.mock.calls.at(-1)?.[0];
+      if (lastCheckout !== 'feat/b') {
+        throw new Error(
+          `expected surviving child checkout, got ${lastCheckout}`,
+        );
+      }
+      if (options?.path !== 'stack') {
+        throw new Error(`expected full-stack refresh, got ${options?.path}`);
+      }
+      return {
+        pushed: ['feat/b', 'feat/c'],
+        created: [],
+        updated: ['feat/b', 'feat/c'],
+        path: 'stack',
+        dryRun: false,
+        fallbackApplied: false,
+      };
+    });
+
+    const result = await postMerge('/repo');
+
+    expect(result.submittedBranches).toEqual(['feat/b', 'feat/c']);
+    expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/b', '/repo');
   });
 
   it('submits each stack when --all is enabled', async () => {

@@ -8,6 +8,7 @@ import {
   getCurrentBranch,
   getMergeBase,
   rebaseContinue as gitRebaseContinue,
+  hasUniquePatchCommits,
   isWorkingTreeClean,
   rebaseOnto,
 } from '../lib/git';
@@ -159,6 +160,18 @@ async function executeRestackSteps(
 
     const parentNewTip = await getBranchTip(step.parent, cwd);
     if (parentNewTip === step.parentOldTip) {
+      step.status = 'skipped';
+      updateParentRevision(state, step.branch, parentNewTip);
+      await writeProgress(progress, cwd);
+      continue;
+    }
+
+    const hasUniquePatches = await hasUniquePatchCommits(
+      parentNewTip,
+      step.branch,
+      cwd,
+    );
+    if (!hasUniquePatches) {
       step.status = 'skipped';
       await writeProgress(progress, cwd);
       continue;
