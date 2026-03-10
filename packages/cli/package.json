@@ -1,6 +1,6 @@
 {
   "name": "dubstack",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "CLI tool for managing stacked diffs (dependent git branches)",
   "type": "module",
   "bin": {
