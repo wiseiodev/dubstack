@@ -17,7 +17,25 @@ dub doctor --all
 dub doctor --no-fetch
 ```
 
-Checks include: in-progress operation detection, missing tracked branches, submit blockers, and local/remote SHA drift.
+Checks include:
+- in-progress operation detection
+- missing tracked branches
+- submit blockers
+- local/remote SHA drift
+- structural parent/child ancestry drift, where a child branch is no longer based on its tracked parent even if local and remote refs match
+
+If `dub doctor` reports that a branch is no longer based on its parent, start with:
+
+```bash
+dub restack
+dub doctor
+```
+
+If the stack looks healthy after restacking and you still need to refresh the PR from your current branch, follow with:
+
+```bash
+dub submit --path current
+```
 
 ## dub ready
 
@@ -99,5 +117,23 @@ dub prune --apply
 dub ready
 
 # 5) Submit current linear path
+dub submit --path current
+```
+
+## Hidden Conflict Recovery
+
+If GitHub shows a stacked child PR as conflicting but your local branch looks clean:
+
+```bash
+# 1) Surface structural drift locally
+dub doctor
+
+# 2) Replay children onto their tracked parents
+dub restack
+
+# 3) Re-check health before pushing
+dub doctor
+
+# 4) Refresh the current PR path if needed
 dub submit --path current
 ```

@@ -5,6 +5,7 @@ vi.mock('../lib/git.js', () => ({
   fetchBranches: vi.fn(),
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),
+  isAncestor: vi.fn(),
   remoteBranchExists: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ import {
   fetchBranches,
   getCurrentBranch,
   getRefSha,
+  isAncestor,
   remoteBranchExists,
 } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
@@ -36,6 +38,7 @@ const mockBranchExists = branchExists as ReturnType<typeof vi.fn>;
 const mockFetchBranches = fetchBranches as ReturnType<typeof vi.fn>;
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 const mockGetRefSha = getRefSha as ReturnType<typeof vi.fn>;
+const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockDetectActiveOperation = detectActiveOperation as ReturnType<
   typeof vi.fn
@@ -67,6 +70,7 @@ beforeEach(() => {
   mockBranchExists.mockResolvedValue(true);
   mockRemoteBranchExists.mockResolvedValue(true);
   mockGetRefSha.mockImplementation(async (ref: string) => `${ref}-sha`);
+  mockIsAncestor.mockResolvedValue(true);
 });
 
 describe('doctor', () => {
@@ -126,5 +130,46 @@ describe('doctor', () => {
       (issue) => issue.code === 'submit-branching-blocker',
     );
     expect(branching?.details).toContain('main -> feat/a, feat/b');
+  });
+
+  it('reports a child branch that matches remote but is no longer based on its parent', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetRefSha.mockImplementation(async (ref: string) => {
+      switch (ref) {
+        case 'feat/a':
+        case 'origin/feat/a':
+          return 'parent-new-sha';
+        case 'feat/b':
+        case 'origin/feat/b':
+          return 'child-remote-sha';
+        default:
+          return `${ref}-sha`;
+      }
+    });
+    mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+      if (left === 'parent-new-sha' && right === 'child-remote-sha') {
+        return false;
+      }
+      return true;
+    });
+
+    const result = await doctor('/repo');
+    const issue = result.issues.find(
+      (entry) => entry.code === 'parent-mismatch',
+    );
+
+    expect(issue?.summary).toContain(
+      "Branch 'feat/b' is no longer based on 'feat/a'",
+    );
+    expect(issue?.details).toContain('structural stack drift');
+    expect(issue?.fixes[0]).toBe('dub restack');
+    expect(issue?.fixes).toContain('dub doctor');
+    expect(result.healthy).toBe(false);
   });
 });

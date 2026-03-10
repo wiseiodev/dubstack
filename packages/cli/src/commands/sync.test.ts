@@ -62,6 +62,7 @@ import {
 import { detectActiveOperation } from '../lib/operation-state';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
+import { doctor } from './doctor';
 import { restack } from './restack';
 import { submit } from './submit';
 import { sync } from './sync';
@@ -564,6 +565,358 @@ describe('sync', () => {
       base_branch: 'main',
       source: 'sync-noop',
     });
+  });
+
+  it('preserves the last submitted base sha when forced sync adopts an older remote child tip', async () => {
+    mockReadState.mockResolvedValue({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              parent_revision: 'main-sha',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'parent-new-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                version_number: null,
+                source: 'submit',
+              },
+              last_reconciled_version: {
+                head_sha: 'parent-new-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              parent_revision: 'parent-new-sha',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'parent-old-sha',
+                base_branch: 'feat/a',
+                version_number: null,
+                source: 'submit',
+              },
+              last_reconciled_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'parent-new-sha',
+                base_branch: 'feat/a',
+                source: 'sync-restack',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+      ],
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockGetRefSha.mockImplementation(async (ref: string) => {
+      switch (ref) {
+        case 'main':
+        case 'origin/main':
+          return 'main-sha';
+        case 'feat/a':
+        case 'origin/feat/a':
+          return 'parent-new-sha';
+        case 'feat/b':
+          return 'child-local-sha';
+        case 'origin/feat/b':
+          return 'child-remote-sha';
+        default:
+          return `${ref}-sha`;
+      }
+    });
+    mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+      if (left === 'main-sha' && right === 'parent-new-sha') return true;
+      if (left === 'feat/b' && right === 'origin/feat/b') return true;
+      if (left === 'origin/feat/b' && right === 'feat/b') return false;
+      if (left === 'feat/a' && right === 'origin/feat/a') return true;
+      if (left === 'origin/feat/a' && right === 'feat/a') return true;
+      if (left === 'parent-old-sha' && right === 'child-remote-sha')
+        return true;
+      if (left === 'parent-new-sha' && right === 'child-remote-sha')
+        return false;
+      return false;
+    });
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/b') {
+        return { state: 'OPEN', baseRefName: 'feat/a' };
+      }
+      return { state: 'OPEN', baseRefName: 'main' };
+    });
+
+    const result = await sync('/repo', {
+      interactive: false,
+      force: true,
+      restack: false,
+    });
+
+    expect(
+      result.branches.find((branch) => branch.branch === 'feat/b')?.action,
+    ).toBe('synced');
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featB = writtenState.stacks[0].branches.find(
+      (branch) => branch.name === 'feat/b',
+    );
+    expect(featB?.last_submitted_version?.base_sha).toBe('parent-old-sha');
+    expect(featB?.last_reconciled_version?.base_sha).toBe('parent-old-sha');
+    expect(featB?.parent_revision).toBe('parent-old-sha');
+  });
+
+  it('clears parent_revision when forced sync cannot trust the prior parent base', async () => {
+    mockReadState.mockResolvedValue({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'local-parent',
+              parent_revision: 'stale-parent-sha',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'local-parent-sha',
+                base_branch: 'local-parent',
+                version_number: null,
+                source: 'submit',
+              },
+              last_reconciled_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'stale-parent-sha',
+                base_branch: 'local-parent',
+                source: 'sync-restack',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+      ],
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockGetRefSha.mockImplementation(async (ref: string) => {
+      switch (ref) {
+        case 'feat/a':
+          return 'child-local-sha';
+        case 'origin/feat/a':
+          return 'child-remote-sha';
+        case 'remote-parent':
+          return 'remote-parent-sha';
+        default:
+          return `${ref}-sha`;
+      }
+    });
+    mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+      if (left === 'feat/a' && right === 'origin/feat/a') return false;
+      if (left === 'origin/feat/a' && right === 'feat/a') return false;
+      if (left === 'remote-parent-sha' && right === 'child-remote-sha')
+        return false;
+      return false;
+    });
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'OPEN',
+      baseRefName: 'remote-parent',
+    });
+
+    const result = await sync('/repo', {
+      interactive: false,
+      force: true,
+      restack: false,
+    });
+
+    expect(result.branches[0]?.action).toBe('synced');
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featA = writtenState.stacks[0].branches.find(
+      (branch) => branch.name === 'feat/a',
+    );
+    expect(featA?.parent).toBe('remote-parent');
+    expect(featA?.last_submitted_version?.base_sha).toBe('remote-parent-sha');
+    expect(featA?.parent_revision).toBeNull();
+  });
+
+  it('reports parent-mismatch after forced sync adopts an older remote child tip', async () => {
+    let currentState: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              parent_revision: 'main-sha',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'parent-new-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                version_number: null,
+                source: 'submit',
+              },
+              last_reconciled_version: {
+                head_sha: 'parent-new-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              parent_revision: 'parent-new-sha',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'parent-old-sha',
+                base_branch: 'feat/a',
+                version_number: null,
+                source: 'submit',
+              },
+              last_reconciled_version: {
+                head_sha: 'child-local-sha',
+                base_sha: 'parent-new-sha',
+                base_branch: 'feat/a',
+                source: 'sync-restack',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+      ],
+    };
+    const refShas: Record<string, string> = {
+      main: 'main-sha',
+      'origin/main': 'main-sha',
+      'feat/a': 'parent-new-sha',
+      'origin/feat/a': 'parent-new-sha',
+      'feat/b': 'child-local-sha',
+      'origin/feat/b': 'child-remote-sha',
+    };
+    mockReadState.mockImplementation(async () => structuredClone(currentState));
+    mockWriteState.mockImplementation(async (nextState: DubState) => {
+      currentState = structuredClone(nextState);
+    });
+    mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+      refShas[branch] = refShas[`origin/${branch}`];
+    });
+    mockGetRefSha.mockImplementation(async (ref: string) => {
+      return refShas[ref] ?? `${ref}-sha`;
+    });
+    mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+      if (left === 'feat/b' && right === 'origin/feat/b') return true;
+      if (left === 'origin/feat/b' && right === 'feat/b') return false;
+      if (left === 'feat/a' && right === 'origin/feat/a') return true;
+      if (left === 'origin/feat/a' && right === 'feat/a') return true;
+      if (left === 'parent-old-sha' && right === 'child-remote-sha')
+        return true;
+      if (left === 'parent-new-sha' && right === 'child-remote-sha')
+        return false;
+      return false;
+    });
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/b') {
+        return { state: 'OPEN', baseRefName: 'feat/a' };
+      }
+      return { state: 'OPEN', baseRefName: 'main' };
+    });
+
+    await sync('/repo', {
+      interactive: false,
+      force: true,
+      restack: false,
+    });
+
+    const result = await doctor('/repo');
+    const issue = result.issues.find(
+      (entry) =>
+        entry.code === 'parent-mismatch' &&
+        entry.summary.includes("Branch 'feat/b'"),
+    );
+
+    expect(issue?.summary).toContain(
+      "Branch 'feat/b' is no longer based on 'feat/a'",
+    );
+    expect(issue?.fixes[0]).toBe('dub restack');
+    expect(result.healthy).toBe(false);
+  });
+
+  it('keeps local-ahead branches when PR base mismatches the tracked parent', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'local-parent' },
+      ]),
+    );
+    mockGetRefSha
+      .mockResolvedValueOnce('local-sha')
+      .mockResolvedValueOnce('remote-sha');
+    mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+      if (left === 'feat/a' && right === 'origin/feat/a') return false;
+      if (left === 'origin/feat/a' && right === 'feat/a') return true;
+      return false;
+    });
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'OPEN',
+      baseRefName: 'remote-parent',
+    });
+
+    const result = await sync('/repo', {
+      interactive: false,
+      force: true,
+      restack: false,
+    });
+
+    expect(result.branches[0].status).toBe('local-ahead');
+    expect(result.branches[0].action).toBe('kept-local');
+    expect(mockHardResetBranchToRef).not.toHaveBeenCalled();
   });
 
   it('handles parent-mismatch status in non-interactive mode by skipping', async () => {

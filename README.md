@@ -516,6 +516,7 @@ Checks include:
 - missing tracked local/remote branches
 - submit branching blockers
 - local/remote SHA drift
+- structural parent/child ancestry drift that can leave GitHub conflicted while local refs look clean
 
 ### `dub ready`
 
