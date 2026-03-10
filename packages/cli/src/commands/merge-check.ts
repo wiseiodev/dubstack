@@ -16,6 +16,8 @@ export interface MergeCheckResult {
   reason: string;
 }
 
+const SAFE_MERGE_STATE_STATUSES = new Set(['CLEAN', 'HAS_HOOKS']);
+
 export async function mergeCheck(
   cwd: string,
   options: { pr?: number; branch?: string } = {},
@@ -60,12 +62,14 @@ export async function mergeCheck(
   }
 
   const mergeStatus = await getPrMergeStatusByNumber(pr.number, cwd);
-  if (
-    mergeStatus.mergeable === 'CONFLICTING' ||
-    mergeStatus.mergeStateStatus === 'DIRTY'
-  ) {
+  const mergeable = mergeStatus.mergeable ?? 'unknown';
+  const mergeStateStatus = mergeStatus.mergeStateStatus ?? 'unknown';
+  const safelyMergeable =
+    mergeable === 'MERGEABLE' &&
+    SAFE_MERGE_STATE_STATUSES.has(mergeStateStatus);
+  if (!safelyMergeable) {
     throw new DubError(
-      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeStatus.mergeable ?? 'unknown'}' and mergeStateStatus='${mergeStatus.mergeStateStatus ?? 'unknown'}'. Resolve or resubmit the branch before merging.`,
+      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeable}' and mergeStateStatus='${mergeStateStatus}'. Resolve or resubmit the branch before merging.`,
     );
   }
 

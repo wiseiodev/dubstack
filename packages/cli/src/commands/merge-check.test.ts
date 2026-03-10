@@ -125,4 +125,27 @@ describe('mergeCheck', () => {
       'PR #12 is not mergeable on GitHub',
     );
   });
+
+  it('fails when GitHub mergeability is not explicitly safe', async () => {
+    mockGetPrByNumber.mockResolvedValue({
+      number: 12,
+      url: 'https://github.com/o/r/pull/12',
+      title: 'feat: b',
+      body: [
+        'body',
+        '<!-- dubstack-metadata',
+        '{ "stack_id":"x","pr_number":12,"prev_pr":11,"next_pr":null,"branch":"feat/b" }',
+        '-->',
+      ].join('\n'),
+    });
+    mockGetPrStateByNumber.mockResolvedValue('MERGED');
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'UNKNOWN',
+      mergeStateStatus: 'BLOCKED',
+    });
+
+    await expect(mergeCheck('/repo', { pr: 12 })).rejects.toThrow(
+      "GitHub reports mergeable='UNKNOWN' and mergeStateStatus='BLOCKED'",
+    );
+  });
 });

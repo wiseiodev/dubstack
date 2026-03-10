@@ -218,8 +218,18 @@ async function appendBranchHealthIssues(
     try {
       const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
       githubBaseRef = prInfo.state === 'OPEN' ? prInfo.baseRefName : null;
-    } catch {
+    } catch (error) {
+      pushGithubCheckFailure(
+        issues,
+        branch.name,
+        error,
+        `Could not query GitHub PR info for '${branch.name}'.`,
+      );
       githubBaseRef = null;
+    }
+
+    if (githubBaseRef) {
+      await fetchBranches([githubBaseRef], cwd);
     }
 
     if (githubBaseRef && (await remoteBranchExists(githubBaseRef, cwd))) {
@@ -241,12 +251,37 @@ async function appendBranchHealthIssues(
     }
   } catch (error) {
     if (error instanceof DubError) {
-      issues.push({
-        code: 'remote-check-failed',
-        summary: `Could not compare local/remote SHAs for '${branch.name}'.`,
-        details: error.message,
-        fixes: ['git fetch --all --prune', 'dub sync --no-restack'],
-      });
+      pushRemoteCheckFailed(
+        issues,
+        `Could not compare local/remote SHAs for '${branch.name}'.`,
+        error.message,
+      );
     }
   }
+}
+
+function pushGithubCheckFailure(
+  issues: DoctorIssue[],
+  branchName: string,
+  error: unknown,
+  summary: string,
+): void {
+  const details =
+    error instanceof Error && error.message
+      ? error.message
+      : `The GitHub PR base-drift check could not be performed for '${branchName}'. Ensure the GitHub CLI ('gh') is installed, authenticated, and that the repository has network access.`;
+  pushRemoteCheckFailed(issues, summary, details);
+}
+
+function pushRemoteCheckFailed(
+  issues: DoctorIssue[],
+  summary: string,
+  details: string,
+): void {
+  issues.push({
+    code: 'remote-check-failed',
+    summary,
+    details,
+    fixes: ['gh auth status', 'gh auth login', 'git fetch --all --prune'],
+  });
 }
