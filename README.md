@@ -517,6 +517,15 @@ Checks include:
 - submit branching blockers
 - local/remote SHA drift
 - structural parent/child ancestry drift that can leave GitHub conflicted while local refs look clean
+- remote GitHub base drift, where the remote PR head is no longer descended from the base branch GitHub is actually evaluating
+
+If `dub doctor` reports a GitHub base mismatch, refresh that base first, then replay and resubmit:
+
+```bash
+git checkout main && git pull --ff-only origin main
+dub restack
+dub submit --path current
+```
 
 ### `dub ready`
 
@@ -543,7 +552,7 @@ dub prune --all --apply
 
 ### `dub merge-check`
 
-Validate merge order for a stack PR.
+Validate merge order and GitHub mergeability for a stack PR.
 
 ```bash
 # check current branch PR
@@ -861,7 +870,7 @@ dub restack --continue
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
 | Wrong operation during create/restack | Use `dub undo` (single-level) |
-| PR merge blocked by order | Run `dub merge-check --pr <number>` and merge previous PR first |
+| PR merge blocked by order or GitHub conflict | Run `dub merge-check --pr <number>` to verify stack order and remote mergeability |
 | Manual merge left stack inconsistent | Run `dub post-merge` |
 
 ### Stale Branch Recovery

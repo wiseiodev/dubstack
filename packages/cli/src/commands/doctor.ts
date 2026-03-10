@@ -7,6 +7,7 @@ import {
   isAncestor,
   remoteBranchExists,
 } from '../lib/git';
+import { getBranchPrSyncInfo } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
 import {
   type Branch,
@@ -21,6 +22,7 @@ export type DoctorIssueCode =
   | 'untracked-current-branch'
   | 'submit-branching-blocker'
   | 'parent-mismatch'
+  | 'remote-base-mismatch'
   | 'missing-local'
   | 'missing-remote'
   | 'remote-drift'
@@ -211,14 +213,75 @@ async function appendBranchHealthIssues(
         });
       }
     }
+
+    let githubBaseRef: string | null = null;
+    try {
+      const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
+      githubBaseRef = prInfo.state === 'OPEN' ? prInfo.baseRefName : null;
+    } catch (error) {
+      pushGithubCheckFailure(
+        issues,
+        branch.name,
+        error,
+        `Could not query GitHub PR info for '${branch.name}'.`,
+      );
+      githubBaseRef = null;
+    }
+
+    if (githubBaseRef) {
+      await fetchBranches([githubBaseRef], cwd);
+    }
+
+    if (githubBaseRef && (await remoteBranchExists(githubBaseRef, cwd))) {
+      const remoteBaseSha = await getRefSha(`origin/${githubBaseRef}`, cwd);
+      const basedOnRemoteBase = await isAncestor(remoteBaseSha, remoteSha, cwd);
+      if (!basedOnRemoteBase) {
+        issues.push({
+          code: 'remote-base-mismatch',
+          summary: `Branch '${branch.name}' is not based on GitHub base '${githubBaseRef}'.`,
+          details: `GitHub is evaluating this PR against origin/${githubBaseRef}, but the remote branch tip is not descended from that base. GitHub may still report merge conflicts even when local parent checks pass.`,
+          fixes: [
+            `git checkout ${githubBaseRef} && git pull --ff-only origin ${githubBaseRef}`,
+            'dub restack',
+            'dub submit --path current',
+            'dub merge-check',
+          ],
+        });
+      }
+    }
   } catch (error) {
     if (error instanceof DubError) {
-      issues.push({
-        code: 'remote-check-failed',
-        summary: `Could not compare local/remote SHAs for '${branch.name}'.`,
-        details: error.message,
-        fixes: ['git fetch --all --prune', 'dub sync --no-restack'],
-      });
+      pushRemoteCheckFailed(
+        issues,
+        `Could not compare local/remote SHAs for '${branch.name}'.`,
+        error.message,
+      );
     }
   }
+}
+
+function pushGithubCheckFailure(
+  issues: DoctorIssue[],
+  branchName: string,
+  error: unknown,
+  summary: string,
+): void {
+  const details =
+    error instanceof Error && error.message
+      ? error.message
+      : `The GitHub PR base-drift check could not be performed for '${branchName}'. Ensure the GitHub CLI ('gh') is installed, authenticated, and that the repository has network access.`;
+  pushRemoteCheckFailed(issues, summary, details);
+}
+
+function pushRemoteCheckFailed(
+  issues: DoctorIssue[],
+  summary: string,
+  details: string,
+): void {
+  issues.push({
+    code: 'remote-check-failed',
+    summary,
+    details,
+    fixes: ['gh auth status', 'gh auth login', 'git fetch --all --prune'],
+  });
 }

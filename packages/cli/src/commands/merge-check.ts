@@ -5,6 +5,7 @@ import {
   ensureGhInstalled,
   getPr,
   getPrByNumber,
+  getPrMergeStatusByNumber,
   getPrStateByNumber,
 } from '../lib/github';
 import { parseDubstackMetadata } from '../lib/pr-body';
@@ -14,6 +15,8 @@ export interface MergeCheckResult {
   prNumber: number | null;
   reason: string;
 }
+
+const SAFE_MERGE_STATE_STATUSES = new Set(['CLEAN', 'HAS_HOOKS']);
 
 export async function mergeCheck(
   cwd: string,
@@ -55,6 +58,18 @@ export async function mergeCheck(
   if (previousState !== 'MERGED') {
     throw new DubError(
       `PR #${pr.number} cannot be merged yet. Previous stack PR #${metadata.prev_pr} is '${previousState}'. Merge it first.`,
+    );
+  }
+
+  const mergeStatus = await getPrMergeStatusByNumber(pr.number, cwd);
+  const mergeable = mergeStatus.mergeable ?? 'unknown';
+  const mergeStateStatus = mergeStatus.mergeStateStatus ?? 'unknown';
+  const safelyMergeable =
+    mergeable === 'MERGEABLE' &&
+    SAFE_MERGE_STATE_STATUSES.has(mergeStateStatus);
+  if (!safelyMergeable) {
+    throw new DubError(
+      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeable}' and mergeStateStatus='${mergeStateStatus}'. Resolve or resubmit the branch before merging.`,
     );
   }
 

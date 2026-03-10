@@ -1,5 +1,11 @@
 import { DubError } from '../lib/errors';
-import { checkoutBranch, getCurrentBranch } from '../lib/git';
+import {
+  checkoutBranch,
+  fastForwardBranchToRef,
+  fetchBranches,
+  getCurrentBranch,
+  remoteBranchExists,
+} from '../lib/git';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -99,6 +105,22 @@ export async function postMerge(
         (branch) => branch.type === 'root',
       )?.name;
       if (!root) continue;
+      await fetchBranches([root], cwd);
+      if (await remoteBranchExists(root, cwd)) {
+        const remoteRef = `origin/${root}`;
+        const fastForwarded = await fastForwardBranchToRef(
+          root,
+          remoteRef,
+          cwd,
+        );
+        if (!fastForwarded) {
+          throw new DubError(
+            `Post-merge could not fast-forward trunk '${root}' to '${remoteRef}'.\n` +
+              'Refresh your local trunk first, then rerun the maintenance flow.\n' +
+              `  git checkout ${root} && git pull --ff-only origin ${root}`,
+          );
+        }
+      }
       await checkoutBranch(root, cwd);
       const restackResult = await restack(cwd);
       if (restackResult.status === 'conflict') {

@@ -220,6 +220,7 @@ dub doctor
 dub ready
 dub prune         # preview stale tracked branches
 dub prune --apply # apply stale metadata cleanup
+dub merge-check   # verify stack order and GitHub mergeability
 ```
 
 ## 8) Handle Restack Conflicts
@@ -319,7 +320,7 @@ dub undo
 | `dub doctor` | Run stack health checks |
 | `dub ready` | Run pre-submit checklist |
 | `dub prune` | Preview/remove stale tracked metadata |
-| `dub merge-check` | Validate stack merge order |
+| `dub merge-check` | Validate stack merge order and GitHub mergeability |
 | `dub merge-next` / `dub land` | Merge next safe PR + maintenance |
 | `dub post-merge` | Repair state/retarget after manual merges |
 | `dub restack` | Rebase stack onto updated parents |

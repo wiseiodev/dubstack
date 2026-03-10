@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/git.js', () => ({
   checkoutBranch: vi.fn(),
+  fastForwardBranchToRef: vi.fn(),
+  fetchBranches: vi.fn(),
   getCurrentBranch: vi.fn(),
+  remoteBranchExists: vi.fn(),
 }));
 
 vi.mock('../lib/state.js', async (importOriginal) => {
@@ -30,7 +33,13 @@ vi.mock('./submit.js', () => ({
   submit: vi.fn(),
 }));
 
-import { checkoutBranch, getCurrentBranch } from '../lib/git';
+import {
+  checkoutBranch,
+  fastForwardBranchToRef,
+  fetchBranches,
+  getCurrentBranch,
+  remoteBranchExists,
+} from '../lib/git';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -45,7 +54,12 @@ import { restack } from './restack';
 import { submit } from './submit';
 
 const mockCheckoutBranch = checkoutBranch as ReturnType<typeof vi.fn>;
+const mockFastForwardBranchToRef = fastForwardBranchToRef as ReturnType<
+  typeof vi.fn
+>;
+const mockFetchBranches = fetchBranches as ReturnType<typeof vi.fn>;
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
+const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
@@ -92,8 +106,11 @@ function makeState(): DubState {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetCurrentBranch.mockResolvedValue('feat/b');
+  mockFetchBranches.mockResolvedValue(undefined);
+  mockFastForwardBranchToRef.mockResolvedValue(true);
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
+  mockRemoteBranchExists.mockResolvedValue(true);
   mockReadState.mockResolvedValue(makeState());
   mockWriteState.mockResolvedValue(undefined);
   mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) => {
@@ -193,6 +210,12 @@ describe('postMerge', () => {
   it('runs restack and submit maintenance by default', async () => {
     await postMerge('/repo');
 
+    expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+    expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+      'main',
+      'origin/main',
+      '/repo',
+    );
     expect(mockRestack).toHaveBeenCalled();
     expect(mockSubmit).toHaveBeenCalledWith('/repo', false, {
       path: 'stack',
@@ -275,6 +298,16 @@ describe('postMerge', () => {
 
     expect(result.submittedBranches).toEqual(['feat/b', 'feat/c']);
     expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/b', '/repo');
+  });
+
+  it('fails before restack when the local root cannot be fast-forwarded to remote', async () => {
+    mockFastForwardBranchToRef.mockResolvedValue(false);
+
+    await expect(postMerge('/repo')).rejects.toThrow(
+      "Post-merge could not fast-forward trunk 'main' to 'origin/main'",
+    );
+    expect(mockRestack).not.toHaveBeenCalled();
+    expect(mockSubmit).not.toHaveBeenCalled();
   });
 
   it('submits each stack when --all is enabled', async () => {
