@@ -282,6 +282,7 @@ export async function sync(
         hasRemote &&
         hasLocal &&
         localSha !== remoteSha &&
+        status !== 'local-ahead' &&
         prSyncInfo.baseRefName &&
         localParent &&
         prSyncInfo.baseRefName !== localParent
@@ -696,17 +697,32 @@ async function markBranchSynced(
   const entry = branchMap.get(branchName);
   if (!entry) return;
   const priorBaseline = entry.last_submitted_version;
+  const isAdoptingRemote = options.source === 'sync-adopt-remote';
   const resolvedBaseBranch =
     options.baseBranch ?? priorBaseline?.base_branch ?? null;
-  let resolvedBaseSha = priorBaseline?.base_sha ?? null;
+  const canPreservePriorBaseSha =
+    isAdoptingRemote &&
+    resolvedBaseBranch != null &&
+    priorBaseline?.base_branch === resolvedBaseBranch &&
+    priorBaseline.base_sha != null;
+  let resolvedBaseSha = canPreservePriorBaseSha
+    ? (priorBaseline?.base_sha ?? null)
+    : null;
   if (resolvedBaseBranch) {
-    try {
-      resolvedBaseSha = await getRefSha(resolvedBaseBranch, cwd);
-    } catch {
-      // Keep existing baseline SHA if base ref isn't currently resolvable.
+    if (!resolvedBaseSha) {
+      try {
+        resolvedBaseSha = await getRefSha(resolvedBaseBranch, cwd);
+      } catch {
+        // Keep existing baseline SHA if base ref isn't currently resolvable.
+      }
     }
   }
-  if (!resolvedBaseBranch || !resolvedBaseSha) return;
+  if (!resolvedBaseBranch || !resolvedBaseSha) {
+    if (isAdoptingRemote) {
+      entry.parent_revision = null;
+    }
+    return;
+  }
   const preservedSource =
     priorBaseline?.source ?? entry.sync_source ?? 'imported';
   entry.last_submitted_version = {
@@ -722,12 +738,30 @@ async function markBranchSynced(
     base_branch: resolvedBaseBranch,
     source: options.source,
   };
-  try {
-    if (await isAncestor(resolvedBaseSha, headSha, cwd)) {
+  if (isAdoptingRemote) {
+    if (canPreservePriorBaseSha) {
       entry.parent_revision = resolvedBaseSha;
+    } else {
+      try {
+        entry.parent_revision = (await isAncestor(
+          resolvedBaseSha,
+          headSha,
+          cwd,
+        ))
+          ? resolvedBaseSha
+          : null;
+      } catch {
+        entry.parent_revision = null;
+      }
     }
-  } catch {
-    // If ancestry check fails, keep existing parent_revision.
+  } else {
+    try {
+      if (await isAncestor(resolvedBaseSha, headSha, cwd)) {
+        entry.parent_revision = resolvedBaseSha;
+      }
+    } catch {
+      // If ancestry check fails, keep existing parent_revision.
+    }
   }
   entry.last_synced_at = new Date().toISOString();
   entry.sync_source = options.source === 'sync-noop' ? preservedSource : 'sync';

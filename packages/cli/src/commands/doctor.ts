@@ -4,6 +4,7 @@ import {
   fetchBranches,
   getCurrentBranch,
   getRefSha,
+  isAncestor,
   remoteBranchExists,
 } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
@@ -19,6 +20,7 @@ export type DoctorIssueCode =
   | 'operation-in-progress'
   | 'untracked-current-branch'
   | 'submit-branching-blocker'
+  | 'parent-mismatch'
   | 'missing-local'
   | 'missing-remote'
   | 'remote-drift'
@@ -194,6 +196,20 @@ async function appendBranchHealthIssues(
           'Local and remote SHAs diverge. Reconcile before submit for predictable PR updates.',
         fixes: ['dub sync --no-restack', 'dub sync --force --no-restack'],
       });
+    }
+
+    if (branch.parent) {
+      const parentSha = await getRefSha(branch.parent, cwd);
+      const basedOnParent = await isAncestor(parentSha, localSha, cwd);
+      if (!basedOnParent) {
+        issues.push({
+          code: 'parent-mismatch',
+          summary: `Branch '${branch.name}' is no longer based on '${branch.parent}'.`,
+          details:
+            'The tracked child branch is not descended from the current tip of its tracked parent, so structural stack drift is present and local submit/readiness checks would be misleading.',
+          fixes: ['dub restack', 'dub doctor', 'dub submit --path current'],
+        });
+      }
     }
   } catch (error) {
     if (error instanceof DubError) {
