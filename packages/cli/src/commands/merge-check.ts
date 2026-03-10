@@ -5,6 +5,7 @@ import {
   ensureGhInstalled,
   getPr,
   getPrByNumber,
+  getPrMergeStatusByNumber,
   getPrStateByNumber,
 } from '../lib/github';
 import { parseDubstackMetadata } from '../lib/pr-body';
@@ -55,6 +56,16 @@ export async function mergeCheck(
   if (previousState !== 'MERGED') {
     throw new DubError(
       `PR #${pr.number} cannot be merged yet. Previous stack PR #${metadata.prev_pr} is '${previousState}'. Merge it first.`,
+    );
+  }
+
+  const mergeStatus = await getPrMergeStatusByNumber(pr.number, cwd);
+  if (
+    mergeStatus.mergeable === 'CONFLICTING' ||
+    mergeStatus.mergeStateStatus === 'DIRTY'
+  ) {
+    throw new DubError(
+      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeStatus.mergeable ?? 'unknown'}' and mergeStateStatus='${mergeStatus.mergeStateStatus ?? 'unknown'}'. Resolve or resubmit the branch before merging.`,
     );
   }
 

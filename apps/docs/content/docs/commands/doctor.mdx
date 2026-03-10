@@ -23,6 +23,7 @@ Checks include:
 - submit blockers
 - local/remote SHA drift
 - structural parent/child ancestry drift, where a child branch is no longer based on its tracked parent even if local and remote refs match
+- remote GitHub base drift, where the remote PR head is no longer descended from the base branch GitHub is actually evaluating
 
 If `dub doctor` reports that a branch is no longer based on its parent, start with:
 
@@ -34,6 +35,14 @@ dub doctor
 If the stack looks healthy after restacking and you still need to refresh the PR from your current branch, follow with:
 
 ```bash
+dub submit --path current
+```
+
+If `dub doctor` reports that a branch is not based on its GitHub base, refresh that base first, then replay and resubmit the branch:
+
+```bash
+git checkout main && git pull --ff-only origin main
+dub restack
 dub submit --path current
 ```
 
@@ -62,7 +71,7 @@ dub prune --all --apply
 
 ## dub merge-check
 
-Validate merge order for a stack PR:
+Validate merge order and GitHub mergeability for a stack PR:
 
 ```bash
 # Check current branch PR
@@ -136,4 +145,7 @@ dub doctor
 
 # 4) Refresh the current PR path if needed
 dub submit --path current
+
+# 5) Confirm GitHub now sees the PR as mergeable
+dub merge-check
 ```

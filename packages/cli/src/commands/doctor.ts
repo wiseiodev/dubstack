@@ -7,6 +7,7 @@ import {
   isAncestor,
   remoteBranchExists,
 } from '../lib/git';
+import { getBranchPrSyncInfo } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
 import {
   type Branch,
@@ -21,6 +22,7 @@ export type DoctorIssueCode =
   | 'untracked-current-branch'
   | 'submit-branching-blocker'
   | 'parent-mismatch'
+  | 'remote-base-mismatch'
   | 'missing-local'
   | 'missing-remote'
   | 'remote-drift'
@@ -208,6 +210,32 @@ async function appendBranchHealthIssues(
           details:
             'The tracked child branch is not descended from the current tip of its tracked parent, so structural stack drift is present and local submit/readiness checks would be misleading.',
           fixes: ['dub restack', 'dub doctor', 'dub submit --path current'],
+        });
+      }
+    }
+
+    let githubBaseRef: string | null = null;
+    try {
+      const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
+      githubBaseRef = prInfo.state === 'OPEN' ? prInfo.baseRefName : null;
+    } catch {
+      githubBaseRef = null;
+    }
+
+    if (githubBaseRef && (await remoteBranchExists(githubBaseRef, cwd))) {
+      const remoteBaseSha = await getRefSha(`origin/${githubBaseRef}`, cwd);
+      const basedOnRemoteBase = await isAncestor(remoteBaseSha, remoteSha, cwd);
+      if (!basedOnRemoteBase) {
+        issues.push({
+          code: 'remote-base-mismatch',
+          summary: `Branch '${branch.name}' is not based on GitHub base '${githubBaseRef}'.`,
+          details: `GitHub is evaluating this PR against origin/${githubBaseRef}, but the remote branch tip is not descended from that base. GitHub may still report merge conflicts even when local parent checks pass.`,
+          fixes: [
+            `git checkout ${githubBaseRef} && git pull --ff-only origin ${githubBaseRef}`,
+            'dub restack',
+            'dub submit --path current',
+            'dub merge-check',
+          ],
         });
       }
     }

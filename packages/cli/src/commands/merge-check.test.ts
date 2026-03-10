@@ -5,6 +5,7 @@ vi.mock('../lib/github.js', () => ({
   ensureGhInstalled: vi.fn(),
   getPr: vi.fn(),
   getPrByNumber: vi.fn(),
+  getPrMergeStatusByNumber: vi.fn(),
   getPrStateByNumber: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ import {
   ensureGhInstalled,
   getPr,
   getPrByNumber,
+  getPrMergeStatusByNumber,
   getPrStateByNumber,
 } from '../lib/github';
 import { mergeCheck } from './merge-check';
@@ -26,6 +28,9 @@ const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
 const mockGetPrByNumber = getPrByNumber as ReturnType<typeof vi.fn>;
+const mockGetPrMergeStatusByNumber = getPrMergeStatusByNumber as ReturnType<
+  typeof vi.fn
+>;
 const mockGetPrStateByNumber = getPrStateByNumber as ReturnType<typeof vi.fn>;
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 
@@ -45,6 +50,10 @@ beforeEach(() => {
     url: 'https://github.com/o/r/pull/11',
     title: 'feat: a',
     body: 'plain body',
+  });
+  mockGetPrMergeStatusByNumber.mockResolvedValue({
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
   });
   mockGetPrStateByNumber.mockResolvedValue('MERGED');
 });
@@ -91,6 +100,29 @@ describe('mergeCheck', () => {
 
     await expect(mergeCheck('/repo', { pr: 12 })).rejects.toThrow(
       'cannot be merged yet',
+    );
+  });
+
+  it('fails when GitHub reports the PR is conflicting', async () => {
+    mockGetPrByNumber.mockResolvedValue({
+      number: 12,
+      url: 'https://github.com/o/r/pull/12',
+      title: 'feat: b',
+      body: [
+        'body',
+        '<!-- dubstack-metadata',
+        '{ "stack_id":"x","pr_number":12,"prev_pr":11,"next_pr":null,"branch":"feat/b" }',
+        '-->',
+      ].join('\n'),
+    });
+    mockGetPrStateByNumber.mockResolvedValue('MERGED');
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'CONFLICTING',
+      mergeStateStatus: 'DIRTY',
+    });
+
+    await expect(mergeCheck('/repo', { pr: 12 })).rejects.toThrow(
+      'PR #12 is not mergeable on GitHub',
     );
   });
 });

@@ -20,6 +20,7 @@ import {
   getBranchPrSyncInfo,
   getPr,
   getPrByNumber,
+  getPrMergeStatusByNumber,
   getPrStateByNumber,
   getRepositoryWebUrl,
   mergePr,
@@ -180,6 +181,31 @@ describe('getPrStateByNumber', () => {
       new Error('GraphQL: Could not resolve to a PullRequest with the number'),
     );
     await expect(getPrStateByNumber(999999, '/repo')).resolves.toBe('NONE');
+  });
+});
+
+describe('getPrMergeStatusByNumber', () => {
+  it('returns mergeability fields when present', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        mergeable: 'CONFLICTING',
+        mergeStateStatus: 'DIRTY',
+      }),
+    });
+    await expect(getPrMergeStatusByNumber(5, '/repo')).resolves.toEqual({
+      mergeable: 'CONFLICTING',
+      mergeStateStatus: 'DIRTY',
+    });
+  });
+
+  it('returns null fields when the PR is missing', async () => {
+    mockExeca.mockRejectedValueOnce(
+      new Error('GraphQL: Could not resolve to a PullRequest with the number'),
+    );
+    await expect(getPrMergeStatusByNumber(999999, '/repo')).resolves.toEqual({
+      mergeable: null,
+      mergeStateStatus: null,
+    });
   });
 });
 

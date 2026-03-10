@@ -17,6 +17,11 @@ export interface BranchPrSyncInfo {
   baseRefName: string | null;
 }
 
+export interface PrMergeStatus {
+  mergeable: string | null;
+  mergeStateStatus: string | null;
+}
+
 /**
  * Ensures the `gh` CLI is installed and available in PATH.
  * @throws {DubError} If `gh` is not found.
@@ -219,6 +224,64 @@ export async function getPrStateByNumber(
     return 'NONE';
   } catch {
     throw new DubError(`Failed to parse PR state for #${prNumber}.`);
+  }
+}
+
+/**
+ * Returns GitHub's mergeability status for a PR by number.
+ */
+export async function getPrMergeStatusByNumber(
+  prNumber: number,
+  cwd: string,
+): Promise<PrMergeStatus> {
+  let stdout: string;
+  try {
+    const result = await execa(
+      'gh',
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'mergeable,mergeStateStatus',
+        '--jq',
+        '.',
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    if (isPrNotFoundError(error)) {
+      return {
+        mergeable: null,
+        mergeStateStatus: null,
+      };
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DubError(
+      `Failed to fetch mergeability for PR #${prNumber}: ${message}`,
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') {
+    return {
+      mergeable: null,
+      mergeStateStatus: null,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      mergeable?: string | null;
+      mergeStateStatus?: string | null;
+    };
+    return {
+      mergeable: parsed.mergeable ?? null,
+      mergeStateStatus: parsed.mergeStateStatus ?? null,
+    };
+  } catch {
+    throw new DubError(`Failed to parse mergeability for PR #${prNumber}.`);
   }
 }
 
