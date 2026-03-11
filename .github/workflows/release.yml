@@ -1,7 +1,16 @@
 name: Release
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run semantic-release in dry-run mode
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -9,66 +18,102 @@ jobs:
     permissions:
       contents: write
       id-token: write
+      issues: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      - run: pnpm install --frozen-lockfile
-
-      - name: Verify version match
-        id: version
+      - name: Guard main branch only
         run: |
-          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          PKG_VERSION=$(node -p "require('./packages/cli/package.json').version")
-          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::Tag v${TAG_VERSION} does not match packages/cli/package.json version ${PKG_VERSION}"
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Release workflow can only run on refs/heads/main, got ${GITHUB_REF}"
             exit 1
           fi
-          echo "version=$TAG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - run: pnpm install --frozen-lockfile
 
       - run: pnpm checks
       - run: pnpm turbo run typecheck --filter=dubstack
       - run: pnpm turbo run test --filter=dubstack
 
-      - name: Pack and compute SHA
-        id: sha
-        working-directory: packages/cli
+      - name: Clear semantic-release marker
         run: |
-          TARBALL=$(pnpm pack | tail -1)
-          SHA=$(shasum -a 256 "$TARBALL" | cut -d ' ' -f 1)
-          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          rm -f .semantic-release-version
 
-      - name: Publish to npm
-        working-directory: packages/cli
-        run: pnpm publish ${{ steps.sha.outputs.tarball }} --no-git-checks --provenance
+      - name: Run semantic-release
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            pnpm exec semantic-release --dry-run
+          else
+            pnpm exec semantic-release
+          fi
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+      - name: Determine release result
+        id: released
+        run: |
+          if [ -f .semantic-release-version ]; then
+            VERSION="$(cat .semantic-release-version)"
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/checkout@v4
+        if: ${{ !inputs.dry_run && steps.released.outputs.released == 'true' }}
         with:
           repository: wiseiodev/homebrew-dubstack
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-tap
 
       - name: Update Homebrew formula
+        if: ${{ !inputs.dry_run && steps.released.outputs.released == 'true' }}
         run: |
           cd homebrew-tap
-          VERSION="${{ steps.version.outputs.version }}"
-          SHA="${{ steps.sha.outputs.sha256 }}"
-          sed -i "s|url \".*\"|url \"https://registry.npmjs.org/dubstack/-/dubstack-${VERSION}.tgz\"|" Formula/dubstack.rb
+          VERSION="${{ steps.released.outputs.version }}"
+          URL="https://registry.npmjs.org/dubstack/-/dubstack-${VERSION}.tgz"
+          TARBALL="dubstack-${VERSION}.tgz"
+          SLEEP_SECONDS=5
+          for attempt in $(seq 1 8); do
+            if curl --fail --location --silent --show-error --output "${TARBALL}" "${URL}"; then
+              break
+            fi
+            if [ "${attempt}" -eq 8 ]; then
+              echo "::error::Failed to download ${URL} after ${attempt} attempts"
+              exit 1
+            fi
+            echo "Tarball not available yet (attempt ${attempt}/8). Retrying in ${SLEEP_SECONDS}s..."
+            sleep "${SLEEP_SECONDS}"
+            if [ "${SLEEP_SECONDS}" -lt 30 ]; then
+              SLEEP_SECONDS=$((SLEEP_SECONDS + 5))
+            fi
+          done
+          SHA="$(shasum -a 256 "${TARBALL}" | cut -d ' ' -f 1)"
+          rm -f "${TARBALL}"
+          sed -i "s|url \".*\"|url \"${URL}\"|" Formula/dubstack.rb
           sed -i "s|sha256 \".*\"|sha256 \"${SHA}\"|" Formula/dubstack.rb
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/dubstack.rb
-          git commit -m "dubstack ${VERSION}"
-          git push origin HEAD:main
+          if ! git diff --quiet -- Formula/dubstack.rb; then
+            git add Formula/dubstack.rb
+            git commit -m "dubstack ${VERSION}"
+            git push origin HEAD:main
+          else
+            echo "No Homebrew formula changes detected"
+          fi
