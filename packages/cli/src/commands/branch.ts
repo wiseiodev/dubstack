@@ -1,4 +1,4 @@
-import { getCurrentBranch } from '../lib/git';
+import { getCurrentBranch, getDiffBetween } from '../lib/git';
 import { findStackForBranch, readState, type Stack } from '../lib/state';
 
 export interface BranchInfoResult {
@@ -78,5 +78,47 @@ export function formatBranchInfo(info: BranchInfoResult): string {
     `Root: ${info.root ?? '(unknown)'}`,
     `Parent: ${info.parent ?? '(root)'}`,
     `Children: ${childrenLabel}`,
+  ].join('\n');
+}
+
+export interface BranchInfoOutputOptions {
+  diff?: boolean;
+}
+
+/**
+ * Formats branch info and optionally appends a parent-relative git diff.
+ */
+export async function branchInfoOutput(
+  cwd: string,
+  branchName?: string,
+  options: BranchInfoOutputOptions = {},
+): Promise<string> {
+  const info = await branchInfo(cwd, branchName);
+  const summary = formatBranchInfo(info);
+
+  if (!options.diff) {
+    return summary;
+  }
+
+  if (!info.tracked) {
+    return [
+      summary,
+      '',
+      'Diff: unavailable because this branch is not tracked by DubStack.',
+    ].join('\n');
+  }
+
+  if (!info.parent) {
+    return [summary, '', 'Diff: unavailable for stack root branches.'].join(
+      '\n',
+    );
+  }
+
+  const diff = await getDiffBetween(info.parent, info.currentBranch, cwd);
+  return [
+    summary,
+    '',
+    `Diff vs ${info.parent}:`,
+    diff.trim().length > 0 ? diff.trimEnd() : '(no changes)',
   ].join('\n');
 }

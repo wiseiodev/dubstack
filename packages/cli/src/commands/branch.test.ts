@@ -1,6 +1,7 @@
+import * as fs from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
-import { branchInfo, formatBranchInfo } from './branch';
+import { branchInfo, branchInfoOutput, formatBranchInfo } from './branch';
 import { create } from './create';
 import { init } from './init';
 
@@ -99,5 +100,48 @@ describe('branch info', () => {
     });
     expect(untracked).toContain('Tracked: no');
     expect(untracked).toContain('not tracked by DubStack');
+  });
+
+  it('includes a parent-relative diff when requested', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+    await gitInRepo(dir, ['checkout', 'feat/b']);
+
+    await fs.promises.writeFile(`${dir}/feature.txt`, 'hello from feat/b\n');
+    await gitInRepo(dir, ['add', 'feature.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: add branch diff fixture']);
+
+    const output = await branchInfoOutput(dir, undefined, { diff: true });
+    expect(output).toContain('Branch: feat/b');
+    expect(output).toContain('Diff vs feat/a:');
+    expect(output).toContain('diff --git a/feature.txt b/feature.txt');
+  });
+
+  it('shows an explicit marker when there are no changes relative to the parent', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+
+    const output = await branchInfoOutput(dir, undefined, { diff: true });
+    expect(output).toContain('Diff vs feat/a:');
+    expect(output).toContain('(no changes)');
+  });
+
+  it('explains that root branches do not have a parent-relative diff', async () => {
+    await create('feat/a', dir);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    const output = await branchInfoOutput(dir, 'main', { diff: true });
+    expect(output).toContain('Branch: main');
+    expect(output).toContain('Diff: unavailable for stack root branches.');
+  });
+
+  it('explains that untracked branches cannot show a dubstack diff', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'rogue']);
+
+    const output = await branchInfoOutput(dir, undefined, { diff: true });
+    expect(output).toContain('Branch: rogue');
+    expect(output).toContain(
+      'Diff: unavailable because this branch is not tracked by DubStack.',
+    );
   });
 });

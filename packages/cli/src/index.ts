@@ -22,7 +22,7 @@ import { createRequire } from 'node:module';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
-import { branchInfo, formatBranchInfo } from './commands/branch';
+import { branchInfoOutput } from './commands/branch';
 import {
   checkout,
   interactiveCheckout,
@@ -75,6 +75,15 @@ const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
 
 const program = new Command();
+
+async function showInfo(
+  branch: string | undefined,
+  options: { diff?: boolean },
+): Promise<void> {
+  console.log(
+    await branchInfoOutput(process.cwd(), branch, { diff: options.diff }),
+  );
+}
 
 program
   .name('dub')
@@ -329,20 +338,16 @@ program
     new Command('info')
       .description('Show tracked stack info for the current branch')
       .argument('[branch]', 'Branch to inspect (defaults to current branch)')
-      .action(async (branch?: string) => {
-        const info = await branchInfo(process.cwd(), branch);
-        console.log(formatBranchInfo(info));
-      }),
+      .option('-d, --diff', 'Show the parent-relative git diff for the branch')
+      .action(showInfo),
   );
 
 program
   .command('info')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
+  .option('-d, --diff', 'Show the parent-relative git diff for the branch')
   .description('Show tracked stack info for a branch')
-  .action(async (branch?: string) => {
-    const info = await branchInfo(process.cwd(), branch);
-    console.log(formatBranchInfo(info));
-  });
+  .action(showInfo);
 
 program
   .command('track')

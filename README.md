@@ -280,11 +280,14 @@ dub bottom
 
 ### `dub info` and `dub branch info`
 
-Show tracked metadata for a branch.
+Show tracked metadata for a branch, optionally including the parent-relative diff.
 
 ```bash
 # current branch
 dub info
+
+# current branch with parent-relative diff
+dub info --diff
 
 # explicit branch
 dub info feat/auth-login
