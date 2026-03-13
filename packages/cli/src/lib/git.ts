@@ -114,13 +114,21 @@ export async function createBranch(name: string, cwd: string): Promise<void> {
 
 /**
  * Switches to an existing branch.
- * @throws {DubError} If the branch does not exist.
+ * @throws {DubError} If the branch does not exist, or if checkout fails for
+ * any other git error (for example, dirty working tree or ref lock failures).
  */
 export async function checkoutBranch(name: string, cwd: string): Promise<void> {
   try {
     await execa('git', ['checkout', name], { cwd });
-  } catch {
-    throw new DubError(`Branch '${name}' not found.`);
+  } catch (error) {
+    const details = readGitCommandOutput(error);
+    if (isMissingBranchCheckoutError(details, name)) {
+      throw new DubError(`Branch '${name}' not found.`);
+    }
+
+    throw new DubError(
+      formatGitFailure(`Failed to checkout branch '${name}'.`, details),
+    );
   }
 }
 
@@ -726,8 +734,13 @@ export async function hardResetBranchToRef(
       await checkoutBranch(branch, cwd);
     }
     await execa('git', ['reset', '--hard', ref], { cwd });
-  } catch {
-    throw new DubError(`Failed to hard reset '${branch}' to '${ref}'.`);
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to hard reset '${branch}' to '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+    );
   }
 }
 
@@ -747,8 +760,17 @@ export async function fastForwardBranchToRef(
     }
     await execa('git', ['merge', '--ff-only', ref], { cwd });
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    const details = readGitCommandOutput(error);
+    if (isFastForwardConflictError(details)) {
+      return false;
+    }
+    throw new DubError(
+      formatGitFailure(
+        `Failed to fast-forward '${branch}' to '${ref}'.`,
+        details,
+      ),
+    );
   }
 }
 
@@ -776,4 +798,53 @@ export async function rebaseBranchOntoRef(
     }
     return false;
   }
+}
+
+function readGitCommandOutput(error: unknown): string {
+  const stderr =
+    typeof (error as { stderr?: unknown })?.stderr === 'string'
+      ? (error as { stderr: string }).stderr
+      : '';
+  const stdout =
+    typeof (error as { stdout?: unknown })?.stdout === 'string'
+      ? (error as { stdout: string }).stdout
+      : '';
+  const shortMessage =
+    typeof (error as { shortMessage?: unknown })?.shortMessage === 'string'
+      ? (error as { shortMessage: string }).shortMessage
+      : '';
+  const message =
+    error instanceof Error && typeof error.message === 'string'
+      ? error.message
+      : '';
+
+  return [stderr, stdout, shortMessage, message]
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function formatGitFailure(base: string, details: string): string {
+  const condensed = details.trim();
+  if (!condensed) return base;
+  return `${base}\n${condensed}`;
+}
+
+function isMissingBranchCheckoutError(output: string, name: string): boolean {
+  const normalized = output.toLowerCase();
+  if (
+    normalized.includes(`pathspec '${name.toLowerCase()}' did not match`) ||
+    normalized.includes(`invalid reference: ${name.toLowerCase()}`)
+  ) {
+    return true;
+  }
+  return normalized.includes('did not match any file(s) known to git');
+}
+
+function isFastForwardConflictError(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return (
+    normalized.includes('not possible to fast-forward') ||
+    normalized.includes('cannot fast-forward')
+  );
 }

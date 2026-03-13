@@ -5,15 +5,18 @@ import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { DubError } from './errors';
 import {
   branchExists,
+  checkoutBranch,
   commitStaged,
   commitStagedFromFile,
   createBranch,
   deleteBranch,
+  fastForwardBranchToRef,
   forceBranchTo,
   getBranchTip,
   getCurrentBranch,
   getDiffBetween,
   getMergeBase,
+  hardResetBranchToRef,
   hasStagedChanges,
   hasUniquePatchCommits,
   isGitRepo,
@@ -98,6 +101,29 @@ describe('createBranch', () => {
       'already exists',
     );
     expect(await getCurrentBranch(dir)).toBe('main');
+  });
+});
+
+describe('checkoutBranch', () => {
+  it('throws a detailed error when checkout is blocked by local changes', async () => {
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'main');
+    await gitInRepo(dir, ['add', 'shared.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'add shared file']);
+
+    await gitInRepo(dir, ['checkout', '-b', 'feat/checkout-blocked']);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'feat');
+    await gitInRepo(dir, ['add', 'shared.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'feat change']);
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'dirty');
+
+    await expect(checkoutBranch('feat/checkout-blocked', dir)).rejects.toThrow(
+      "Failed to checkout branch 'feat/checkout-blocked'.",
+    );
+    await expect(
+      checkoutBranch('feat/checkout-blocked', dir),
+    ).rejects.not.toThrow("Branch 'feat/checkout-blocked' not found.");
   });
 });
 
@@ -249,6 +275,38 @@ describe('forceBranchTo', () => {
 
     await forceBranchTo('main', originalTip, dir);
     expect(await getBranchTip('main', dir)).toBe(originalTip);
+  });
+});
+
+describe('fastForwardBranchToRef', () => {
+  it('returns false only for true fast-forward conflicts', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/ff-target']);
+    fs.writeFileSync(path.join(dir, 'ff.txt'), 'target');
+    await gitInRepo(dir, ['add', 'ff.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'target commit']);
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    fs.writeFileSync(path.join(dir, 'main.txt'), 'main');
+    await gitInRepo(dir, ['add', 'main.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'main commit']);
+
+    await expect(
+      fastForwardBranchToRef('main', 'feat/ff-target', dir),
+    ).resolves.toBe(false);
+  });
+
+  it('throws details for non-conflict failures', async () => {
+    await expect(
+      fastForwardBranchToRef('main', 'does-not-exist', dir),
+    ).rejects.toThrow("Failed to fast-forward 'main' to 'does-not-exist'.");
+  });
+});
+
+describe('hardResetBranchToRef', () => {
+  it('includes root-cause details on reset failures', async () => {
+    await expect(
+      hardResetBranchToRef('main', 'does-not-exist', dir),
+    ).rejects.toThrow("Failed to hard reset 'main' to 'does-not-exist'.");
   });
 });
 

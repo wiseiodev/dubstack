@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DubError } from '../lib/errors';
 
 vi.mock('../lib/git.js', () => ({
   branchExists: vi.fn(),
@@ -207,6 +208,50 @@ describe('sync', () => {
     expect(mockRestack).toHaveBeenCalled();
   });
 
+  it('treats trunk fast-forward conflicts as resettable when --force is set', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockFastForwardBranchToRef.mockImplementation(
+      async (branch: string) => branch !== 'main',
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    await sync('/repo', { interactive: false, force: true, restack: false });
+
+    expect(mockHardResetBranchToRef).toHaveBeenCalledWith(
+      'main',
+      'origin/main',
+      '/repo',
+    );
+  });
+
+  it('fails trunk sync immediately on non-conflict fast-forward errors', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockFastForwardBranchToRef.mockRejectedValue(
+      new DubError(
+        "Failed to checkout branch 'main'.\nYour local changes would be overwritten by checkout.",
+      ),
+    );
+
+    await expect(
+      sync('/repo', { interactive: false, restack: false }),
+    ).rejects.toThrow("Failed to checkout branch 'main'.");
+    expect(mockHardResetBranchToRef).not.toHaveBeenCalledWith(
+      'main',
+      'origin/main',
+      '/repo',
+    );
+  });
+
   it('restores missing local branch from remote', async () => {
     mockReadState.mockResolvedValue(
       makeState([
@@ -252,6 +297,30 @@ describe('sync', () => {
       '/repo',
     );
     expect(result.branches[0].status).toBe('needs-remote-sync-safe');
+  });
+
+  it('surfaces branch reset root-cause details when sync reset fails', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetRefSha
+      .mockResolvedValueOnce('local-a')
+      .mockResolvedValueOnce('remote-a');
+    mockIsAncestor.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    mockHardResetBranchToRef.mockRejectedValue(
+      new DubError(
+        "Failed to hard reset 'feat/a' to 'origin/feat/a'.\nfatal: cannot lock ref",
+      ),
+    );
+
+    await expect(
+      sync('/repo', { interactive: false, restack: false }),
+    ).rejects.toThrow(
+      /Failed to hard reset 'feat\/a' to 'origin\/feat\/a'\.[\s\S]*cannot lock ref/,
+    );
   });
 
   it('skips diverged branch in non-interactive mode without force', async () => {
