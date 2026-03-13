@@ -166,6 +166,10 @@ dub repo        # current repository GitHub page
 When feedback lands on a middle branch:
 
 ```bash
+# from anywhere in the same stack, target that branch directly
+dub m --into feat/auth-login -a -m "fix: address review feedback"
+
+# or switch first, then modify in-place
 dub co feat/auth-login
 
 # amend current commit

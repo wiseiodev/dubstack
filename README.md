@@ -205,6 +205,9 @@ dub modify -vv
 
 # interactive rebase of this branch's commits
 dub modify --interactive-rebase
+
+# apply changes to an older branch in the current stack
+dub modify --into feat/auth-login -a -m "fix: address feedback"
 ```
 
 Flags:
@@ -216,6 +219,7 @@ Flags:
 - `-m, --message <message>` (repeatable)
 - `-v, --verbose` (repeatable)
 - `--interactive-rebase`
+- `--into <branch>` (modify another branch in current stack and restack descendants)
 
 ### `dub checkout` / `dub co`
 

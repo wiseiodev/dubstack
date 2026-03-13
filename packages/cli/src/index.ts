@@ -1296,7 +1296,10 @@ program
     '--interactive-rebase',
     'Start an interactive rebase on the branch commits',
   )
-  // .option("--into <branch>", "Amend staged changes to the specified branch") // TODO: Implement --into
+  .option(
+    '--into <branch>',
+    'Apply modify flow to another branch in the current stack, then restack descendants',
+  )
   // .option("--reset-author", "Set the author to the current user") // TODO: Implement --reset-author
   // .option("-v, --verbose", "Show unified diff") // TODO: Implement verbose
   .action(async (options) => {

@@ -1,6 +1,8 @@
 import { DubError } from '../lib/errors';
 import {
   amendCommit,
+  branchExists,
+  checkoutBranch,
   commit,
   getBranchTip,
   getCurrentBranch,
@@ -54,6 +56,11 @@ export async function modify(
 ): Promise<void> {
   const currentBranch = await getCurrentBranch(cwd);
   const state = await readState(cwd);
+  const targetBranch = options.into;
+
+  if (targetBranch && options.interactiveRebase) {
+    throw new DubError('Cannot combine --into with --interactive-rebase.');
+  }
 
   if (options.interactiveRebase) {
     const parent = getParent(state, currentBranch);
@@ -72,6 +79,44 @@ export async function modify(
     return;
   }
 
+  if (!targetBranch || targetBranch === currentBranch) {
+    await runModifyFlow(cwd, options);
+    return;
+  }
+
+  const target = await validateIntoTarget(
+    cwd,
+    state,
+    currentBranch,
+    targetBranch,
+  );
+  await modifyIntoTarget(cwd, options, currentBranch, target);
+}
+
+function normalizeMessage(message?: string | string[]): string | undefined {
+  if (Array.isArray(message)) {
+    const chunks = message.map((part) => part.trim()).filter(Boolean);
+    return chunks.length > 0 ? chunks.join('\n\n') : undefined;
+  }
+  return message;
+}
+
+async function printVerboseDiff(cwd: string, level: number): Promise<void> {
+  if (level < 1) return;
+
+  const staged = await getDiff(cwd, true);
+  console.log(staged || '(no staged diff)');
+
+  if (level > 1) {
+    const unstaged = await getDiff(cwd, false);
+    console.log(unstaged || '(no unstaged diff)');
+  }
+}
+
+async function runModifyFlow(
+  cwd: string,
+  options: ModifyOptions,
+): Promise<'success' | 'up-to-date' | 'conflict' | 'failed'> {
   if (options.patch) {
     await interactiveStage(cwd);
   } else if (options.all) {
@@ -97,26 +142,80 @@ export async function modify(
     await amendCommit(cwd, { message, noEdit });
   }
 
-  await restackChildren(cwd);
+  return restackChildren(cwd);
 }
 
-function normalizeMessage(message?: string | string[]): string | undefined {
-  if (Array.isArray(message)) {
-    const chunks = message.map((part) => part.trim()).filter(Boolean);
-    return chunks.length > 0 ? chunks.join('\n\n') : undefined;
+async function validateIntoTarget(
+  cwd: string,
+  state: Awaited<ReturnType<typeof readState>>,
+  currentBranch: string,
+  targetBranch: string,
+): Promise<string> {
+  if (!(await branchExists(targetBranch, cwd))) {
+    throw new DubError(`Target branch '${targetBranch}' not found.`);
   }
-  return message;
+
+  const currentStack = state.stacks.find((stack) =>
+    stack.branches.some((branch) => branch.name === currentBranch),
+  );
+  if (!currentStack) {
+    throw new DubError(
+      `Current branch '${currentBranch}' is not part of a tracked stack.`,
+    );
+  }
+
+  const target = currentStack.branches.find(
+    (branch) => branch.name === targetBranch,
+  );
+  if (!target) {
+    throw new DubError(
+      `Target branch '${targetBranch}' is not in the current stack.`,
+    );
+  }
+
+  if (target.type === 'root' || target.parent === null) {
+    throw new DubError(`Cannot use --into with root branch '${targetBranch}'.`);
+  }
+
+  return targetBranch;
 }
 
-async function printVerboseDiff(cwd: string, level: number): Promise<void> {
-  if (level < 1) return;
+async function modifyIntoTarget(
+  cwd: string,
+  options: ModifyOptions,
+  originalBranch: string,
+  targetBranch: string,
+): Promise<void> {
+  let restackStatus: 'success' | 'up-to-date' | 'conflict' | 'failed' =
+    'up-to-date';
+  let primaryError: unknown;
 
-  const staged = await getDiff(cwd, true);
-  console.log(staged || '(no staged diff)');
+  try {
+    await checkoutBranch(targetBranch, cwd);
+    restackStatus = await runModifyFlow(cwd, options);
+  } catch (error) {
+    primaryError = error;
+  }
 
-  if (level > 1) {
-    const unstaged = await getDiff(cwd, false);
-    console.log(unstaged || '(no unstaged diff)');
+  if (restackStatus !== 'conflict') {
+    try {
+      await checkoutBranch(originalBranch, cwd);
+    } catch (restoreError) {
+      if (primaryError) {
+        console.log(
+          `⚠ Could not return to original branch '${originalBranch}'.`,
+        );
+        console.log(
+          `  ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+        );
+      } else {
+        throw restoreError;
+      }
+    }
+  }
+
+  if (primaryError) {
+    throw primaryError;
   }
 }
 
@@ -125,18 +224,30 @@ async function printVerboseDiff(cwd: string, level: number): Promise<void> {
  *
  * @param cwd - The working directory.
  */
-async function restackChildren(cwd: string): Promise<void> {
+async function restackChildren(
+  cwd: string,
+): Promise<'success' | 'up-to-date' | 'conflict' | 'failed'> {
   try {
-    await restack(cwd);
+    const result = await restack(cwd);
+    if (result.status === 'conflict') {
+      console.log(
+        '⚠ Modify successful, but auto-restacking encountered conflicts.',
+      );
+      console.log("  Run 'dub restack --continue' to resolve.");
+      return 'conflict';
+    }
+    return result.status;
   } catch (e) {
     if (e instanceof DubError && e.message.includes('Conflict')) {
       console.log(
         '⚠ Modify successful, but auto-restacking encountered conflicts.',
       );
       console.log("  Run 'dub restack --continue' to resolve.");
+      return 'conflict';
     } else {
       console.log('⚠ Modify successful, but auto-restacking failed.');
       console.log(`  ${e instanceof Error ? e.message : String(e)}`);
+      return 'failed';
     }
   }
 }
