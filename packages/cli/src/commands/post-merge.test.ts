@@ -4,7 +4,12 @@ vi.mock('../lib/git.js', () => ({
   checkoutBranch: vi.fn(),
   fastForwardBranchToRef: vi.fn(),
   fetchBranches: vi.fn(),
+  formatWorktreeCheckoutSkipMessage: vi.fn(
+    (branch: string, worktreePath: string) =>
+      `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`dub sync\` from that worktree to update it.`,
+  ),
   getCurrentBranch: vi.fn(),
+  listWorktreeCheckouts: vi.fn(),
   remoteBranchExists: vi.fn(),
 }));
 
@@ -38,6 +43,7 @@ import {
   fastForwardBranchToRef,
   fetchBranches,
   getCurrentBranch,
+  listWorktreeCheckouts,
   remoteBranchExists,
 } from '../lib/git';
 import {
@@ -59,6 +65,9 @@ const mockFastForwardBranchToRef = fastForwardBranchToRef as ReturnType<
 >;
 const mockFetchBranches = fetchBranches as ReturnType<typeof vi.fn>;
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
+const mockListWorktreeCheckouts = listWorktreeCheckouts as ReturnType<
+  typeof vi.fn
+>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
@@ -111,6 +120,7 @@ beforeEach(() => {
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
   mockRemoteBranchExists.mockResolvedValue(true);
+  mockListWorktreeCheckouts.mockResolvedValue(new Map());
   mockReadState.mockResolvedValue(makeState());
   mockWriteState.mockResolvedValue(undefined);
   mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) => {
@@ -149,6 +159,24 @@ describe('postMerge', () => {
     const saved = mockWriteState.mock.calls[0][0] as DubState;
     const featB = saved.stacks[0].branches.find((b) => b.name === 'feat/b');
     expect(featB?.parent).toBe('main');
+  });
+
+  it('skips merged branches checked out in another worktree', async () => {
+    mockListWorktreeCheckouts.mockResolvedValue(
+      new Map([['feat/a', '/repo-worktree']]),
+    );
+
+    const result = await postMerge('/repo', {
+      restack: false,
+      submit: false,
+    });
+
+    expect(result.cleaned).toEqual([]);
+    expect(result.skipped).toEqual(['feat/a']);
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
+    const saved = mockWriteState.mock.calls[0][0] as DubState;
+    const featB = saved.stacks[0].branches.find((b) => b.name === 'feat/b');
+    expect(featB?.parent).toBe('feat/a');
   });
 
   it('preserves parent_revision on reparented children', async () => {

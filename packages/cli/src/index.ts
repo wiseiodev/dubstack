@@ -747,6 +747,9 @@ program
       if (result.cleaned.length > 0) {
         console.log(chalk.dim(`  cleaned: ${result.cleaned.join(', ')}`));
       }
+      if (result.skipped.length > 0) {
+        console.log(chalk.dim(`  skipped: ${result.skipped.join(', ')}`));
+      }
       if (result.retargeted.length > 0) {
         console.log(chalk.dim(`  retargeted: ${result.retargeted.join(', ')}`));
       }

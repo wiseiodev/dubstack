@@ -299,6 +299,38 @@ describe('restack', () => {
     expect(result.rebased).toContain('feat/a');
     expect(result.rebased).toContain('feat/b');
   });
+
+  it('skips a branch checked out in another worktree', async () => {
+    await create('feat/a', dir);
+    fs.writeFileSync(path.join(dir, 'feat.txt'), 'feat');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'feat-commit']);
+    const preRestackTip = await getBranchTip('feat/a', dir);
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    fs.writeFileSync(path.join(dir, 'base.txt'), 'base');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'base-commit']);
+
+    const worktreeDir = `${dir}-feat-a-worktree`;
+    try {
+      await gitInRepo(dir, ['worktree', 'add', worktreeDir, 'feat/a']);
+
+      const result = await restack(dir);
+
+      expect(result.status).toBe('up-to-date');
+      expect(result.rebased).toEqual([]);
+      expect(await getBranchTip('feat/a', dir)).toBe(preRestackTip);
+    } finally {
+      await gitInRepo(dir, [
+        'worktree',
+        'remove',
+        '--force',
+        worktreeDir,
+      ]).catch(() => {});
+      await fs.promises.rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('squash-merge-then-restack', () => {
