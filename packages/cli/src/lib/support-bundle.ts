@@ -503,7 +503,7 @@ function sanitizeRemoteLine(line: string): string {
   return `${remote} ${sanitizeRemoteUrl(url)}${suffix}`;
 }
 
-function sanitizeRemoteUrl(url: string): string {
+export function sanitizeRemoteUrl(url: string): string {
   return url
     .replace(/(https?:\/\/)([^/\s@]+)@/gi, '$1[REDACTED]@')
     .replace(
