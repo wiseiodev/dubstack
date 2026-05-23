@@ -1555,6 +1555,272 @@ describe('sync', () => {
     });
   });
 
+  describe('fresh / last_synced_at caching', () => {
+    function makeStateWithSync(
+      branches: {
+        name: string;
+        parent: string | null;
+        type?: 'root';
+        last_synced_at?: string | null;
+      }[],
+    ): DubState {
+      return {
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: branches.map((b) => ({
+              name: b.name,
+              parent: b.parent,
+              type: b.type,
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version:
+                b.type === 'root'
+                  ? null
+                  : {
+                      head_sha: `${b.name}-sha`,
+                      base_sha: `${b.parent ?? 'main'}-sha`,
+                      base_branch: b.parent ?? 'main',
+                      version_number: null,
+                      source: 'submit',
+                    },
+              last_synced_at: b.last_synced_at ?? null,
+              sync_source: b.type === 'root' ? null : 'submit',
+            })),
+          },
+        ],
+      };
+    }
+
+    it('partitions recently-synced branches out of the fetch list', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+          { name: 'feat/b', parent: 'feat/a', last_synced_at: recent },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockFetchBranches).toHaveBeenCalledTimes(1);
+      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+      const featA = result.branches.find((b) => b.branch === 'feat/a');
+      const featB = result.branches.find((b) => b.branch === 'feat/b');
+      expect(featA?.status).toBe('fresh');
+      expect(featA?.action).toBe('cached');
+      expect(featB?.status).toBe('fresh');
+    });
+
+    it('still fetches branches synced more than 5 minutes ago', async () => {
+      const stale = new Date(Date.now() - 6 * 60 * 1000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: stale },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main', 'feat/a'],
+        '/repo',
+      );
+    });
+
+    it('--fresh forces a full fetch of every tracked branch', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+          { name: 'feat/b', parent: 'feat/a', last_synced_at: recent },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+        fresh: true,
+      });
+
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main', 'feat/a', 'feat/b'],
+        '/repo',
+      );
+      expect(result.branches.find((b) => b.status === 'fresh')).toBeUndefined();
+    });
+
+    it('still runs the batched gh pr list when every branch is cached', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+        ]),
+      );
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map([['feat/a', { state: 'OPEN', baseRefName: 'main' }]]),
+        truncated: false,
+      });
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockGetAllPrSyncInfoBatch).toHaveBeenCalledTimes(1);
+      expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
+    });
+
+    it('still cleans a merged branch even when its last_synced_at is fresh', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+        ]),
+      );
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map([
+          ['feat/a', { state: 'MERGED', baseRefName: 'main' }],
+        ]),
+        truncated: false,
+      });
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockDeleteBranch).toHaveBeenCalledWith('feat/a', '/repo');
+      expect(result.cleaned).toContain('feat/a');
+      expect(result.branches).toHaveLength(0);
+    });
+
+    it('skips skipping when last_synced_at is unparseable (defensive)', async () => {
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: 'not-a-date' },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main', 'feat/a'],
+        '/repo',
+      );
+    });
+
+    it('falls through to missing-remote when a fresh-cached branch was pruned upstream', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+        ]),
+      );
+      // Simulate `pruneRemote` having dropped origin/feat/a since the last sync.
+      mockRemoteBranchExists.mockImplementation(
+        async (branch: string) => branch !== 'feat/a',
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      const featA = result.branches.find((b) => b.branch === 'feat/a');
+      expect(featA?.status).toBe('missing-remote');
+      expect(featA?.action).toBe('skipped');
+    });
+
+    it('stamps last_synced_at for local-ahead branches so re-sync skips fetch', async () => {
+      let currentState: DubState = makeStateWithSync([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]);
+      mockReadState.mockImplementation(async () =>
+        structuredClone(currentState),
+      );
+      mockWriteState.mockImplementation(async (next: DubState) => {
+        currentState = structuredClone(next);
+      });
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref === 'feat/a' ? 'local-sha' : 'remote-sha',
+      );
+      mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+        if (left === 'origin/feat/a' && right === 'feat/a') return true;
+        return false;
+      });
+
+      const first = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+      expect(first.branches[0].status).toBe('local-ahead');
+      const featAFirst = currentState.stacks[0].branches.find(
+        (b) => b.name === 'feat/a',
+      );
+      expect(featAFirst?.last_synced_at).toBeTruthy();
+
+      mockFetchBranches.mockClear();
+      await sync('/repo', { interactive: false, restack: false });
+      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+    });
+
+    it('second consecutive sync only fetches trunk (idempotency)', async () => {
+      // Stateful mock: first sync writes last_synced_at, second sync reads it back
+      let currentState: DubState = makeStateWithSync([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]);
+      mockReadState.mockImplementation(async () =>
+        structuredClone(currentState),
+      );
+      mockWriteState.mockImplementation(async (next: DubState) => {
+        currentState = structuredClone(next);
+      });
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      // First sync — everything must fetch.
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockFetchBranches).toHaveBeenLastCalledWith(
+        ['main', 'feat/a', 'feat/b'],
+        '/repo',
+      );
+      const writtenAfterFirst = currentState.stacks[0].branches.find(
+        (b) => b.name === 'feat/a',
+      );
+      expect(writtenAfterFirst?.last_synced_at).toBeTruthy();
+
+      mockFetchBranches.mockClear();
+
+      // Second sync — recently-synced branches now skip the fetch.
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockFetchBranches).toHaveBeenCalledTimes(1);
+      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+      const cached = result.branches.filter((b) => b.status === 'fresh');
+      expect(cached.map((b) => b.branch).sort()).toEqual(['feat/a', 'feat/b']);
+    });
+  });
+
   describe('per-branch error isolation', () => {
     it('continues processing other branches when one branch errors', async () => {
       mockReadState.mockResolvedValue(

@@ -13,6 +13,7 @@ export type BranchSyncStatus =
   | 'squash-merged-with-trailing-commits'
   | 'non-conflicting-divergence'
   | 'parent-merged-orphan'
+  | 'fresh'
   | 'error';
 
 export type ReconcileSource =
@@ -55,12 +56,20 @@ export interface SyncOptions {
   restack: boolean;
   all: boolean;
   interactive: boolean;
+  fresh: boolean;
 }
 
 export interface BranchSyncOutcome {
   branch: string;
   status: BranchSyncStatus;
-  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none' | 'error';
+  action:
+    | 'synced'
+    | 'kept-local'
+    | 'skipped'
+    | 'deleted'
+    | 'none'
+    | 'cached'
+    | 'error';
   message: string;
   reconcileSource?: ReconcileSource;
   recovery?: string[];

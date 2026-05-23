@@ -558,12 +558,17 @@ program
   )
   .option('-a, --all', 'Sync all tracked stacks across trunks')
   .option('--no-interactive', 'Disable prompts and use deterministic behavior')
+  .option(
+    '--fresh',
+    'Force a full fetch of every tracked branch (skip 5-minute freshness cache)',
+  )
   .action(
     async (options: {
       restack?: boolean;
       force?: boolean;
       all?: boolean;
       interactive?: boolean;
+      fresh?: boolean;
     }) => {
       await sync(process.cwd(), options);
     },
