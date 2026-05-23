@@ -19,6 +19,7 @@ import {
   fastForwardBranchToRef,
   fetchBranches,
   forceBranchTo,
+  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCurrentBranch,
   getDiffBetween,
@@ -31,6 +32,7 @@ import {
   isWorkingTreeClean,
   lastPushedRef,
   listNamespacedFetchRefs,
+  listWorktreeCheckouts,
   namespacedFetchRef,
   pruneRemote,
   pushBranch,
@@ -76,6 +78,59 @@ describe('getCurrentBranch', () => {
     await gitInRepo(dir, ['checkout', '--detach']);
     await expect(getCurrentBranch(dir)).rejects.toThrow(DubError);
     await expect(getCurrentBranch(dir)).rejects.toThrow('detached');
+  });
+});
+
+describe('listWorktreeCheckouts', () => {
+  it('returns an empty map for a single worktree', async () => {
+    expect(await listWorktreeCheckouts(dir)).toEqual(new Map());
+  });
+
+  it('returns branches checked out in another worktree', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/worktree']);
+    await gitInRepo(dir, ['checkout', 'main']);
+    const worktreeDir = `${dir}-feat-worktree`;
+
+    try {
+      await gitInRepo(dir, ['worktree', 'add', worktreeDir, 'feat/worktree']);
+      const gitWorktreePath = await fs.promises.realpath(worktreeDir);
+      const gitMainPath = await fs.promises.realpath(dir);
+
+      expect(await listWorktreeCheckouts(dir)).toEqual(
+        new Map([['feat/worktree', gitWorktreePath]]),
+      );
+      expect(await listWorktreeCheckouts(worktreeDir)).toEqual(
+        new Map([['main', gitMainPath]]),
+      );
+    } finally {
+      await gitInRepo(dir, [
+        'worktree',
+        'remove',
+        '--force',
+        worktreeDir,
+      ]).catch(() => {});
+      await fs.promises.rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('formatWorktreeCheckoutSkipMessage', () => {
+  it('defaults to the sync follow-up hint', () => {
+    expect(formatWorktreeCheckoutSkipMessage('feat/a', '/repo-worktree')).toBe(
+      "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub sync` from that worktree to update it.",
+    );
+  });
+
+  it('supports command-specific follow-up hints', () => {
+    expect(
+      formatWorktreeCheckoutSkipMessage(
+        'feat/a',
+        '/repo-worktree',
+        'dub restack',
+      ),
+    ).toBe(
+      "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub restack` from that worktree to update it.",
+    );
   });
 });
 

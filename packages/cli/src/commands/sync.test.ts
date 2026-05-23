@@ -9,10 +9,15 @@ vi.mock('../lib/git.js', () => ({
   deleteBranch: vi.fn(),
   fastForwardBranchToRef: vi.fn(),
   fetchBranches: vi.fn(),
+  formatWorktreeCheckoutSkipMessage: vi.fn(
+    (branch: string, worktreePath: string, command = 'dub sync') =>
+      `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`${command}\` from that worktree to update it.`,
+  ),
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),
   hardResetBranchToRef: vi.fn(),
   isAncestor: vi.fn(),
+  listWorktreeCheckouts: vi.fn(),
   pruneRemote: vi.fn(),
   remoteBranchExists: vi.fn(),
 }));
@@ -55,6 +60,7 @@ import {
   getRefSha,
   hardResetBranchToRef,
   isAncestor,
+  listWorktreeCheckouts,
   pruneRemote,
   remoteBranchExists,
 } from '../lib/git';
@@ -97,6 +103,9 @@ const mockHardResetBranchToRef = hardResetBranchToRef as ReturnType<
   typeof vi.fn
 >;
 const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
+const mockListWorktreeCheckouts = listWorktreeCheckouts as ReturnType<
+  typeof vi.fn
+>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
@@ -157,6 +166,7 @@ beforeEach(() => {
   mockGetRefSha.mockImplementation(async (ref: string) => `${ref}-sha`);
   mockIsAncestor.mockResolvedValue(false);
   mockHardResetBranchToRef.mockResolvedValue(undefined);
+  mockListWorktreeCheckouts.mockResolvedValue(new Map());
   mockCheckoutRemoteBranch.mockResolvedValue(undefined);
   mockCheckoutBranch.mockResolvedValue(undefined);
   mockDeleteBranch.mockResolvedValue(undefined);
@@ -212,6 +222,35 @@ describe('sync', () => {
     expect(result.fetched).toEqual(['main', 'feat/a']);
     expect(result.branches[0].status).toBe('up-to-date');
     expect(mockRestack).not.toHaveBeenCalled();
+  });
+
+  it('skips reconciliation for branches checked out in another worktree', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockListWorktreeCheckouts.mockResolvedValue(
+      new Map([['feat/a', '/repo-worktree']]),
+    );
+
+    const result = await sync('/repo', { interactive: false, restack: false });
+
+    expect(result.branches).toEqual([
+      {
+        branch: 'feat/a',
+        status: 'checked-out-elsewhere',
+        action: 'skipped',
+        message:
+          "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub sync` from that worktree to update it.",
+      },
+    ]);
+    expect(mockHardResetBranchToRef).not.toHaveBeenCalledWith(
+      'feat/a',
+      expect.any(String),
+      '/repo',
+    );
   });
 
   it('clears stale namespaced fetch refs and prunes remote once before trunk pull', async () => {
@@ -518,6 +557,35 @@ describe('sync', () => {
     expect(
       writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
     ).toBeUndefined();
+  });
+
+  it('skips auto-clean deletion for branches checked out in another worktree', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'MERGED',
+      baseRefName: 'main',
+    });
+    mockListWorktreeCheckouts.mockResolvedValue(
+      new Map([['feat/a', '/repo-worktree']]),
+    );
+
+    const result = await sync('/repo', {
+      interactive: false,
+      restack: false,
+    });
+
+    expect(mockDeleteBranch).not.toHaveBeenCalledWith('feat/a', '/repo');
+    expect(result.cleaned).toEqual([]);
+    expect(result.branches[0]?.status).toBe('checked-out-elsewhere');
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    expect(
+      writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
+    ).toBeTruthy();
   });
 
   it('warns when auto-cleaning a merged branch with dependent children', async () => {

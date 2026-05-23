@@ -9,10 +9,12 @@ import {
   deleteBranch,
   fastForwardBranchToRef,
   fetchBranches,
+  formatWorktreeCheckoutSkipMessage,
   getCurrentBranch,
   getRefSha,
   hardResetBranchToRef,
   isAncestor,
+  listWorktreeCheckouts,
   pruneRemote,
   rebaseBranchOntoRef,
   remoteBranchExists,
@@ -106,6 +108,7 @@ export async function sync(
 
   const state = await readState(cwd);
   const originalBranch = await getCurrentBranch(cwd);
+  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
 
   const scopeStacks = options.all
     ? state.stacks
@@ -157,6 +160,23 @@ export async function sync(
   let needsSubmitRefresh = false;
   let restackChanged = false;
   const reparentedBranchNames = new Set<string>();
+  const worktreeSkippedBranches = new Set<string>();
+  const recordWorktreeSkip = (branch: string): boolean => {
+    const worktreePath = worktreeCheckouts.get(branch);
+    if (!worktreePath) return false;
+    if (worktreeSkippedBranches.has(branch)) return true;
+
+    const outcome: BranchSyncOutcome = {
+      branch,
+      status: 'checked-out-elsewhere',
+      action: 'skipped',
+      message: formatWorktreeCheckoutSkipMessage(branch, worktreePath),
+    };
+    worktreeSkippedBranches.add(branch);
+    result.branches.push(outcome);
+    printBranchOutcome(outcome);
+    return true;
+  };
 
   try {
     const allTrackedBranches = new Set(
@@ -174,6 +194,8 @@ export async function sync(
     await pruneRemote('origin', cwd);
 
     for (const root of roots) {
+      if (recordWorktreeSkip(root)) continue;
+
       const remoteRef = `origin/${root}`;
       const hasRemoteRoot = await remoteBranchExists(root, cwd);
       rootHasRemote.set(root, hasRemoteRoot);
@@ -252,6 +274,7 @@ export async function sync(
     for (const entry of cleanupPlan.toDelete) {
       const branch = entry.branch;
       if (excludedFromSync.has(branch)) continue;
+      if (recordWorktreeSkip(branch)) continue;
       const descendants = getDescendants(scopeStacks, branch).filter(
         (name) =>
           !cleanupPlan.toDelete.some((target) => target.branch === name),
@@ -285,6 +308,7 @@ export async function sync(
     for (const branch of stackBranches) {
       if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
         continue;
+      if (recordWorktreeSkip(branch)) continue;
 
       try {
         const hasRemote = await remoteBranchExists(branch, cwd);
@@ -661,6 +685,7 @@ export async function sync(
       console.log('🥞 Restacking branches...');
       const rootsToRestack = options.all ? roots : [roots[0]].filter(Boolean);
       for (const root of rootsToRestack) {
+        if (recordWorktreeSkip(root)) continue;
         await checkoutBranch(root, cwd);
         const restackResult = await restack(cwd);
         if (restackResult.status === 'conflict') {

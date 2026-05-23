@@ -24,8 +24,13 @@ export function printSyncSummary(result: SyncResult): void {
     (b) => b.action === 'kept-local',
   ).length;
   const errored = result.branches.filter((b) => b.action === 'error');
+  const worktreeSkipped = result.branches.filter(
+    (b) => b.status === 'checked-out-elsewhere',
+  ).length;
+  const worktreeSuffix =
+    worktreeSkipped > 0 ? ` (${worktreeSkipped} checked-out-elsewhere)` : '';
   console.log(
-    `✔ Sync complete: ${synced} synced, ${keptLocal} kept-local, ${skipped} skipped, ${result.cleaned.length} cleaned, ${errored.length} errored`,
+    `✔ Sync complete: ${synced} synced, ${keptLocal} kept-local, ${skipped} skipped${worktreeSuffix}, ${result.cleaned.length} cleaned, ${errored.length} errored`,
   );
   if (errored.length > 0) {
     console.error(

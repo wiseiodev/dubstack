@@ -1,3 +1,5 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { execa } from 'execa';
 import { DubError } from './errors';
 import { retry } from './retry';
@@ -41,6 +43,53 @@ export async function getRepoRoot(cwd: string): Promise<string> {
       "Run 'cd <repo>' to switch into an existing git repository and retry.",
     ]);
   }
+}
+
+/**
+ * Returns local branches checked out in other git worktrees.
+ */
+export async function listWorktreeCheckouts(
+  cwd: string,
+): Promise<Map<string, string>> {
+  const repoRoot = await realpathOrResolve(await getRepoRoot(cwd));
+  const { stdout } = await execa('git', ['worktree', 'list', '--porcelain'], {
+    cwd,
+  });
+  const checkouts = new Map<string, string>();
+  let worktreePath: string | null = null;
+
+  for (const line of stdout.split('\n')) {
+    if (line.startsWith('worktree ')) {
+      worktreePath = line.slice('worktree '.length);
+      continue;
+    }
+
+    if (!line.startsWith('branch refs/heads/') || !worktreePath) continue;
+
+    const checkoutRoot = await realpathOrResolve(worktreePath);
+    if (checkoutRoot === repoRoot) continue;
+
+    const branch = line.slice('branch refs/heads/'.length);
+    checkouts.set(branch, worktreePath);
+  }
+
+  return checkouts;
+}
+
+async function realpathOrResolve(inputPath: string): Promise<string> {
+  try {
+    return await fs.realpath(inputPath);
+  } catch {
+    return path.resolve(inputPath);
+  }
+}
+
+export function formatWorktreeCheckoutSkipMessage(
+  branch: string,
+  worktreePath: string,
+  command = 'dub sync',
+): string {
+  return `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`${command}\` from that worktree to update it.`;
 }
 
 /**

@@ -4,12 +4,14 @@ import { DubError } from '../lib/errors';
 import {
   branchExists,
   checkoutBranch,
+  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCurrentBranch,
   getMergeBase,
   rebaseContinue as gitRebaseContinue,
   hasUniquePatchCommits,
   isWorkingTreeClean,
+  listWorktreeCheckouts,
   rebaseOnto,
 } from '../lib/git';
 import {
@@ -26,6 +28,7 @@ interface RestackStep {
   parent: string;
   parentOldTip: string;
   parentNewTip?: string;
+  worktreePath?: string;
   status: 'pending' | 'done' | 'skipped' | 'conflicted';
 }
 
@@ -68,6 +71,7 @@ export async function restack(cwd: string): Promise<RestackResult> {
 
   const originalBranch = await getCurrentBranch(cwd);
   const targetStacks = getTargetStacks(state.stacks, originalBranch);
+  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
 
   if (targetStacks.length === 0) {
     throw new DubError(`Branch '${originalBranch}' is not part of any stack.`, [
@@ -97,9 +101,25 @@ export async function restack(cwd: string): Promise<RestackResult> {
     branchTips[branch.name] = await getBranchTip(branch.name, cwd);
   }
 
-  const steps = await buildRestackSteps(targetStacks, cwd);
+  const steps = await buildRestackSteps(targetStacks, cwd, worktreeCheckouts);
 
   if (steps.length === 0) {
+    return { status: 'up-to-date', rebased: [] };
+  }
+
+  for (const step of steps) {
+    if (step.status === 'skipped' && step.worktreePath) {
+      console.log(
+        formatWorktreeCheckoutSkipMessage(
+          step.branch,
+          step.worktreePath,
+          'dub restack',
+        ),
+      );
+    }
+  }
+
+  if (steps.every((step) => step.status === 'skipped')) {
     return { status: 'up-to-date', rebased: [] };
   }
 
@@ -248,6 +268,7 @@ function getTargetStacks(stacks: Stack[], currentBranch: string): Stack[] {
 async function buildRestackSteps(
   stacks: Stack[],
   cwd: string,
+  worktreeCheckouts: Map<string, string> = new Map(),
 ): Promise<RestackStep[]> {
   const steps: RestackStep[] = [];
 
@@ -262,7 +283,8 @@ async function buildRestackSteps(
         branch: branch.name,
         parent: branch.parent,
         parentOldTip,
-        status: 'pending',
+        worktreePath: worktreeCheckouts.get(branch.name),
+        status: worktreeCheckouts.has(branch.name) ? 'skipped' : 'pending',
       });
     }
   }
