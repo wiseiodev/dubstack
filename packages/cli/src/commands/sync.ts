@@ -15,6 +15,7 @@ import {
   rebaseBranchOntoRef,
   remoteBranchExists,
 } from '../lib/git';
+import { isMergedByPatchId } from '../lib/git/is-merged-by-patch-id';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -204,6 +205,13 @@ export async function sync(
         for (const root of roots) {
           const compareRef = rootHasRemote.get(root) ? `origin/${root}` : root;
           if (await isAncestor(branch, compareRef, cwd)) return true;
+        }
+        return false;
+      },
+      isMergedByPatchId: async (branch) => {
+        for (const root of roots) {
+          const trunkRef = rootHasRemote.get(root) ? `origin/${root}` : root;
+          if (await isMergedByPatchId(branch, trunkRef, cwd)) return true;
         }
         return false;
       },
