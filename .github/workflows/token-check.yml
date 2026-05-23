@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 env:
-  NPM_TOKEN_EXPIRES: "2026-05-17"
+  NPM_TOKEN_EXPIRES: "2026-08-21"
 
 jobs:
   check:
