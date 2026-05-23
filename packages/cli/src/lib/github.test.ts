@@ -13,6 +13,7 @@ vi.mock('execa', () => ({
 
 import { execa } from 'execa';
 import {
+  __setGhRetryOptionsForTesting,
   checkGhAuth,
   createPr,
   ensureGhInstalled,
@@ -34,6 +35,11 @@ const mockExeca = execa as unknown as MockInstance;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Disable backoff sleeps and jitter so retry tests don't burn wall-clock time.
+  __setGhRetryOptionsForTesting({
+    sleep: () => Promise.resolve(),
+    random: () => 0,
+  });
 });
 
 describe('ensureGhInstalled', () => {
@@ -529,5 +535,195 @@ describe('getRepositoryWebUrl', () => {
     await expect(getRepositoryWebUrl('/repo')).rejects.toThrow(
       'does not point to GitHub',
     );
+  });
+});
+
+describe('gh retry behavior', () => {
+  it('retries getPr on transient failure and succeeds', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 7,
+          url: 'https://github.com/o/r/pull/7',
+          title: 't',
+          body: 'b',
+        }),
+      });
+
+    const result = await getPr('feat/x', '/repo');
+
+    expect(result).toEqual({
+      number: 7,
+      url: 'https://github.com/o/r/pull/7',
+      title: 't',
+      body: 'b',
+    });
+    expect(mockExeca).toHaveBeenCalledTimes(3);
+  });
+
+  it('short-circuits getPrByNumber on permanent 404', async () => {
+    mockExeca.mockRejectedValue(new Error('HTTP 404: Not Found'));
+
+    // 404 is permanent → only one attempt; isPrNotFoundError matches → null.
+    await expect(getPrByNumber(123, '/repo')).resolves.toBeNull();
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+
+  it('short-circuits updatePrBody on permanent 403', async () => {
+    mockExeca.mockRejectedValue(new Error('HTTP 403: Forbidden'));
+
+    await expect(updatePrBody(42, '/tmp/body.md', '/repo')).rejects.toThrow(
+      'permissions',
+    );
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries up to maxAttempts then wraps the failure', async () => {
+    mockExeca.mockRejectedValue(new Error('502 Bad Gateway'));
+
+    await expect(getBranchPrSyncInfo('feat/x', '/repo')).rejects.toThrow(
+      /giving up after 4 attempts/,
+    );
+    expect(mockExeca).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries mergePr on transient failure and succeeds', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      .mockResolvedValueOnce({ stdout: '' });
+
+    await expect(mergePr(99, '/repo')).resolves.toBeUndefined();
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not classify bare HTTP-status digits in args as permanent', async () => {
+    // Transient gh error whose stderr happens to echo a branch named "feat/404"
+    // — the bare 404 must not short-circuit retries.
+    mockExeca
+      .mockRejectedValueOnce(
+        new Error(
+          'Command failed: gh pr list --head feat/404\n502 Bad Gateway',
+        ),
+      )
+      .mockResolvedValueOnce({ stdout: 'null' });
+
+    await expect(getPr('feat/404', '/repo')).resolves.toBeNull();
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('createPr idempotency guard', () => {
+  it('returns the existing PR when a phantom duplicate is detected on retry', async () => {
+    const phantomUrl = 'https://github.com/o/r/pull/77';
+    mockExeca
+      // Attempt 1: gh pr create — succeeded server-side but the response was
+      // lost to a transient network error.
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      // Attempt 2 begins with getPr() (gh pr list) — returns the PR that the
+      // first attempt actually created.
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 77,
+          url: phantomUrl,
+          title: 'feat: x',
+          body: '',
+        }),
+      });
+
+    const result = await createPr(
+      'feat/x',
+      'main',
+      'feat: x',
+      '/tmp/body.md',
+      '/repo',
+    );
+
+    expect(result).toEqual({
+      number: 77,
+      url: phantomUrl,
+      title: 'feat: x',
+      body: '',
+    });
+    // Exactly two gh calls: the failed create + the idempotency check.
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      expect.arrayContaining(['pr', 'list', '--head', 'feat/x']),
+      { cwd: '/repo' },
+    );
+  });
+
+  it('retries createPr when no PR exists yet', async () => {
+    mockExeca
+      // Attempt 1: transient failure
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      // Attempt 2: idempotency check finds no PR
+      .mockResolvedValueOnce({ stdout: '' })
+      // Attempt 2: gh pr create — succeeds
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r/pull/88\n',
+      });
+
+    const result = await createPr(
+      'feat/y',
+      'main',
+      'feat: y',
+      '/tmp/body.md',
+      '/repo',
+    );
+
+    expect(result.number).toBe(88);
+    expect(mockExeca).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries createPr if an unrelated PR title is found', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      // Idempotency check returns a PR whose title does NOT match.
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 1,
+          url: 'https://github.com/o/r/pull/1',
+          title: 'something else',
+          body: '',
+        }),
+      })
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r/pull/2\n',
+      });
+
+    const result = await createPr(
+      'feat/z',
+      'main',
+      'feat: z',
+      '/tmp/body.md',
+      '/repo',
+    );
+
+    expect(result.number).toBe(2);
+    expect(mockExeca).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry createPr on permanent 403', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
+
+    await expect(
+      createPr('feat/x', 'main', 't', '/tmp/body.md', '/repo'),
+    ).rejects.toThrow('permissions');
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+
+  it('wraps the underlying error after exhausting createPr retries', async () => {
+    mockExeca.mockRejectedValue(new Error('502 Bad Gateway'));
+
+    await expect(
+      createPr('feat/x', 'main', 'feat: x', '/tmp/body.md', '/repo'),
+    ).rejects.toThrow(/Failed to create PR for 'feat\/x'.*502/);
+    // At least one create attempt happened; exact call count depends on
+    // the nested getPr retries and is intentionally not asserted.
+    expect(mockExeca.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 });
