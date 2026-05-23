@@ -72,6 +72,11 @@ import {
 } from './lib/history';
 import { detectActiveOperation } from './lib/operation-state';
 import { setVerbose } from './lib/progress';
+import {
+  resolveRestackConflictDecision,
+  restackConflictPrompt,
+} from './lib/restack-conflict-prompt';
+import { rollbackRestack } from './lib/restack-rollback';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -593,8 +598,38 @@ Examples:
     if (result.status === 'up-to-date') {
       console.log(chalk.green('✔ Stack is already up to date'));
     } else if (result.status === 'conflict') {
+      const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+      const conflictBranch = result.conflictBranch ?? 'unknown';
+      const decision = await resolveRestackConflictDecision({
+        branch: conflictBranch,
+        interactive,
+        promptChoice: (branchName) =>
+          restackConflictPrompt({ branch: branchName }),
+      });
+      if (decision === 'cancel') {
+        const rollback = await rollbackRestack(process.cwd());
+        console.log(
+          chalk.green(
+            `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+          ),
+        );
+        return;
+      }
+      if (decision === 'exit') {
+        console.log(
+          chalk.yellow(
+            `⚠ Restack left in its current state on '${conflictBranch}'.`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
+          ),
+        );
+        return;
+      }
       console.log(
-        chalk.yellow(`⚠ Conflict while restacking '${result.conflictBranch}'`),
+        chalk.yellow(`⚠ Conflict while restacking '${conflictBranch}'`),
       );
       console.log(
         chalk.dim(
@@ -1094,6 +1129,33 @@ program
       }),
   )
   .addCommand(
+    new Command('mcp-mode')
+      .argument(
+        '[mode]',
+        'Set to read-only/interactive/trusted (omit to inspect current value)',
+      )
+      .description(
+        'Manage the security model for mutating MCP tool calls (default: interactive)',
+      )
+      .action(async (mode?: string) => {
+        const { configMcpMode } = await import('./commands/config');
+        const result = await configMcpMode(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(`MCP mode is '${result.mode}' for this repository.`),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ MCP mode set to '${result.mode}'`));
+        } else {
+          console.log(chalk.yellow(`⚠ MCP mode is already '${result.mode}'`));
+        }
+      }),
+  )
+  .addCommand(
     new Command('ai-model')
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
@@ -1297,7 +1359,9 @@ program
 
 program
   .command('mcp')
-  .description('Start the DubStack read-only MCP server over stdio')
+  .description(
+    'Start the DubStack MCP server over stdio (mutating tools gated by `dub config mcp-mode`)',
+  )
   .action(async () => {
     await mcp(process.cwd(), { version });
   });

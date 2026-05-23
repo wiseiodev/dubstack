@@ -159,6 +159,23 @@ describe('createProgress', () => {
     expect(combined).not.toMatch(/\b0\/0\b/);
   });
 
+  it('stop halts the bar without forcing it to 100% and clears active progress', () => {
+    const stream = createFakeStream(true);
+    const progress = createProgress({
+      stream: stream as unknown as NodeJS.WriteStream,
+      isTTY: true,
+      ci: false,
+    });
+
+    progress.start('working', 10);
+    progress.update('working', 3, 'feat/a');
+    expect(getActiveProgress()).toBe(progress);
+    progress.stop();
+
+    expect(getActiveProgress()).toBeNull();
+    expect(() => progress.stop()).not.toThrow();
+  });
+
   it('pause is a no-op when already paused or not started', () => {
     const stream = createFakeStream(true);
     const progress = createProgress({
@@ -230,8 +247,13 @@ describe('verbose flag plumbing', () => {
       start: () => {},
       update: () => {},
       complete: () => {},
-      pause: () => events.push('pause'),
-      resume: () => events.push('resume'),
+      pause: () => {
+        events.push('pause');
+      },
+      resume: () => {
+        events.push('resume');
+      },
+      stop: () => {},
     };
     const stream = createFakeStream(false);
     setVerbose(true);

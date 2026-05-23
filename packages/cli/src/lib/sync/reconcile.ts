@@ -1,26 +1,25 @@
-export type ReconcileDecision =
-  | 'take-remote'
-  | 'keep-local'
-  | 'reconcile'
-  | 'skip';
+import type { ReconcilePromptChoice } from './reconcile-prompt';
 
+export type ReconcileDecision = 'rebase-onto-remote' | 'take-remote' | 'abort';
+
+/**
+ * Resolves the three-way reconcile decision for a branch that diverged from
+ * its remote while sharing the same parent.
+ *
+ * Flag semantics (verbatim from DUB-15 / Graphite v1.7.18):
+ * - `--force` alone does NOT skip the interactive prompt.
+ * - `--no-interactive` and no `--force` → ABORT (safest).
+ * - `--force` AND `--no-interactive` → take-remote.
+ * - Otherwise → ask the user. There is no default — the user must select.
+ */
 export async function resolveReconcileDecision(input: {
   branch: string;
   force: boolean;
   interactive: boolean;
-  promptChoice: () => Promise<string>;
+  promptChoice: () => Promise<ReconcilePromptChoice>;
 }): Promise<ReconcileDecision> {
-  if (input.force) return 'take-remote';
-  if (!input.interactive) return 'skip';
-
-  const raw = await input.promptChoice();
-  if (
-    raw === 'take-remote' ||
-    raw === 'keep-local' ||
-    raw === 'reconcile' ||
-    raw === 'skip'
-  ) {
-    return raw;
+  if (!input.interactive) {
+    return input.force ? 'take-remote' : 'abort';
   }
-  return 'skip';
+  return input.promptChoice();
 }
