@@ -1,20 +1,27 @@
 import chalk from 'chalk';
+import { getActiveProgress } from '../progress';
 import type { BranchSyncOutcome, SyncResult } from './types';
 
 export function printBranchOutcome(outcome: BranchSyncOutcome): void {
-  if (outcome.action === 'error') {
-    console.error(
-      chalk.red(`✖ Failed to sync '${outcome.branch}': ${outcome.message}`),
-    );
-    if (outcome.recovery && outcome.recovery.length > 0) {
-      console.error(chalk.red('  What you can do:'));
-      outcome.recovery.forEach((step, idx) => {
-        console.error(chalk.red(`    ${idx + 1}. ${step}`));
-      });
+  const progress = getActiveProgress();
+  if (progress) progress.pause();
+  try {
+    if (outcome.action === 'error') {
+      console.error(
+        chalk.red(`✖ Failed to sync '${outcome.branch}': ${outcome.message}`),
+      );
+      if (outcome.recovery && outcome.recovery.length > 0) {
+        console.error(chalk.red('  What you can do:'));
+        outcome.recovery.forEach((step, idx) => {
+          console.error(chalk.red(`    ${idx + 1}. ${step}`));
+        });
+      }
+      return;
     }
-    return;
+    console.log(outcome.message);
+  } finally {
+    if (progress) progress.resume();
   }
-  console.log(outcome.message);
 }
 
 export function printSyncSummary(result: SyncResult): void {

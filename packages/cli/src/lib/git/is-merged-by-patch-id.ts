@@ -1,4 +1,4 @@
-import { execa } from 'execa';
+import { execa } from '../exec';
 
 export interface IsMergedByPatchIdOptions {
   maxCommits?: number;

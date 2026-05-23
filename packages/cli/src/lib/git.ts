@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { execa } from 'execa';
 import { DubError } from './errors';
+import { execa } from './exec';
 import { retry } from './retry';
 
 export interface DiffStatEntry {
@@ -906,6 +906,12 @@ export interface FetchBranchesOptions {
    * log lines (e.g. under `--verbose`).
    */
   onRetry?: (attempt: number, err: unknown) => void;
+  /**
+   * Invoked before each per-branch fetch with the 1-indexed position and the
+   * branch name. Used by callers to drive a progress bar with the current
+   * branch as detail text.
+   */
+  onBranchStart?: (index: number, branch: string) => void;
 }
 
 /**
@@ -924,7 +930,10 @@ export async function fetchBranches(
   options: FetchBranchesOptions = {},
 ): Promise<void> {
   if (branches.length === 0) return;
+  let index = 0;
   for (const branch of branches) {
+    index += 1;
+    options.onBranchStart?.(index, branch);
     const refspec = `${branch}:${namespacedFetchRef(branch)}`;
     try {
       await retry(

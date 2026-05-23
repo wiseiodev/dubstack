@@ -248,7 +248,12 @@ describe('sync', () => {
 
     expect(mockEnsureGhInstalled).toHaveBeenCalledTimes(1);
     expect(mockCheckGhAuth).toHaveBeenCalledTimes(1);
-    expect(mockFetchBranches).toHaveBeenCalledWith(['main', 'feat/a'], '/repo');
+    expect(mockFetchBranches).toHaveBeenCalledWith(
+      ['main', 'feat/a'],
+      '/repo',
+      'origin',
+      expect.objectContaining({ onBranchStart: expect.any(Function) }),
+    );
     expect(result.fetched).toEqual(['main', 'feat/a']);
     expect(result.branches[0].status).toBe('up-to-date');
     expect(mockRestack).not.toHaveBeenCalled();
