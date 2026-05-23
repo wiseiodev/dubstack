@@ -18,7 +18,8 @@ export function assertStateInvariants(stacks: Stack[]) {
             `Invalid stack '${stack.id}': root '${branch.name}' must have no parent.`,
             [
               "Run 'dub doctor' to inspect the stack.",
-              `Run 'dub track ${branch.name} --parent null' is not supported; restore state from backup or rerun 'dub init'.`,
+              `Run 'dub untrack ${branch.name}' to clear the bad metadata, then 'dub track ${branch.name}' to re-add it as a root.`,
+              "Restore '.git/dubstack/state.json' from version control or backup if the metadata is corrupted.",
             ],
           );
         }

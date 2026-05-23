@@ -18,7 +18,7 @@
     "commitlint:edit": "commitlint --edit",
     "dev": "turbo run dev",
     "lint:fix:staged": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off",
-    "prepare": "lefthook install",
+    "prepare": "node -e \"const fs=require('node:fs');if(process.env.CI||!fs.existsSync('.git'))process.exit(0)\" && lefthook install",
     "evals": "evalite run",
     "evals:watch": "evalite watch",
     "evals:export": "evalite export --output .evalite-export"
