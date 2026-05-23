@@ -163,6 +163,25 @@ describe('pushBranch (retry)', () => {
     expect(pushCallCount()).toBe(1);
   });
 
+  it("surfaces the underlying git stderr in the final DubError after retry exhaustion (cause is read, not just retry's wrapper message)", async () => {
+    mockExeca
+      .mockRejectedValueOnce(noTrackedShaError())
+      .mockRejectedValue(
+        gitError('fatal: unable to access: connection reset by peer'),
+      );
+
+    let caught: DubError | null = null;
+    try {
+      await pushBranch('feat/a', '/repo');
+    } catch (err) {
+      caught = err as DubError;
+    }
+
+    expect(caught).toBeInstanceOf(DubError);
+    expect(caught?.message).toContain('connection reset by peer');
+    expect(pushCallCount()).toBe(4);
+  }, 10000);
+
   it('surfaces lease rejection as a DubError with dub-sync recovery hint', async () => {
     mockExeca
       .mockRejectedValueOnce(noTrackedShaError())

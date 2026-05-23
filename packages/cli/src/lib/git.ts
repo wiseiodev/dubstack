@@ -1148,9 +1148,12 @@ const REFUSE_DELETE_CURRENT_PATTERN = /refusing to delete the current branch/i;
 
 function readGitErrorOutput(error: unknown): string {
   const direct = readGitCommandOutput(error);
-  if (direct) return direct;
   const cause = (error as { cause?: unknown })?.cause;
-  return cause ? readGitCommandOutput(cause) : '';
+  if (!cause) return direct;
+  const causeOutput = readGitCommandOutput(cause);
+  if (!causeOutput) return direct;
+  if (!direct) return causeOutput;
+  return `${direct}\n${causeOutput}`;
 }
 
 function isFetchPermanentError(error: unknown): boolean {
