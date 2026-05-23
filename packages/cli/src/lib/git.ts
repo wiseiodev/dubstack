@@ -348,6 +348,82 @@ export async function getLastCommitMessage(
 }
 
 /**
+ * Returns the local ref path used to track the last SHA we successfully
+ * pushed to `origin/<branch>`. We maintain this ourselves rather than
+ * trusting `refs/remotes/origin/<branch>`, which can be silently updated
+ * by background fetches (IDEs, watchers) and defeat `--force-with-lease`.
+ */
+export function lastPushedRef(branch: string): string {
+  return `refs/dubstack/last-pushed/${branch}`;
+}
+
+/**
+ * Reads our locally-tracked last-pushed SHA for a branch, or null if we
+ * have never recorded one.
+ *
+ * `git rev-parse --verify --quiet` exits 1 when the ref is missing (the
+ * expected "no tracked SHA yet" case). Any other exit code signals a
+ * real failure (not a repo, lock contention, etc.) — we surface those as
+ * `DubError` so we don't silently degrade `pushBranch` to a bare lease.
+ *
+ * @throws {DubError} If git rev-parse fails for any reason other than
+ * the ref being missing.
+ */
+export async function readLastPushedSha(
+  branch: string,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-parse', '--verify', '--quiet', lastPushedRef(branch)],
+      { cwd },
+    );
+    const sha = stdout.trim();
+    return sha || null;
+  } catch (error) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    if (exitCode === 1) return null;
+    throw new DubError(
+      formatGitFailure(
+        `Failed to read last-pushed ref for '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git rev-parse --verify ${lastPushedRef(branch)}' manually to inspect the underlying error.`,
+        `Run 'git status' to confirm the repository is in a healthy state.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Writes our locally-tracked last-pushed SHA for a branch. Only `dub submit`
+ * and `dub sync` should update this ref; never background processes.
+ * @throws {DubError} If the ref update fails.
+ */
+export async function writeLastPushedSha(
+  branch: string,
+  sha: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['update-ref', lastPushedRef(branch), sha], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to record last-pushed SHA for '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git update-ref ${lastPushedRef(branch)} ${sha}' manually to inspect the underlying error.`,
+        `Run 'dub sync' to reconcile state before the next push.`,
+      ],
+    );
+  }
+}
+
+/**
  * Options accepted by {@link pushBranch}.
  */
 export interface PushBranchOptions {
@@ -360,47 +436,75 @@ export interface PushBranchOptions {
 }
 
 /**
- * Pushes a branch to origin with `--force-with-lease`. Retries transient
- * failures via {@link retry} (up to 4 attempts) and short-circuits on
- * permanent errors: authentication failure, missing repository, refusal to
- * delete the current branch, and `--force-with-lease` rejection (stale info).
- * Lease rejection surfaces as a `DubError` whose recovery hint points at
- * `dub sync` so callers can refresh remote tracking before retrying.
+ * Pushes a branch to origin with `--force-with-lease`, scoped to our
+ * locally-tracked last-pushed SHA (`refs/dubstack/last-pushed/<branch>`).
  *
- * @throws {DubError} If the push fails (either permanently or after exhausting retries).
+ * Using the tracked ref instead of git's default lease target avoids the
+ * race where a background fetch updates `refs/remotes/origin/<branch>`
+ * and silently makes the lease succeed against stale-on-disk state, which
+ * would let us overwrite work pushed by a teammate.
+ *
+ * The push itself is wrapped in {@link retry} (up to 4 attempts) so
+ * transient network blips don't abort long sync runs. Authentication
+ * failures, missing repositories, refusal to delete the current branch,
+ * and lease rejection short-circuit immediately. Lease rejection surfaces
+ * as a `DubError` whose recovery hint points at `dub sync`.
+ *
+ * On success, updates the tracked ref to the freshly-pushed SHA.
+ *
+ * On a first push (no tracked SHA recorded yet), falls back to bare
+ * `--force-with-lease`. Race protection kicks in for all subsequent pushes
+ * once the tracking ref is established.
+ *
+ * @throws {DubError} If the push fails (permanently or after exhausting retries).
  */
 export async function pushBranch(
   branch: string,
   cwd: string,
   options: PushBranchOptions = {},
 ): Promise<void> {
+  const trackedSha = await readLastPushedSha(branch, cwd);
+  const leaseArg = trackedSha
+    ? `--force-with-lease=refs/heads/${branch}:${trackedSha}`
+    : '--force-with-lease';
+
   try {
     await retry(
-      () =>
-        execa('git', ['push', '--force-with-lease', 'origin', branch], {
-          cwd,
-        }),
+      () => execa('git', ['push', leaseArg, 'origin', branch], { cwd }),
       {
         isPermanent: isPushPermanentError,
         onRetry: options.onRetry,
       },
     );
   } catch (error) {
-    const output = readGitErrorOutput(error);
-    if (isLeaseRejectionOutput(output)) {
+    const details = readGitErrorOutput(error);
+    if (isLeaseRejectionError(details)) {
       throw new DubError(
-        `Failed to push '${branch}': remote moved (force-with-lease rejected).`,
+        formatGitFailure(
+          `Push of '${branch}' refused: remote has updates not reflected in our last-pushed ref.`,
+          details,
+        ),
         [
-          `Run 'dub sync' to refresh remote tracking, then retry the push.`,
-          `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
+          `Run 'dub sync' to reconcile remote updates, then retry 'dub submit'.`,
+          `Run 'git fetch origin ${branch}' and inspect 'origin/${branch}' to see the third-party changes.`,
         ],
       );
     }
-    throw new DubError(`Failed to push '${branch}'.`, [
-      `Run 'dub sync' to reconcile remote updates, then retry the push.`,
-      `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
-    ]);
+    throw new DubError(
+      formatGitFailure(`Failed to push '${branch}'.`, details),
+      [
+        `Run 'dub sync' to reconcile remote updates, then retry the push.`,
+        `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
+      ],
+    );
   }
+
+  const newSha = await getBranchTip(branch, cwd);
+  await writeLastPushedSha(branch, newSha, cwd);
+}
+
+function isLeaseRejectionError(output: string): boolean {
+  return output.toLowerCase().includes('stale info');
 }
 
 /**
@@ -1041,17 +1145,12 @@ export async function rebaseBranchOntoRef(
 const AUTH_FAILURE_PATTERN = /fatal:\s*authentication failed/i;
 const REPO_NOT_FOUND_PATTERN = /repository not found/i;
 const REFUSE_DELETE_CURRENT_PATTERN = /refusing to delete the current branch/i;
-const LEASE_REJECTION_PATTERN = /stale info/i;
 
 function readGitErrorOutput(error: unknown): string {
   const direct = readGitCommandOutput(error);
   if (direct) return direct;
   const cause = (error as { cause?: unknown })?.cause;
   return cause ? readGitCommandOutput(cause) : '';
-}
-
-function isLeaseRejectionOutput(output: string): boolean {
-  return LEASE_REJECTION_PATTERN.test(output);
 }
 
 function isFetchPermanentError(error: unknown): boolean {
@@ -1069,7 +1168,7 @@ function isPushPermanentError(error: unknown): boolean {
     AUTH_FAILURE_PATTERN.test(output) ||
     REPO_NOT_FOUND_PATTERN.test(output) ||
     REFUSE_DELETE_CURRENT_PATTERN.test(output) ||
-    LEASE_REJECTION_PATTERN.test(output)
+    isLeaseRejectionError(output)
   );
 }
 

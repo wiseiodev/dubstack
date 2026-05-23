@@ -33,6 +33,21 @@ function gitError(
   return err;
 }
 
+/**
+ * `readLastPushedSha` exits 1 ("ref missing") for branches we haven't
+ * pushed before — that's the simplest setup for these tests since it
+ * makes `pushBranch` fall back to bare `--force-with-lease`.
+ */
+function noTrackedShaError(): Error & { exitCode: number; stderr: string } {
+  return gitError('', 1);
+}
+
+function pushCallCount(): number {
+  return mockExeca.mock.calls.filter(
+    (call) => Array.isArray(call[1]) && call[1][0] === 'push',
+  ).length;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -98,51 +113,64 @@ describe('fetchBranches (retry)', () => {
 describe('pushBranch (retry)', () => {
   it('retries a transient failure and succeeds on the next attempt', async () => {
     mockExeca
+      .mockRejectedValueOnce(noTrackedShaError()) // readLastPushedSha
       .mockRejectedValueOnce(
         gitError('fatal: unable to access: connection reset'),
-      )
-      .mockResolvedValueOnce({ stdout: '' });
+      ) // push attempt 1
+      .mockResolvedValueOnce({ stdout: '' }) // push attempt 2 (success)
+      .mockResolvedValueOnce({ stdout: 'abc123\n' }) // getBranchTip
+      .mockResolvedValueOnce({ stdout: '' }); // writeLastPushedSha
     const onRetry = vi.fn();
 
     await expect(
       pushBranch('feat/a', '/repo', { onRetry }),
     ).resolves.toBeUndefined();
 
-    expect(mockExeca).toHaveBeenCalledTimes(2);
+    expect(pushCallCount()).toBe(2);
     expect(onRetry).toHaveBeenCalledWith(2, expect.any(Error));
   });
 
   it('throws immediately on authentication failure', async () => {
-    mockExeca.mockRejectedValueOnce(gitError('fatal: Authentication failed'));
+    mockExeca
+      .mockRejectedValueOnce(noTrackedShaError())
+      .mockRejectedValueOnce(gitError('fatal: Authentication failed'));
 
     await expect(pushBranch('feat/a', '/repo')).rejects.toThrow(DubError);
-    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(pushCallCount()).toBe(1);
   });
 
   it('throws immediately on "Repository not found"', async () => {
-    mockExeca.mockRejectedValueOnce(
-      gitError('fatal: remote error: Repository not found'),
-    );
+    mockExeca
+      .mockRejectedValueOnce(noTrackedShaError())
+      .mockRejectedValueOnce(
+        gitError('fatal: remote error: Repository not found'),
+      );
 
     await expect(pushBranch('feat/a', '/repo')).rejects.toThrow(DubError);
-    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(pushCallCount()).toBe(1);
   });
 
   it('throws immediately when refusing to delete the current branch', async () => {
-    mockExeca.mockRejectedValueOnce(
-      gitError('fatal: refusing to delete the current branch: refs/heads/main'),
-    );
+    mockExeca
+      .mockRejectedValueOnce(noTrackedShaError())
+      .mockRejectedValueOnce(
+        gitError(
+          'fatal: refusing to delete the current branch: refs/heads/main',
+        ),
+      );
 
     await expect(pushBranch('feat/a', '/repo')).rejects.toThrow(DubError);
-    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(pushCallCount()).toBe(1);
   });
 
   it('surfaces lease rejection as a DubError with dub-sync recovery hint', async () => {
-    mockExeca.mockRejectedValueOnce(
-      gitError(
-        'To github.com:org/repo\n ! [rejected]   feat/a -> feat/a (stale info)\nerror: failed to push some refs',
-      ),
-    );
+    mockExeca
+      .mockRejectedValueOnce(noTrackedShaError())
+      .mockRejectedValueOnce(
+        gitError(
+          'To github.com:org/repo\n ! [rejected]   feat/a -> feat/a (stale info)\nerror: failed to push some refs',
+        ),
+      );
 
     let caught: DubError | null = null;
     try {
@@ -152,10 +180,10 @@ describe('pushBranch (retry)', () => {
     }
 
     expect(caught).toBeInstanceOf(DubError);
-    expect(caught?.message).toMatch(/force-with-lease rejected/);
+    expect(caught?.message).toMatch(/refused: remote has updates/);
     expect(caught?.recovery.some((hint) => hint.includes('dub sync'))).toBe(
       true,
     );
-    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(pushCallCount()).toBe(1);
   });
 });
