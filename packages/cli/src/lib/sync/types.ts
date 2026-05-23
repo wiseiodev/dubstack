@@ -4,6 +4,7 @@ export type BranchSyncStatus =
   | 'up-to-date'
   | 'updated-outside-dubstack-but-up-to-date'
   | 'unsubmitted'
+  | 'checked-out-elsewhere'
   | 'needs-remote-sync-safe'
   | 'needs-remote-sync'
   | 'reconcile-needed'
@@ -11,7 +12,8 @@ export type BranchSyncStatus =
   | 'remote-restacked'
   | 'squash-merged-with-trailing-commits'
   | 'non-conflicting-divergence'
-  | 'parent-merged-orphan';
+  | 'parent-merged-orphan'
+  | 'error';
 
 export type ReconcileSource =
   | 'submit'
@@ -58,9 +60,10 @@ export interface SyncOptions {
 export interface BranchSyncOutcome {
   branch: string;
   status: BranchSyncStatus;
-  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none';
+  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none' | 'error';
   message: string;
   reconcileSource?: ReconcileSource;
+  recovery?: string[];
 }
 
 export interface SyncResult {

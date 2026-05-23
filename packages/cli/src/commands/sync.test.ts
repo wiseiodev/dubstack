@@ -9,10 +9,15 @@ vi.mock('../lib/git.js', () => ({
   deleteBranch: vi.fn(),
   fastForwardBranchToRef: vi.fn(),
   fetchBranches: vi.fn(),
+  formatWorktreeCheckoutSkipMessage: vi.fn(
+    (branch: string, worktreePath: string, command = 'dub sync') =>
+      `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`${command}\` from that worktree to update it.`,
+  ),
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),
   hardResetBranchToRef: vi.fn(),
   isAncestor: vi.fn(),
+  listWorktreeCheckouts: vi.fn(),
   pruneRemote: vi.fn(),
   rebaseBranchOntoRef: vi.fn(),
   remoteBranchExists: vi.fn(),
@@ -60,6 +65,7 @@ import {
   getRefSha,
   hardResetBranchToRef,
   isAncestor,
+  listWorktreeCheckouts,
   pruneRemote,
   rebaseBranchOntoRef,
   remoteBranchExists,
@@ -104,6 +110,9 @@ const mockHardResetBranchToRef = hardResetBranchToRef as ReturnType<
   typeof vi.fn
 >;
 const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
+const mockListWorktreeCheckouts = listWorktreeCheckouts as ReturnType<
+  typeof vi.fn
+>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
 const mockRebaseBranchOntoRef = rebaseBranchOntoRef as ReturnType<typeof vi.fn>;
 const mockIsMergedByPatchId = isMergedByPatchId as ReturnType<typeof vi.fn>;
@@ -168,6 +177,7 @@ beforeEach(() => {
   mockHardResetBranchToRef.mockResolvedValue(undefined);
   mockRebaseBranchOntoRef.mockResolvedValue(false);
   mockIsMergedByPatchId.mockResolvedValue(true);
+  mockListWorktreeCheckouts.mockResolvedValue(new Map());
   mockCheckoutRemoteBranch.mockResolvedValue(undefined);
   mockCheckoutBranch.mockResolvedValue(undefined);
   mockDeleteBranch.mockResolvedValue(undefined);
@@ -223,6 +233,35 @@ describe('sync', () => {
     expect(result.fetched).toEqual(['main', 'feat/a']);
     expect(result.branches[0].status).toBe('up-to-date');
     expect(mockRestack).not.toHaveBeenCalled();
+  });
+
+  it('skips reconciliation for branches checked out in another worktree', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockListWorktreeCheckouts.mockResolvedValue(
+      new Map([['feat/a', '/repo-worktree']]),
+    );
+
+    const result = await sync('/repo', { interactive: false, restack: false });
+
+    expect(result.branches).toEqual([
+      {
+        branch: 'feat/a',
+        status: 'checked-out-elsewhere',
+        action: 'skipped',
+        message:
+          "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub sync` from that worktree to update it.",
+      },
+    ]);
+    expect(mockHardResetBranchToRef).not.toHaveBeenCalledWith(
+      'feat/a',
+      expect.any(String),
+      '/repo',
+    );
   });
 
   it('clears stale namespaced fetch refs and prunes remote once before trunk pull', async () => {
@@ -529,6 +568,35 @@ describe('sync', () => {
     expect(
       writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
     ).toBeUndefined();
+  });
+
+  it('skips auto-clean deletion for branches checked out in another worktree', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'MERGED',
+      baseRefName: 'main',
+    });
+    mockListWorktreeCheckouts.mockResolvedValue(
+      new Map([['feat/a', '/repo-worktree']]),
+    );
+
+    const result = await sync('/repo', {
+      interactive: false,
+      restack: false,
+    });
+
+    expect(mockDeleteBranch).not.toHaveBeenCalledWith('feat/a', '/repo');
+    expect(result.cleaned).toEqual([]);
+    expect(result.branches[0]?.status).toBe('checked-out-elsewhere');
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    expect(
+      writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
+    ).toBeTruthy();
   });
 
   it('warns when auto-cleaning a merged branch with dependent children', async () => {
@@ -1484,6 +1552,122 @@ describe('sync', () => {
       await sync('/repo', { interactive: false, restack: false });
 
       expect(mockGetBranchPrSyncInfo).toHaveBeenCalledWith('feat/a', '/repo');
+    });
+  });
+
+  describe('per-branch error isolation', () => {
+    it('continues processing other branches when one branch errors', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+          { name: 'feat/c', parent: 'main' },
+        ]),
+      );
+      // Drive every non-root branch into the 'needs-remote-sync-safe' path so
+      // each one calls hardResetBranchToRef where we can inject a per-branch
+      // failure.
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/b') {
+          throw new DubError(
+            "Failed to hard reset 'feat/b' to 'origin/feat/b'.\nfatal: simulated branch failure",
+            ['Re-run after the simulated outage clears.'],
+          );
+        }
+      });
+      mockSubmit.mockResolvedValue({
+        pushed: [],
+        created: [],
+        updated: [],
+        path: 'current',
+        dryRun: false,
+        fallbackApplied: false,
+      });
+
+      let captured: DubError | null = null;
+      try {
+        await sync('/repo', { interactive: false, all: true, restack: false });
+      } catch (err) {
+        captured = err as DubError;
+      }
+
+      expect(captured).toBeInstanceOf(DubError);
+      const finalState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(finalState).toBeDefined();
+
+      const errored = mockHardResetBranchToRef.mock.calls.map((c) => c[0]);
+      // Sync should have attempted all three non-root branches even after
+      // 'feat/b' failed.
+      expect(errored).toEqual(
+        expect.arrayContaining(['feat/a', 'feat/b', 'feat/c']),
+      );
+    });
+
+    it('captures per-branch errors into outcomes with action="error"', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/a') {
+          throw new DubError("Reset failed for 'feat/a'.", [
+            "Run 'dub doctor' to inspect the branch.",
+          ]);
+        }
+      });
+
+      let captured: DubError | null = null;
+      try {
+        await sync('/repo', { interactive: false, all: true, restack: false });
+      } catch (err) {
+        captured = err as DubError;
+      }
+
+      expect(captured).toBeInstanceOf(DubError);
+      expect(captured?.message).toContain('feat/a');
+      expect(captured?.message).toContain("Reset failed for 'feat/a'.");
+      expect(captured?.recovery.length).toBeGreaterThan(0);
+    });
+
+    it('exits non-zero (throws aggregate DubError) when any branch errored', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/a') {
+          throw new DubError("Reset failed for 'feat/a'.");
+        }
+      });
+
+      await expect(
+        sync('/repo', { interactive: false, all: true, restack: false }),
+      ).rejects.toThrow(/Sync completed with errors on 1 branch\(es\)/);
     });
   });
 });
