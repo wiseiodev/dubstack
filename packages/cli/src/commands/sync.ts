@@ -42,6 +42,7 @@ import {
 } from '../lib/state';
 import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
 import { buildCleanupPlan } from '../lib/sync/cleanup';
+import { partitionFreshBranches } from '../lib/sync/fresh';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
 import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
@@ -124,6 +125,7 @@ export async function sync(
     force?: boolean;
     all?: boolean;
     interactive?: boolean;
+    fresh?: boolean;
   } = {},
 ): Promise<SyncResult> {
   await ensureGhInstalled();
@@ -134,6 +136,7 @@ export async function sync(
     force: rawOptions.force ?? false,
     all: rawOptions.all ?? false,
     interactive: rawOptions.interactive ?? isInteractiveShell(),
+    fresh: rawOptions.fresh ?? false,
   };
 
   const state = await readState(cwd);
@@ -215,11 +218,24 @@ export async function sync(
     );
     await clearStaleNamespacedFetchRefs(allTrackedBranches, cwd);
 
+    const partition = partitionFreshBranches({
+      branches: stackBranches,
+      branchMap: stateBranchMap,
+      fresh: options.fresh,
+      now: Date.now(),
+    });
+    const freshSkipped = new Set(partition.canSkip);
+
     console.log('🌲 Fetching branches from remote...');
-    const toFetch = [...new Set([...roots, ...stackBranches])];
+    const toFetch = [...new Set([...roots, ...partition.mustFetch])];
     if (toFetch.length > 0) {
       await fetchBranches(toFetch, cwd);
       result.fetched = toFetch;
+    }
+    if (freshSkipped.size > 0) {
+      console.log(
+        `⚡ Reusing recent fetch for ${freshSkipped.size} branch(es) synced < 5min ago (use --fresh to refetch).`,
+      );
     }
 
     await pruneRemote('origin', cwd);
@@ -340,6 +356,25 @@ export async function sync(
       if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
         continue;
       if (recordWorktreeSkip(branch)) continue;
+
+      if (freshSkipped.has(branch)) {
+        // `pruneRemote` ran just above, so a branch deleted upstream since
+        // the last sync may have lost its `origin/<branch>` ref. Fall through
+        // to the normal classification path in that case so the user sees
+        // `missing-remote` instead of a misleading "reused cached state".
+        const remoteStillExists = await remoteBranchExists(branch, cwd);
+        if (remoteStillExists) {
+          const outcome: BranchSyncOutcome = {
+            branch,
+            status: 'fresh',
+            action: 'cached',
+            message: `⚡ '${branch}' synced recently — reused cached state (--fresh to refetch).`,
+          };
+          result.branches.push(outcome);
+          printBranchOutcome(outcome);
+          continue;
+        }
+      }
 
       try {
         const hasRemote = await remoteBranchExists(branch, cwd);
@@ -483,6 +518,10 @@ export async function sync(
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
+          await markBranchSynced(stateBranchMap, branch, localSha, cwd, {
+            source: 'sync-noop',
+            baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+          });
           continue;
         }
 
@@ -861,6 +900,10 @@ async function markBranchSynced(
     if (isAdoptingRemote) {
       entry.parent_revision = null;
     }
+    // Stamp the sync timestamp even when baseline metadata can't be
+    // resolved — the branch was still processed by sync, and the freshness
+    // cache must reflect that so the next run can skip its fetch.
+    entry.last_synced_at = new Date().toISOString();
     return;
   }
   const preservedSource =
