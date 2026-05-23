@@ -1535,4 +1535,120 @@ describe('sync', () => {
       expect(cached.map((b) => b.branch).sort()).toEqual(['feat/a', 'feat/b']);
     });
   });
+
+  describe('per-branch error isolation', () => {
+    it('continues processing other branches when one branch errors', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+          { name: 'feat/c', parent: 'main' },
+        ]),
+      );
+      // Drive every non-root branch into the 'needs-remote-sync-safe' path so
+      // each one calls hardResetBranchToRef where we can inject a per-branch
+      // failure.
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/b') {
+          throw new DubError(
+            "Failed to hard reset 'feat/b' to 'origin/feat/b'.\nfatal: simulated branch failure",
+            ['Re-run after the simulated outage clears.'],
+          );
+        }
+      });
+      mockSubmit.mockResolvedValue({
+        pushed: [],
+        created: [],
+        updated: [],
+        path: 'current',
+        dryRun: false,
+        fallbackApplied: false,
+      });
+
+      let captured: DubError | null = null;
+      try {
+        await sync('/repo', { interactive: false, all: true, restack: false });
+      } catch (err) {
+        captured = err as DubError;
+      }
+
+      expect(captured).toBeInstanceOf(DubError);
+      const finalState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(finalState).toBeDefined();
+
+      const errored = mockHardResetBranchToRef.mock.calls.map((c) => c[0]);
+      // Sync should have attempted all three non-root branches even after
+      // 'feat/b' failed.
+      expect(errored).toEqual(
+        expect.arrayContaining(['feat/a', 'feat/b', 'feat/c']),
+      );
+    });
+
+    it('captures per-branch errors into outcomes with action="error"', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/a') {
+          throw new DubError("Reset failed for 'feat/a'.", [
+            "Run 'dub doctor' to inspect the branch.",
+          ]);
+        }
+      });
+
+      let captured: DubError | null = null;
+      try {
+        await sync('/repo', { interactive: false, all: true, restack: false });
+      } catch (err) {
+        captured = err as DubError;
+      }
+
+      expect(captured).toBeInstanceOf(DubError);
+      expect(captured?.message).toContain('feat/a');
+      expect(captured?.message).toContain("Reset failed for 'feat/a'.");
+      expect(captured?.recovery.length).toBeGreaterThan(0);
+    });
+
+    it('exits non-zero (throws aggregate DubError) when any branch errored', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockImplementation(async (ref: string) =>
+        ref.startsWith('origin/') ? `${ref}-remote-sha` : `${ref}-local-sha`,
+      );
+      mockIsAncestor.mockImplementation(
+        async (a: string, _b: string) => !a.startsWith('origin/'),
+      );
+      mockHardResetBranchToRef.mockImplementation(async (branch: string) => {
+        if (branch === 'feat/a') {
+          throw new DubError("Reset failed for 'feat/a'.");
+        }
+      });
+
+      await expect(
+        sync('/repo', { interactive: false, all: true, restack: false }),
+      ).rejects.toThrow(/Sync completed with errors on 1 branch\(es\)/);
+    });
+  });
 });
