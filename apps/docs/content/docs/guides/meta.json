@@ -4,6 +4,7 @@
     "stacking-workflow",
     "conflict-resolution",
     "ai-assistant",
+    "mcp",
     "migration-from-graphite"
   ]
 }

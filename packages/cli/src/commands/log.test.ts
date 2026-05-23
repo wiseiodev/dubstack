@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { type DubState, initState, writeState } from '../lib/state';
-import { log } from './log';
+import { log, logJson } from './log';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -51,6 +51,59 @@ describe('log', () => {
     // Currently on feat/b
     const output = await log(dir);
     expect(output).toBe('(main)\n  └─ feat/a\n       └─ *feat/b (Current)*');
+  });
+
+  it('returns a JSON tree with the same branch metadata', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: 7,
+              pr_link: 'https://github.com/example/repo/pull/7',
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+
+    const output = await logJson(dir);
+    expect(output).toMatchObject({
+      currentBranch: 'feat/a',
+      stacks: [
+        {
+          id: 'stack-1',
+          root: {
+            name: 'main',
+            type: 'root',
+            current: false,
+            children: [
+              {
+                name: 'feat/a',
+                type: 'branch',
+                parent: 'main',
+                current: true,
+                exists: true,
+                prNumber: 7,
+              },
+            ],
+          },
+        },
+      ],
+    });
   });
 
   it('renders branching with correct connectors', async () => {

@@ -36,7 +36,8 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
-import { log } from './commands/log';
+import { log, logJson } from './commands/log';
+import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
@@ -250,6 +251,7 @@ program
   .option('-s, --stack', 'Only show the current stack')
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
+  .option('--json', 'Output the stack tree as JSON')
   .addHelpText(
     'after',
     `
@@ -257,7 +259,12 @@ Examples:
   $ dub log    Show the branch tree with current branch highlighted`,
   )
   .action(
-    async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+    async (options: {
+      stack?: boolean;
+      all?: boolean;
+      reverse?: boolean;
+      json?: boolean;
+    }) => {
       await printLog(process.cwd(), options);
     },
   );
@@ -268,8 +275,14 @@ program
   .option('-s, --stack', 'Only show the current stack')
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
+  .option('--json', 'Output the stack tree as JSON')
   .action(
-    async (options: { stack?: boolean; all?: boolean; reverse?: boolean }) => {
+    async (options: {
+      stack?: boolean;
+      all?: boolean;
+      reverse?: boolean;
+      json?: boolean;
+    }) => {
       await printLog(process.cwd(), options);
     },
   );
@@ -1275,6 +1288,13 @@ program
   });
 
 program
+  .command('mcp')
+  .description('Start the DubStack read-only MCP server over stdio')
+  .action(async () => {
+    await mcp(process.cwd(), { version });
+  });
+
+program
   .command('modify')
   .alias('m')
   .description(
@@ -1399,8 +1419,18 @@ async function runFlow(options: {
 
 async function printLog(
   cwd: string,
-  options: { stack?: boolean; all?: boolean; reverse?: boolean } = {},
+  options: {
+    stack?: boolean;
+    all?: boolean;
+    reverse?: boolean;
+    json?: boolean;
+  } = {},
 ) {
+  if (options.json) {
+    console.log(JSON.stringify(await logJson(cwd, options), null, 2));
+    return;
+  }
+
   const output = await log(cwd, options);
   const styled = output
     .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
@@ -1521,6 +1551,7 @@ function beginHistoryCapture(): void {
   const captureArgs = historyArgsForCapture ?? process.argv.slice(2);
   const sanitizedArgs = sanitizeCommandArgs(captureArgs);
   if (sanitizedArgs.length === 0) return;
+  if (sanitizedArgs[0] === 'mcp') return;
 
   const output: string[] = [];
   let stdoutBuffer = '';
