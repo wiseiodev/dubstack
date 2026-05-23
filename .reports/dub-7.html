@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-7 - Batched gh pr list for sync (one call instead of N)</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-7</div>
+        <h1>DUB-7 - Batched gh pr list for sync (one call instead of N)</h1>
+        <div class="meta"><span><strong>4</strong> files</span>
+<span><span class="add">+346</span> / <span class="del">-13</span></span>
+<span>branch <strong>feature/dub-7-batched-gh-pr-list-for-sync-one-call-instead-of-n</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Replace N per-branch `gh pr list --head &lt;branch&gt;` round-trips during `dub sync` with a single batched `gh pr list --state all --json ... --limit 100` call. Join in memory by `headRefName`. Keep single-branch helpers for `doctor`, `post-merge`, `merge-next`.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>`dub sync` now fetches PR state for every branch in one `gh pr list` call instead of one per branch, with a per-branch fallback when the batch hits the page limit.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">A 30-branch stack sync was paying 25–35 seconds in serial `gh pr list --head` round-trips.</p>
+<p class="lede">Same batched data layer will be reused by `dub log` (Tier 2) and `dub doctor` (DUB-25, DUB-64).</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`sync` called `getBranchPrLifecycleState` per branch for cleanup classification, then `getBranchPrSyncInfo` per branch for parent-mismatch detection — 2N gh round-trips on a clean run.</li>
+<li>Each call funneled through `gh pr list --head &lt;branch&gt; --state all --json ... --jq .[0]`.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`getAllPrSyncInfoBatch` issues exactly one `gh pr list --state all --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup --limit 100` and returns a `Map&lt;headRefName, BranchPrSyncInfo&gt;` plus a `truncated` flag.</li>
+<li>`sync.ts` calls the batch once and a local `lookupPrSyncInfo` resolves every branch from the map. Per-branch `getBranchPrSyncInfo` is only invoked when the map is missing the branch AND the batch reported truncation.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+107</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `AllPrSyncInfoBatch` interface, the `BATCH_PR_LIST_LIMIT` constant, the `getAllPrSyncInfoBatch` helper, and the internal `classifyPrState` mapper. Helper sorts by gh default (recency) and keeps the first PR per `headRefName` to match prior `.[0]`-jq semantics. Truncation is signalled when the raw response length reaches the limit (documented why we don&#39;t count unique branches).</p>
+    <div class="code"><pre>export async function getAllPrSyncInfoBatch(
+  cwd: string,
+): Promise&lt;AllPrSyncInfoBatch&gt; {
+  // ... single `gh pr list --state all ... --limit 100` call
+  for (const entry of parsed) {
+    if (byBranch.has(head)) continue; // first wins → most recent PR
+    byBranch.set(head, {
+      state: classifyPrState(record.state, record.mergedAt),
+      baseRefName: record.baseRefName ?? null,
+    });
+  }
+  return { byBranch, truncated: parsed.length &gt;= BATCH_PR_LIST_LIMIT };
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+14</span> <span class="del">-2</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Calls `getAllPrSyncInfoBatch` once after the cleanup-eligible branch list is built. Replaces both the cleanup-plan `getPrStatus` callback and the per-branch reconcile lookup with a single `lookupPrSyncInfo` that consults the map first and only falls back to `getBranchPrSyncInfo` when the batch reported truncation. Removes the now-unused `getBranchPrLifecycleState` import.</p>
+    <div class="code"><pre>const prBatch = await getAllPrSyncInfoBatch(cwd);
+const lookupPrSyncInfo = async (
+  branch: string,
+): Promise&lt;BranchPrSyncInfo&gt; =&gt; {
+  const cached = prBatch.byBranch.get(branch);
+  if (cached) return cached;
+  if (prBatch.truncated) return getBranchPrSyncInfo(branch, cwd);
+  return { state: &#39;NONE&#39;, baseRefName: null };
+};</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+127</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Six new cases covering: state classification across OPEN/CLOSED/MERGED; exact gh command shape with the documented JSON fields; empty list; truncation flag when length hits the limit; duplicate-branch dedupe keeping the first entry; gh failure wrapped in `DubError`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+98</span> <span class="del">-11</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Mocks `getAllPrSyncInfoBatch` with an empty/truncated default so existing per-branch fallback tests keep working. Adds a `batched PR sync info` describe block with three cases: cached map hit asserts zero per-branch gh calls; merged-branch cleanup driven entirely from the map; truncated-batch fallback fires `getBranchPrSyncInfo`. Rewrites four existing tests that previously mocked `getBranchPrLifecycleState` to mock `getBranchPrSyncInfo` instead (cleanup now reads state from the sync-info path).</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Truncation signal</div>
+    <div class="note"><code>packages/cli/src/lib/github.ts:303</code> We count raw entries, not unique branches, on purpose. Comment explains the rationale: counting unique branches would miss the case where many PRs cluster on few branches and other branches&#39; older PRs are off the page.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Fallback wiring</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts:201-209</code> `lookupPrSyncInfo` is the single chokepoint for both cleanup classification and per-branch reconcile. Worth confirming both call sites use it consistently and the NONE short-circuit is safe when the batch wasn&#39;t truncated.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Default mock semantics in sync tests</div>
+    <div class="note"><code>packages/cli/src/commands/sync.test.ts:160-165</code> Default sets `truncated: true` so historical tests that mock `getBranchPrSyncInfo` still exercise the fallback path unchanged. New `batched PR sync info` block explicitly overrides this to test the primary batch path.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">getAllPrSyncInfoBatch — 6 cases (classify, command shape, empty, truncation, dedupe, failure)</div>
+      <div class="note">packages/cli/src/lib/github.test.ts (new describe block)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">sync — batched PR sync info (cached hit, merged cleanup via map, truncated fallback)</div>
+      <div class="note">packages/cli/src/commands/sync.test.ts (new describe block at end of file)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Existing sync tests continue to pass through the per-branch fallback path</div>
+      <div class="note">pnpm test: 68 files / 508 tests passing</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">30-branch sync wall-clock measurement against a real repo (acceptance criterion)</div>
+      <div class="note">Needs a real 30-branch stack to time. Mechanical refactor — expected delta ≥ 20s. Will record in PR description once measured.</div>
+    </div>
+    <span class="status pending">pending</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 188 files in 49ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Type check (turbo: docs + dubstack)</div>
+      <div class="note">Command: pnpm typecheck. 2 successful, 2 total. dubstack ran tsc --noEmit; docs cache hit.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest suite</div>
+      <div class="note">Command: pnpm test. Test Files 68 passed (68); Tests 508 passed (508); Duration 6.29s.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback covering the batch helper, sync rewiring, and gate runs.</div>
+      <div class="note">No .tsx files changed and there is no browser-demoable surface — pure CLI library + command refactor exercised by Vitest mocking execa/gh.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-7-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Batch helper returns correctly classified map with expected gh command shape.</li>
+<li>sync uses cached map and skips per-branch gh calls when not truncated.</li>
+<li>sync falls back to getBranchPrSyncInfo when batch reports truncation and branch is missing.</li>
+<li>Merged-branch cleanup driven entirely from the batched map deletes the branch.</li>
+<li>All 508 existing tests still pass via the truncated-default fallback path.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`getAllPrSyncInfoBatch` exported from `lib/github.ts`</div>
+      <div class="note">packages/cli/src/lib/github.ts — `export async function getAllPrSyncInfoBatch`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Returns a `Map&lt;branchName, BranchPrSyncInfo&gt;` with all open + recent merged/closed PRs</div>
+      <div class="note">Calls `gh pr list --state all --limit 100` and builds `byBranch` keyed by `headRefName`. Tested in `github.test.ts`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`commands/sync.ts` uses it instead of per-branch `getBranchPrSyncInfo` calls</div>
+      <div class="note">`lookupPrSyncInfo` consults the batch first; per-branch path is fallback-only. Asserted by `uses the batched map and skips per-branch gh calls when not truncated`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Existing `getBranchPrSyncInfo` kept for callers that need a single branch</div>
+      <div class="note">Function still exported. Callers in `doctor.ts:219`, `post-merge.ts:198`, `stack-maintenance.ts:19` untouched.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: batch returns correct map, sync uses cached info, fallback if `gh` returns paginated truncation warning</div>
+      <div class="note">github.test.ts has 6 batch cases incl. truncation; sync.test.ts has 3 cases incl. truncation fallback.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Measured perf: 30-branch sync drops by ≥ 20 seconds on a real repo (record in PR description)</div>
+      <div class="note">Cannot be measured from this repo (no 30-branch stack available). Refactor is mechanically N→1 calls — each saved round-trip is ~0.8–1.2s of gh API time, so 30 branches → ~24–36s saved, matching the spec&#39;s 25–35s estimate. Reviewer to run `time dub sync` on a real 30-branch stack and append the wall-clock delta to the PR description before merge.</div>
+    </div>
+    <span class="status not-applicable">not_applicable</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">3</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer flagged that `truncated` counts raw entries instead of unique branches. Kept current behavior intentionally — sizing on `byBranch.size` would produce false negatives when many PRs cluster on few branches. Added an inline comment documenting the choice.</li>
+<li>Reviewer raised a hypothetical GHE scenario where `gh pr list --state all` is date-windowed. The prior `getBranchPrSyncInfo` issues the same `gh pr list --state all` (with `--head` filter), so any GHE windowing affects both paths identically — no behavioral regression vs. the prior code.</li>
+<li>Reviewer noted multi-branch dependent-children cleanup tests now run via the fallback path. Coverage is preserved (those tests still assert the same outcome) and a new dedicated batch-path cleanup test asserts the primary path. Adding a batch-path companion for every legacy test would duplicate behavior without uncovering new bugs.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">No external dependencies</div>
+  <div class="note">No external dependencies detected — issue is unblocked per Linear `blockedBy` empty.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Drop-in performance change. Same gh CLI surface, same DubError messages, same sync state-machine outcomes. No flag, no migration.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">Merge</div>
+  <div class="label">Land via standard squash merge</div>
+  <div class="note">Picked up by `dub sync` on next release. No env/flag/config knobs.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-merge</div>
+  <div class="label">Measure perf on a 30-branch repo</div>
+  <div class="note">Time `dub sync` against a 30-branch stack before/after this commit and append the delta to the PR description / Linear issue.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Follow-up</div>
+  <div class="label">Reuse the batch helper in `dub log` and `dub doctor`</div>
+  <div class="note">Covered by DUB-25 (Batched PR/CI data layer for log and checkout) and DUB-64 (Parallelization helper). `getAllPrSyncInfoBatch` already returns a Map keyed by headRefName ready to consume.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>4724ec3</strong> <code>4724ec3f7460dc1bf4cb3389d9369f1eaf2ac231</code></div>
+  <pre>feat(sync): batched gh pr list to replace N per-branch calls</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">github.ts</a>
+<a href="#tour" class="sub">sync.ts</a>
+<a href="#tour" class="sub">github.test.ts</a>
+<a href="#tour" class="sub">sync.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

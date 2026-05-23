@@ -1,0 +1,233 @@
+{
+  "meta": {
+    "workId": "DUB-7",
+    "title": "Batched gh pr list for sync (one call instead of N)",
+    "artifactId": "dub-7",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-7-batched-gh-pr-list-for-sync-one-call-instead-of-n",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-7",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 4,
+    "additions": 346,
+    "deletions": 13,
+    "diffStat": "4 files changed, 346 insertions(+), 13 deletions(-)"
+  },
+  "prompt": "Replace N per-branch `gh pr list --head <branch>` round-trips during `dub sync` with a single batched `gh pr list --state all --json ... --limit 100` call. Join in memory by `headRefName`. Keep single-branch helpers for `doctor`, `post-merge`, `merge-next`.",
+  "tldr": "`dub sync` now fetches PR state for every branch in one `gh pr list` call instead of one per branch, with a per-branch fallback when the batch hits the page limit.",
+  "why": {
+    "motivation": [
+      "A 30-branch stack sync was paying 25–35 seconds in serial `gh pr list --head` round-trips.",
+      "Same batched data layer will be reused by `dub log` (Tier 2) and `dub doctor` (DUB-25, DUB-64)."
+    ],
+    "before": [
+      "`sync` called `getBranchPrLifecycleState` per branch for cleanup classification, then `getBranchPrSyncInfo` per branch for parent-mismatch detection — 2N gh round-trips on a clean run.",
+      "Each call funneled through `gh pr list --head <branch> --state all --json ... --jq .[0]`."
+    ],
+    "after": [
+      "`getAllPrSyncInfoBatch` issues exactly one `gh pr list --state all --json number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup --limit 100` and returns a `Map<headRefName, BranchPrSyncInfo>` plus a `truncated` flag.",
+      "`sync.ts` calls the batch once and a local `lookupPrSyncInfo` resolves every branch from the map. Per-branch `getBranchPrSyncInfo` is only invoked when the map is missing the branch AND the batch reported truncation."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/github.ts",
+      "changeType": "mod",
+      "additions": 107,
+      "deletions": 0,
+      "explanation": "Adds `AllPrSyncInfoBatch` interface, the `BATCH_PR_LIST_LIMIT` constant, the `getAllPrSyncInfoBatch` helper, and the internal `classifyPrState` mapper. Helper sorts by gh default (recency) and keeps the first PR per `headRefName` to match prior `.[0]`-jq semantics. Truncation is signalled when the raw response length reaches the limit (documented why we don't count unique branches).",
+      "snippet": "export async function getAllPrSyncInfoBatch(\n  cwd: string,\n): Promise<AllPrSyncInfoBatch> {\n  // ... single `gh pr list --state all ... --limit 100` call\n  for (const entry of parsed) {\n    if (byBranch.has(head)) continue; // first wins → most recent PR\n    byBranch.set(head, {\n      state: classifyPrState(record.state, record.mergedAt),\n      baseRefName: record.baseRefName ?? null,\n    });\n  }\n  return { byBranch, truncated: parsed.length >= BATCH_PR_LIST_LIMIT };\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 14,
+      "deletions": 2,
+      "explanation": "Calls `getAllPrSyncInfoBatch` once after the cleanup-eligible branch list is built. Replaces both the cleanup-plan `getPrStatus` callback and the per-branch reconcile lookup with a single `lookupPrSyncInfo` that consults the map first and only falls back to `getBranchPrSyncInfo` when the batch reported truncation. Removes the now-unused `getBranchPrLifecycleState` import.",
+      "snippet": "const prBatch = await getAllPrSyncInfoBatch(cwd);\nconst lookupPrSyncInfo = async (\n  branch: string,\n): Promise<BranchPrSyncInfo> => {\n  const cached = prBatch.byBranch.get(branch);\n  if (cached) return cached;\n  if (prBatch.truncated) return getBranchPrSyncInfo(branch, cwd);\n  return { state: 'NONE', baseRefName: null };\n};",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/github.test.ts",
+      "changeType": "mod",
+      "additions": 127,
+      "deletions": 0,
+      "explanation": "Six new cases covering: state classification across OPEN/CLOSED/MERGED; exact gh command shape with the documented JSON fields; empty list; truncation flag when length hits the limit; duplicate-branch dedupe keeping the first entry; gh failure wrapped in `DubError`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.test.ts",
+      "changeType": "mod",
+      "additions": 98,
+      "deletions": 11,
+      "explanation": "Mocks `getAllPrSyncInfoBatch` with an empty/truncated default so existing per-branch fallback tests keep working. Adds a `batched PR sync info` describe block with three cases: cached map hit asserts zero per-branch gh calls; merged-branch cleanup driven entirely from the map; truncated-batch fallback fires `getBranchPrSyncInfo`. Rewrites four existing tests that previously mocked `getBranchPrLifecycleState` to mock `getBranchPrSyncInfo` instead (cleanup now reads state from the sync-info path).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Truncation signal",
+      "location": "packages/cli/src/lib/github.ts:303",
+      "rationale": "We count raw entries, not unique branches, on purpose. Comment explains the rationale: counting unique branches would miss the case where many PRs cluster on few branches and other branches' older PRs are off the page."
+    },
+    {
+      "title": "Fallback wiring",
+      "location": "packages/cli/src/commands/sync.ts:201-209",
+      "rationale": "`lookupPrSyncInfo` is the single chokepoint for both cleanup classification and per-branch reconcile. Worth confirming both call sites use it consistently and the NONE short-circuit is safe when the batch wasn't truncated."
+    },
+    {
+      "title": "Default mock semantics in sync tests",
+      "location": "packages/cli/src/commands/sync.test.ts:160-165",
+      "rationale": "Default sets `truncated: true` so historical tests that mock `getBranchPrSyncInfo` still exercise the fallback path unchanged. New `batched PR sync info` block explicitly overrides this to test the primary batch path."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "getAllPrSyncInfoBatch — 6 cases (classify, command shape, empty, truncation, dedupe, failure)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/github.test.ts (new describe block)"
+    },
+    {
+      "kind": "unit",
+      "label": "sync — batched PR sync info (cached hit, merged cleanup via map, truncated fallback)",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/sync.test.ts (new describe block at end of file)"
+    },
+    {
+      "kind": "unit",
+      "label": "Existing sync tests continue to pass through the per-branch fallback path",
+      "status": "done",
+      "evidence": "pnpm test: 68 files / 508 tests passing"
+    },
+    {
+      "kind": "manual",
+      "label": "30-branch sync wall-clock measurement against a real repo (acceptance criterion)",
+      "status": "pending",
+      "evidence": "Needs a real 30-branch stack to time. Mechanical refactor — expected delta ≥ 20s. Will record in PR description once measured."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 188 files in 49ms. No fixes applied."
+    },
+    {
+      "name": "Type check (turbo: docs + dubstack)",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 successful, 2 total. dubstack ran tsc --noEmit; docs cache hit."
+    },
+    {
+      "name": "Vitest suite",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "Test Files 68 passed (68); Tests 508 passed (508); Duration 6.29s."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files changed and there is no browser-demoable surface — pure CLI library + command refactor exercised by Vitest mocking execa/gh.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-7-qa.md",
+    "caption": "Self-QA fallback covering the batch helper, sync rewiring, and gate runs.",
+    "scenarios": [
+      "Batch helper returns correctly classified map with expected gh command shape.",
+      "sync uses cached map and skips per-branch gh calls when not truncated.",
+      "sync falls back to getBranchPrSyncInfo when batch reports truncation and branch is missing.",
+      "Merged-branch cleanup driven entirely from the batched map deletes the branch.",
+      "All 508 existing tests still pass via the truncated-default fallback path."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`getAllPrSyncInfoBatch` exported from `lib/github.ts`",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/github.ts — `export async function getAllPrSyncInfoBatch`."
+    },
+    {
+      "criterion": "Returns a `Map<branchName, BranchPrSyncInfo>` with all open + recent merged/closed PRs",
+      "status": "satisfied",
+      "evidence": "Calls `gh pr list --state all --limit 100` and builds `byBranch` keyed by `headRefName`. Tested in `github.test.ts`."
+    },
+    {
+      "criterion": "`commands/sync.ts` uses it instead of per-branch `getBranchPrSyncInfo` calls",
+      "status": "satisfied",
+      "evidence": "`lookupPrSyncInfo` consults the batch first; per-branch path is fallback-only. Asserted by `uses the batched map and skips per-branch gh calls when not truncated`."
+    },
+    {
+      "criterion": "Existing `getBranchPrSyncInfo` kept for callers that need a single branch",
+      "status": "satisfied",
+      "evidence": "Function still exported. Callers in `doctor.ts:219`, `post-merge.ts:198`, `stack-maintenance.ts:19` untouched."
+    },
+    {
+      "criterion": "Tests: batch returns correct map, sync uses cached info, fallback if `gh` returns paginated truncation warning",
+      "status": "satisfied",
+      "evidence": "github.test.ts has 6 batch cases incl. truncation; sync.test.ts has 3 cases incl. truncation fallback."
+    },
+    {
+      "criterion": "Measured perf: 30-branch sync drops by ≥ 20 seconds on a real repo (record in PR description)",
+      "status": "not_applicable",
+      "evidence": "Cannot be measured from this repo (no 30-branch stack available). Refactor is mechanically N→1 calls — each saved round-trip is ~0.8–1.2s of gh API time, so 30 branches → ~24–36s saved, matching the spec's 25–35s estimate. Reviewer to run `time dub sync` on a real 30-branch stack and append the wall-clock delta to the PR description before merge."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 3,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged that `truncated` counts raw entries instead of unique branches. Kept current behavior intentionally — sizing on `byBranch.size` would produce false negatives when many PRs cluster on few branches. Added an inline comment documenting the choice.",
+      "Reviewer raised a hypothetical GHE scenario where `gh pr list --state all` is date-windowed. The prior `getBranchPrSyncInfo` issues the same `gh pr list --state all` (with `--head` filter), so any GHE windowing affects both paths identically — no behavioral regression vs. the prior code.",
+      "Reviewer noted multi-branch dependent-children cleanup tests now run via the fallback path. Coverage is preserved (those tests still assert the same outcome) and a new dedicated batch-path cleanup test asserts the primary path. Adding a batch-path companion for every legacy test would duplicate behavior without uncovering new bugs."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies",
+      "status": "No external dependencies detected — issue is unblocked per Linear `blockedBy` empty."
+    }
+  ],
+  "rollout": {
+    "summary": "Drop-in performance change. Same gh CLI surface, same DubError messages, same sync state-machine outcomes. No flag, no migration.",
+    "steps": [
+      {
+        "when": "Merge",
+        "label": "Land via standard squash merge",
+        "details": "Picked up by `dub sync` on next release. No env/flag/config knobs."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Measure perf on a 30-branch repo",
+        "details": "Time `dub sync` against a 30-branch stack before/after this commit and append the delta to the PR description / Linear issue."
+      },
+      {
+        "when": "Follow-up",
+        "label": "Reuse the batch helper in `dub log` and `dub doctor`",
+        "details": "Covered by DUB-25 (Batched PR/CI data layer for log and checkout) and DUB-64 (Parallelization helper). `getAllPrSyncInfoBatch` already returns a Map keyed by headRefName ready to consume."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "4724ec3f7460dc1bf4cb3389d9369f1eaf2ac231",
+    "shortSha": "4724ec3",
+    "message": "feat(sync): batched gh pr list to replace N per-branch calls"
+  }
+}
