@@ -1551,6 +1551,7 @@ function beginHistoryCapture(): void {
   const captureArgs = historyArgsForCapture ?? process.argv.slice(2);
   const sanitizedArgs = sanitizeCommandArgs(captureArgs);
   if (sanitizedArgs.length === 0) return;
+  if (sanitizedArgs[0] === 'mcp') return;
 
   const output: string[] = [];
   let stdoutBuffer = '';

@@ -49,6 +49,17 @@ interface ToolCallResult {
 
 const PROTOCOL_VERSION = '2025-11-25';
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-11-25', '2025-06-18']);
+const MAX_HISTORY_ARGS_LENGTH = 500;
+
+const HISTORY_ARG_KEYS: Record<string, string[]> = {
+  'dubstack.log': ['stack', 'all', 'reverse'],
+  'dubstack.doctor': ['all', 'fetch'],
+  'dubstack.status': [],
+  'dubstack.parent': ['branch'],
+  'dubstack.children': ['branch'],
+  'dubstack.trunk': ['branch'],
+  'dubstack.history': ['limit'],
+};
 
 const EMPTY_SCHEMA = {
   type: 'object',
@@ -153,13 +164,15 @@ export async function mcp(
   const output = options.output ?? process.stdout;
   const serverVersion = options.version ?? '0.0.0';
   let buffer = '';
-  let queue = Promise.resolve();
+  let queue: Promise<void> = Promise.resolve();
 
   input.setEncoding('utf8');
 
   await new Promise<void>((resolve) => {
     const enqueue = (line: string) => {
-      queue = queue.then(() => handleLine(line, cwd, output, serverVersion));
+      queue = queue
+        .catch(() => undefined)
+        .then(() => handleLineSafely(line, cwd, output, serverVersion));
     };
 
     input.on('data', (chunk: string) => {
@@ -176,9 +189,27 @@ export async function mcp(
       if (buffer.trim().length > 0) {
         enqueue(buffer);
       }
-      void queue.then(resolve);
+      void queue.then(resolve, resolve);
     });
   });
+}
+
+async function handleLineSafely(
+  line: string,
+  cwd: string,
+  output: Writable,
+  serverVersion: string,
+): Promise<void> {
+  try {
+    await handleLine(line, cwd, output, serverVersion);
+  } catch (error) {
+    const requestId = parseRequestId(line);
+    const message = error instanceof Error ? error.message : String(error);
+    safeWriteMessage(
+      output,
+      jsonRpcError(requestId, -32603, `Internal error: ${message}`),
+    );
+  }
 }
 
 async function handleLine(
@@ -406,11 +437,11 @@ async function appendMcpHistory(
 ): Promise<void> {
   const currentBranch = await getCurrentBranch(cwd).catch(() => undefined);
   const operation = await detectActiveOperation(cwd).catch(() => undefined);
-  const argsText = JSON.stringify(args);
+  const argsText = formatHistoryArgs(name, args);
   const command =
-    argsText === '{}'
+    argsText === null
       ? `dub mcp tools/call ${name}`
-      : `dub mcp tools/call ${name} ${redactSensitiveText(argsText)}`;
+      : `dub mcp tools/call ${name} ${argsText}`;
 
   await appendHistoryEntry(cwd, {
     timestamp: new Date(startedAt).toISOString(),
@@ -428,6 +459,30 @@ async function appendMcpHistory(
   });
 }
 
+function formatHistoryArgs(
+  name: string,
+  args: Record<string, unknown>,
+): string | null {
+  const keys = HISTORY_ARG_KEYS[name] ?? [];
+  const filteredArgs: Record<string, unknown> = {};
+
+  for (const key of keys) {
+    if (Object.hasOwn(args, key)) {
+      filteredArgs[key] = args[key];
+    }
+  }
+
+  const argsText = JSON.stringify(filteredArgs);
+  if (!argsText || argsText === '{}') return null;
+
+  const redactedArgs = redactSensitiveText(argsText);
+  if (redactedArgs.length <= MAX_HISTORY_ARGS_LENGTH) {
+    return redactedArgs;
+  }
+
+  return `${redactedArgs.slice(0, MAX_HISTORY_ARGS_LENGTH)}...`;
+}
+
 function jsonToolResult(value: unknown): ToolCallResult {
   const structuredContent = toJsonValue(value);
   return {
@@ -443,6 +498,26 @@ function jsonToolResult(value: unknown): ToolCallResult {
 
 function writeMessage(output: Writable, message: JsonValue): void {
   output.write(`${JSON.stringify(message)}\n`);
+}
+
+function safeWriteMessage(output: Writable, message: JsonValue): void {
+  try {
+    writeMessage(output, message);
+  } catch {
+    // Nothing useful remains to do if the client stream has already closed.
+  }
+}
+
+function parseRequestId(line: string): JsonRpcId {
+  try {
+    const message = JSON.parse(line.trim()) as unknown;
+    if (isJsonRpcRequest(message) && message.id !== undefined) {
+      return message.id ?? null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function jsonRpcResult(id: JsonRpcId, result: unknown): JsonValue {

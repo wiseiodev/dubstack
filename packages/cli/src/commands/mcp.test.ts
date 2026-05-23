@@ -17,8 +17,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  if (child && !child.killed) {
-    child.kill('SIGTERM');
+  if (child) {
+    await stopMcpChild(child);
   }
   child = null;
   await cleanup();
@@ -100,7 +100,10 @@ describe('mcp command', () => {
       method: 'tools/call',
       params: {
         name: 'dubstack.log',
-        arguments: {},
+        arguments: {
+          stack: true,
+          ignored: 'x'.repeat(1000),
+        },
       },
     });
     const logResponse = await server.nextJson();
@@ -133,11 +136,47 @@ describe('mcp command', () => {
     const entries = await readHistory(dir, { limit: 5 });
     expect(
       entries.some(
-        (entry) => entry.command === 'dub mcp tools/call dubstack.log',
+        (entry) =>
+          entry.command === 'dub mcp tools/call dubstack.log {"stack":true}',
       ),
     ).toBe(true);
+
+    await stopMcpChild(server.child);
+    child = null;
+
+    const postShutdownEntries = await readHistory(dir, { limit: 5 });
+    expect(
+      postShutdownEntries.some((entry) => entry.command === 'dub mcp'),
+    ).toBe(false);
   });
 });
+
+async function stopMcpChild(
+  process: ChildProcessWithoutNullStreams,
+): Promise<void> {
+  if (process.exitCode !== null || process.signalCode !== null) {
+    return;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const closed = new Promise<void>((resolve) => {
+    process.once('close', () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+      resolve();
+    });
+  });
+  const timedOut = new Promise<'timeout'>((resolve) => {
+    timeout = setTimeout(() => resolve('timeout'), 1000);
+  });
+
+  process.kill('SIGTERM');
+  if ((await Promise.race([closed, timedOut])) === 'timeout') {
+    process.kill('SIGKILL');
+    await closed;
+  }
+}
 
 function startMcpServer(cwd: string): {
   child: ChildProcessWithoutNullStreams;
