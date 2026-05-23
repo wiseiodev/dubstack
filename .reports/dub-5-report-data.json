@@ -1,0 +1,209 @@
+{
+  "meta": {
+    "workId": "DUB-5",
+    "title": "--force-with-lease for all pushes + remote-tracking SHA discipline",
+    "artifactId": "dub-5",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-5--force-with-lease-for-all-pushes-remote-tracking-sha",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-5",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 2,
+    "additions": 211,
+    "deletions": 10,
+    "diffStat": "packages/cli/src/lib/git.test.ts | 104 ++++++++++++++++++++++++\npackages/cli/src/lib/git.ts      | 117 +++++++++++++++++++++++++++++++++++----\n2 files changed, 211 insertions(+), 10 deletions(-)"
+  },
+  "prompt": "Switch all pushes from raw --force to --force-with-lease keyed on a locally-tracked SHA (refs/dubstack/last-pushed/<branch>) so that background fetches by IDEs can't defeat the lease and silently overwrite a teammate's work.",
+  "tldr": "pushBranch now uses --force-with-lease=refs/heads/<branch>:<trackedSha> against a locally-maintained ref under refs/dubstack/last-pushed/<branch>. The tracking ref is only written by pushBranch itself on a successful push, so background fetches can't move it. Lease rejections surface a DubError pointing the user at `dub sync`.",
+  "why": {
+    "motivation": [
+      "Without --force-with-lease, dub submit can silently overwrite teammate pushes during the same branch's lifecycle.",
+      "Bare --force-with-lease leases against refs/remotes/origin/<branch>, which IDE/tool background fetches update silently — defeating the lease (the 'Graphite gotcha').",
+      "Maintaining our own refs/dubstack/last-pushed/<branch> and leasing against it scopes the lease to state only dub touches."
+    ],
+    "before": [
+      "pushBranch ran `git push --force-with-lease origin <branch>` with no expect value.",
+      "Background `git fetch` from any tool could move refs/remotes/origin/<branch> to a third-party SHA, making the bare lease succeed against that updated tracking ref.",
+      "Push generic-errored with 'Failed to push' on rejection — no specific recovery for lease failures."
+    ],
+    "after": [
+      "pushBranch reads refs/dubstack/last-pushed/<branch> and pushes with --force-with-lease=refs/heads/<branch>:<trackedSha>.",
+      "On success it updates the tracking ref to the freshly-pushed SHA, so the next push is protected against any new third-party work.",
+      "Lease rejections raise DubError('Push of \\'<branch>\\' refused: remote has updates not reflected in our last-pushed ref.') with a recovery hint to run `dub sync`."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 107,
+      "deletions": 10,
+      "explanation": "Replaces the bare --force-with-lease pushBranch with one keyed on refs/dubstack/last-pushed/<branch>. Adds helpers lastPushedRef, readLastPushedSha, writeLastPushedSha, plus isLeaseRejectionError to distinguish lease failures from generic push errors.",
+      "snippet": "export async function pushBranch(branch: string, cwd: string): Promise<void> {\n  const trackedSha = await readLastPushedSha(branch, cwd);\n  const leaseArg = trackedSha\n    ? `--force-with-lease=refs/heads/${branch}:${trackedSha}`\n    : '--force-with-lease';\n\n  try {\n    await execa('git', ['push', leaseArg, 'origin', branch], { cwd });\n  } catch (error) {\n    const details = readGitCommandOutput(error);\n    if (isLeaseRejectionError(details)) {\n      throw new DubError(\n        formatGitFailure(\n          `Push of '${branch}' refused: remote has updates not reflected in our last-pushed ref.`,\n          details,\n        ),\n        [\n          `Run 'dub sync' to reconcile remote updates, then retry 'dub submit'.`,\n          `Run 'git fetch origin ${branch}' and inspect 'origin/${branch}' to see the third-party changes.`,\n        ],\n      );\n    }\n    throw new DubError(\n      formatGitFailure(`Failed to push '${branch}'.`, details),\n      [\n        `Run 'dub sync' to reconcile remote updates, then retry the push.`,\n        `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,\n      ],\n    );\n  }\n\n  const newSha = await getBranchTip(branch, cwd);\n  await writeLastPushedSha(branch, newSha, cwd);\n}",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/git.test.ts",
+      "changeType": "mod",
+      "additions": 104,
+      "deletions": 0,
+      "explanation": "Adds a pushBranch describe-block that runs real git pushes against a bare remote in a temp dir. Tests cover: first-push records the tracked SHA; second push succeeds when tracked SHA matches reality; concurrent third-party push triggers a lease error, surfaces the recovery hint, and leaves the tracked SHA unchanged so retry-after-sync works.",
+      "snippet": "it('refuses with a lease error when a third party pushed concurrently', async () => {\n  await pushBranch('feat/lease', dir);\n  const trackedSha = await readLastPushedSha('feat/lease', dir);\n  // ...clone bare remote into otherDir, third-party commit, push...\n  await gitInRepo(dir, ['fetch', 'origin', 'feat/lease']);\n\n  const err = await pushBranch('feat/lease', dir).catch((e) => e);\n  expect(err).toBeInstanceOf(DubError);\n  expect(err.message).toMatch(\n    /refused: remote has updates not reflected in our last-pushed ref/,\n  );\n  expect((err as DubError).recovery.join('\\n')).toMatch(/dub sync/);\n\n  expect(await readLastPushedSha('feat/lease', dir)).toBe(trackedSha);\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Lease argument shape",
+      "location": "packages/cli/src/lib/git.ts pushBranch",
+      "rationale": "Per git docs, --force-with-lease=<refname>:<expect> takes the remote-side ref path (refs/heads/<branch>) and the SHA we expect that ref to currently hold. Confirm refname is constructed correctly and expect comes from the dubstack tracking ref, not from refs/remotes/origin/."
+    },
+    {
+      "title": "Lease-vs-generic error detection",
+      "location": "packages/cli/src/lib/git.ts isLeaseRejectionError",
+      "rationale": "Detection matches 'stale info' (case-insensitive) in concatenated stderr/stdout. This is git's documented message for --force-with-lease rejection. Confirm this won't false-positive on non-lease errors and won't false-negative if git changes wording."
+    },
+    {
+      "title": "Tracking-ref atomicity on failure",
+      "location": "packages/cli/src/lib/git.ts pushBranch",
+      "rationale": "writeLastPushedSha is only called after a successful push. On lease failure the tracked SHA stays at the old value so retry-after-sync still leases correctly. Test 'refuses with a lease error...' asserts this."
+    },
+    {
+      "title": "First-push fallback gap",
+      "location": "packages/cli/src/lib/git.ts pushBranch trackedSha branch",
+      "rationale": "When refs/dubstack/last-pushed/<branch> does not exist (first push), code falls back to bare --force-with-lease, which leases against the stale-prone refs/remotes/origin/<branch>. Documented limitation; not in the issue's acceptance criteria. Confirm this is acceptable."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "pushBranch records last-pushed SHA on first push",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.test.ts — 'pushes and records the last-pushed SHA on first push'"
+    },
+    {
+      "kind": "unit",
+      "label": "Lease succeeds when our tracked SHA matches reality on remote (acceptance criterion)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.test.ts — 'lease succeeds when our tracked SHA matches reality on remote'"
+    },
+    {
+      "kind": "unit",
+      "label": "Concurrent third-party push refuses with lease error (acceptance criterion)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.test.ts — 'refuses with a lease error when a third party pushed concurrently'"
+    },
+    {
+      "kind": "unit",
+      "label": "lastPushedRef returns the expected ref path",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.test.ts — 'returns the dubstack ref path for a branch'"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "biome lint+format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 188 files in 49ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 packages clean (dubstack + docs)"
+    },
+    {
+      "name": "unit tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "68 test files / 503 tests passed (10.3s)"
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Pure git library change with no UI surface. Behavior is verified by deterministic unit tests that exercise real git push against a bare remote.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-5-qa.md",
+    "caption": "Fallback QA: 3 new unit tests exercise the lease behavior against a real bare git remote.",
+    "scenarios": [
+      "First push records the tracked SHA and matches the remote ref.",
+      "Lease succeeds when our tracked SHA still matches the remote (acceptance criterion).",
+      "Concurrent third-party push triggers a lease error with a `dub sync` recovery hint; the tracked SHA is left unchanged so retry-after-sync works (acceptance criterion)."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "pushBranch uses git push --force-with-lease=<refname>:<sha> with our tracked SHA",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/git.ts pushBranch constructs --force-with-lease=refs/heads/<branch>:<trackedSha> from readLastPushedSha."
+    },
+    {
+      "criterion": "After every successful push from dub submit and dub sync, write refs/dubstack/last-pushed/<branch> to the new SHA",
+      "status": "satisfied",
+      "evidence": "writeLastPushedSha is called at the tail of pushBranch on success. dub submit calls pushBranch directly; dub sync re-submits via submitRefreshedStacks → submit → pushBranch."
+    },
+    {
+      "criterion": "Lease failure surfaces a DubError with recovery hint to run dub sync and retry",
+      "status": "satisfied",
+      "evidence": "isLeaseRejectionError detects 'stale info'; pushBranch throws DubError('Push of <branch> refused: remote has updates not reflected in our last-pushed ref.') with recovery [\"Run 'dub sync' to reconcile remote updates, then retry 'dub submit'.\", ...]."
+    },
+    {
+      "criterion": "Unit test: simulate concurrent third-party push, verify our push refuses with lease error",
+      "status": "satisfied",
+      "evidence": "git.test.ts 'refuses with a lease error when a third party pushed concurrently' — clones bare remote, third-party pushes, asserts DubError with lease message and unchanged tracked SHA."
+    },
+    {
+      "criterion": "Unit test: lease succeeds when our tracked SHA matches reality",
+      "status": "satisfied",
+      "evidence": "git.test.ts 'lease succeeds when our tracked SHA matches reality on remote' — pushes twice without third-party interference, asserts no throw and tracked ref advances."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer initially flagged a critical that proved to be correct-by-design on re-analysis (lease refname semantics).",
+      "Minor: lease detection via 'stale info' substring is workable for current git but could be brittle across versions. Mitigated by the generic-push-error fallback also listing dub sync as a recovery step.",
+      "Minor (documented as follow-up): first-push fallback uses bare --force-with-lease, which is vulnerable to the same background-fetch race for the very first push only. Not in acceptance criteria; subsequent pushes are fully protected."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "External dependencies",
+      "status": "No external dependencies detected"
+    }
+  ],
+  "rollout": {
+    "summary": "No data migration. Tracking refs (refs/dubstack/last-pushed/<branch>) are created lazily on first successful push per branch. No user-visible config or workflow changes outside the new DubError message on lease failure.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship",
+        "details": "Squash-merge into main; semantic-release picks up the feat: commit and publishes a new minor version of the dubstack CLI."
+      },
+      {
+        "when": "After ship",
+        "label": "Monitor",
+        "details": "Watch user reports for unexpected 'Push of <branch> refused' errors. Expected legitimate trigger: a teammate pushed to the same branch between our last submit and this one."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "f647527dd25a4f378fda33460c9c2f76d46141c2",
+    "shortSha": "f647527",
+    "message": "feat(git): force-with-lease scoped to dubstack-tracked SHA\n\nSwitch pushBranch from a bare --force-with-lease to one keyed on our\nown refs/dubstack/last-pushed/<branch> tracking ref. The default lease\ntarget (refs/remotes/origin/<branch>) is updated by background fetches\nfrom IDEs and watchers, which silently defeats the lease and lets a\npush overwrite a teammate's work. The tracking ref is only written by\npushBranch itself (which is invoked by dub submit and, transitively,\ndub sync), so background tools can't move it.\n\nLease rejections now raise a DubError with a recovery hint to run\n'dub sync' and retry.\n\nCompletes DUB-5"
+  }
+}
