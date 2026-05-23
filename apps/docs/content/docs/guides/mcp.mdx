@@ -1,9 +1,9 @@
 ---
 title: MCP Server
-description: Connect MCP-aware agents to read-only DubStack stack tools.
+description: Connect MCP-aware agents to DubStack stack tools, gated by a per-repo security model.
 ---
 
-DubStack includes a stdio Model Context Protocol server so agents can inspect a tracked repository without shelling out to free-form commands.
+DubStack includes a stdio Model Context Protocol server so agents can inspect and (optionally) drive a tracked repository without shelling out to free-form commands.
 
 ## Install
 
@@ -21,7 +21,7 @@ Show me the current DubStack stack.
 
 The agent can call `dubstack.log` and receive structured JSON for the tracked stack tree.
 
-## Tools
+## Read-only tools
 
 | Tool | Description |
 |---|---|
@@ -33,17 +33,64 @@ The agent can call `dubstack.log` and receive structured JSON for the tracked st
 | `dubstack.trunk` | Returns the trunk/root branch for a branch |
 | `dubstack.history` | Returns recent Dub command history |
 
-All tools in this first MCP surface are read-only. Mutating tools are intentionally excluded.
+## Mutating tools
 
-## Audit History
+| Tool | Description |
+|---|---|
+| `dubstack.create` | Create a stacked branch (optionally with a commit message or `--ai`) |
+| `dubstack.modify` | Amend the current tip or commit new changes, then restack children |
+| `dubstack.submit` | Push the current path or stack and create/update GitHub PRs |
+| `dubstack.sync` | Sync tracked branches with the remote and reconcile divergence |
+| `dubstack.checkout` | Switch to a tracked branch (stack-aware) |
+| `dubstack.delete` | Delete a local branch and update DubStack metadata |
 
-Every MCP tool call is appended to `dub history`, for example:
+Mutating tools are gated by the configured **MCP mode** (see below).
+
+## Security model
+
+Choose how aggressive the agent's automation is for this repository:
+
+```bash
+dub config mcp-mode read-only    # only read tools work; mutating tools return a refusal payload
+dub config mcp-mode interactive  # mutating tools require explicit y/n confirmation in the dub mcp terminal (DEFAULT)
+dub config mcp-mode trusted      # mutating tools run without confirmation
+```
+
+Run `dub config mcp-mode` with no argument to inspect the current value.
+
+### read-only
+
+Mutating tools return a structured refusal that the agent can surface cleanly:
+
+```json
+{
+  "isError": true,
+  "content": [{
+    "type": "text",
+    "text": "dubstack.create refused: repo is in read-only MCP mode. Run `dub config mcp-mode interactive` to enable mutating tools."
+  }]
+}
+```
+
+### interactive (default)
+
+When the MCP server receives a mutating tool call, it opens the controlling terminal (`/dev/tty`) where `dub mcp` is running, prints a confirmation prompt, and waits for `y/n`. If no controlling terminal is available, the tool refuses with a clear message asking you to switch to `trusted` or `read-only` mode.
+
+This is the right default for workflows like Claude Code, where `dub mcp` runs in a known terminal pane.
+
+### trusted
+
+Mutating tools execute immediately without confirmation. Use this only when you fully trust the agent driving DubStack.
+
+## Audit history
+
+Every MCP tool invocation — successful, refused, or failed — is appended to `dub history`:
 
 ```bash
 dub history
 ```
 
-This gives teams a local audit trail for agent-driven stack inspection.
+This gives teams a local audit trail for agent-driven stack operations.
 
 ## Protocol
 

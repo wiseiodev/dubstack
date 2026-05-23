@@ -6,6 +6,7 @@ import {
   configAiDefaults,
   configAiModel,
   configAiProvider,
+  configMcpMode,
 } from './config';
 
 let dir: string;
@@ -149,6 +150,41 @@ describe('config ai-model', () => {
   it('throws when setting an empty model override', async () => {
     await expect(configAiModel(dir, 'gemini', '   ')).rejects.toThrow(
       'Model override cannot be empty.',
+    );
+  });
+});
+
+describe('config mcp-mode', () => {
+  it('returns the default interactive mode when no mode is set', async () => {
+    const result = await configMcpMode(dir);
+    expect(result).toEqual({ mode: 'interactive', changed: false });
+  });
+
+  it('writes read-only mode when set', async () => {
+    const result = await configMcpMode(dir, 'read-only');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'read-only', changed: true });
+    expect(config.mcpMode).toBe('read-only');
+  });
+
+  it('writes trusted mode when set', async () => {
+    const result = await configMcpMode(dir, 'trusted');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'trusted', changed: true });
+    expect(config.mcpMode).toBe('trusted');
+  });
+
+  it('reports unchanged when re-setting the same mode', async () => {
+    await configMcpMode(dir, 'trusted');
+    const result = await configMcpMode(dir, 'trusted');
+    expect(result).toEqual({ mode: 'trusted', changed: false });
+  });
+
+  it('throws for invalid modes', async () => {
+    await expect(configMcpMode(dir, 'wide-open')).rejects.toThrow(
+      "MCP mode must be one of 'read-only', 'interactive', or 'trusted'.",
     );
   });
 });

@@ -23,6 +23,7 @@ describe('readConfig', () => {
     const config = await readConfig(dir);
     expect(config).toEqual({
       aiAssistantEnabled: false,
+      mcpMode: 'interactive',
       ai: {
         defaults: {
           createMetadata: false,

@@ -1129,6 +1129,33 @@ program
       }),
   )
   .addCommand(
+    new Command('mcp-mode')
+      .argument(
+        '[mode]',
+        'Set to read-only/interactive/trusted (omit to inspect current value)',
+      )
+      .description(
+        'Manage the security model for mutating MCP tool calls (default: interactive)',
+      )
+      .action(async (mode?: string) => {
+        const { configMcpMode } = await import('./commands/config');
+        const result = await configMcpMode(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(`MCP mode is '${result.mode}' for this repository.`),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ MCP mode set to '${result.mode}'`));
+        } else {
+          console.log(chalk.yellow(`⚠ MCP mode is already '${result.mode}'`));
+        }
+      }),
+  )
+  .addCommand(
     new Command('ai-model')
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
@@ -1332,7 +1359,9 @@ program
 
 program
   .command('mcp')
-  .description('Start the DubStack read-only MCP server over stdio')
+  .description(
+    'Start the DubStack MCP server over stdio (mutating tools gated by `dub config mcp-mode`)',
+  )
   .action(async () => {
     await mcp(process.cwd(), { version });
   });
