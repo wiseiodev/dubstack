@@ -567,6 +567,11 @@ async function confirmMutatingTool(
     };
   } finally {
     rl.close();
+    // Destroy the streams to release their internal buffers and listeners;
+    // autoClose: false means destroy() leaves the underlying fd open for us
+    // to close explicitly below.
+    input.destroy();
+    output.destroy();
     try {
       fs.closeSync(fd);
     } catch {
@@ -695,14 +700,19 @@ async function mutatingToolResult<T>(
     captured.push(text);
   };
 
-  process.stdout.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
+  // Writable.write supports `(chunk, callback)` and `(chunk, encoding, callback)`.
+  // Invoke the trailing callback (if any) so callers relying on flush signal don't hang.
+  const captureShim = (chunk: string | Uint8Array, ...args: unknown[]) => {
     collect(chunk);
+    const callback = args.find((arg) => typeof arg === 'function') as
+      | ((error?: Error | null) => void)
+      | undefined;
+    callback?.(null);
     return true;
-  }) as unknown as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
-    collect(chunk);
-    return true;
-  }) as unknown as typeof process.stderr.write;
+  };
+
+  process.stdout.write = captureShim as unknown as typeof process.stdout.write;
+  process.stderr.write = captureShim as unknown as typeof process.stderr.write;
 
   try {
     const value = await fn();
