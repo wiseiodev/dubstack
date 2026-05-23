@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-19 - Range-diff empty-output bug guard + regression test</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-19</div>
+        <h1>DUB-19 - Range-diff empty-output bug guard + regression test</h1>
+        <div class="meta"><span><strong>3</strong> files</span>
+<span><span class="add">+197</span> / <span class="del">-7</span></span>
+<span>branch <strong>feature/dub-19-range-diff-empty-output-bug-guard-regression-test</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Defensive guard + regression test against the Graphite v1.7.18 range-diff bug class: never treat the empty output of a comparison command as &#39;they match.&#39; Audit every match-decision site in lib/sync/branch-status.ts, lib/sync/cleanup.ts, commands/sync.ts, and lib/git.ts, then add a positive-signal guard plus a regression test that fails without it.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>lib/git.ts:hasUniquePatchCommits collapsed empty `git cherry` stdout to &#39;no unique commits = equivalent&#39;, the same bug class Graphite hit in v1.7.18. The helper now requires SHA equality or `headRef`-reachable-from-`baseRef` before treating empty output as equivalence; otherwise it fails open (&#39;has unique&#39;) so callers do not silently drop local work. New regression test in git.cherry-empty.test.ts fails on the pre-guard implementation.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Audit the four named files for any place that decides &#39;matches / doesn&#39;t match&#39; from a git command&#39;s stdout.</p>
+<p class="lede">Eliminate the specific class of bug where an empty output is treated as &#39;equivalent&#39; without a positive confirming signal.</p>
+<p class="lede">Lock the behavior in with a regression test so the bug cannot reappear.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>hasUniquePatchCommits(baseRef, headRef) split cherry stdout, trimmed, and returned `lines.some(startsWith(&#39;+&#39;))`.</li>
+<li>Empty stdout → empty array → some() returns false → caller (restack.ts:204) interprets as &#39;no unique commits&#39; and SKIPS the rebase.</li>
+<li>If `git cherry` ever produced empty output for a non-equivalent pair (the Graphite bug pattern: obscure git config, commit-msg encoding edge case, etc.), local commits would be silently dropped without any visible signal.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>Non-empty cherry output: behavior unchanged — same `.some(startsWith(&#39;+&#39;))` decision.</li>
+<li>Empty cherry output: helper requires a positive equivalence signal — SHA equality OR `headRef` is an ancestor of `baseRef`. If either holds, it returns false (no unique). If neither holds, it returns true (has unique) so callers do not silently discard local work.</li>
+<li>Failure of the confirming check (e.g., one of the refs cannot be resolved) collapses to &#39;not confirmed&#39;, which again returns true — always the safe direction.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+37</span> <span class="del">-7</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Restructured hasUniquePatchCommits so that empty `git cherry` stdout goes through isPatchEquivalenceConfirmed (SHA equality + ancestor check) instead of collapsing to false. Non-empty path is unchanged. Added a JSDoc note tying the guard to the Graphite v1.7.18 bug class.</p>
+    <div class="code"><pre>if (lines.length === 0) {
+  return !(await isPatchEquivalenceConfirmed(baseRef, headRef, cwd));
+}
+return lines.some((line) =&gt; line.startsWith(&#39;+&#39;));</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.cherry-empty.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+108</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Vitest regression suite that mocks execa to simulate the three empty-output situations. Test 1 fails on the pre-guard implementation: empty cherry + differing SHAs + head not ancestor of base must return true. Tests 2 and 3 confirm the legitimate equivalence paths (same SHA, head ancestor of base) still return false.</p>
+    <div class="code"><pre>it(&#39;reports unique commits when cherry is empty but SHAs differ (guard)&#39;, async () =&gt; {
+  // empty cherry, distinct SHAs, head NOT an ancestor of base
+  await expect(hasUniquePatchCommits(&#39;main&#39;, &#39;feat&#39;, &#39;/repo&#39;)).resolves.toBe(true);
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-19-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+52</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback markdown — non-browser change so no Playwright video. Contains the per-site audit table for the four files in scope, the guard description, and the scenarios exercised by the automated suite.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Audit completeness</div>
+    <div class="note"><code>packages/cli/src/lib/sync/branch-status.ts, packages/cli/src/lib/sync/cleanup.ts, packages/cli/src/commands/sync.ts, packages/cli/src/lib/git.ts</code> The audit table in .reports/dub-19-qa.md walks every match-decision site in the four files named by the issue. hasUniquePatchCommits is the only one that consumed empty stdout as a match signal; the rest already use positive signals (SHA equality, ancestor exit code, rebase success). Confirm nothing was missed.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Direction of the ancestor check</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts:isPatchEquivalenceConfirmed</code> Empty `git cherry baseRef headRef` means `rev-list baseRef..headRef` is empty, which happens when headRef is reachable from baseRef (or head == base). The guard therefore calls `isAncestor(headRef, baseRef)`. Verify the direction matches the cherry semantics — flipping it would invert the guard.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Fail-open semantics</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts:hasUniquePatchCommits</code> When the confirming check throws (refs missing, transient git failure), the catch returns false → outer `!` flips to true → &#39;has unique&#39;. This is intentional: erroneously running a rebase is recoverable; silently skipping one is not. Confirm this matches the project&#39;s preferred error stance.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">Caller behavior change</div>
+    <div class="note"><code>packages/cli/src/commands/restack.ts:204</code> restack.ts:204 still treats `!hasUniquePatches` as &#39;skip the rebase&#39;. The guard now produces fewer false &#39;no unique&#39; results, so previously-skipped branches in the bug case will rebase instead. The happy paths (squash-merged children, truly unique commits) remain identical.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Empty cherry + differing SHAs + head not ancestor of base → has unique (guard)</div>
+      <div class="note">packages/cli/src/lib/git.cherry-empty.test.ts — fails without the guard, passes with it.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Empty cherry + identical SHAs → no unique</div>
+      <div class="note">packages/cli/src/lib/git.cherry-empty.test.ts — exercises the SHA-equality confirmation branch.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Empty cherry + head ancestor of base → no unique</div>
+      <div class="note">packages/cli/src/lib/git.cherry-empty.test.ts — exercises the isAncestor confirmation branch.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Happy paths in git.test.ts continue to pass</div>
+      <div class="note">Existing fixture tests &#39;returns true when a branch has unique work&#39; and &#39;returns false when squash-merged upstream&#39; produce non-empty cherry output and are unaffected by the guard.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lint</div>
+      <div class="note">Command: pnpm checks. biome check . — 222 files, no fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">typecheck</div>
+      <div class="note">Command: pnpm typecheck. tsc --noEmit across docs + dubstack — 0 errors.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">tests</div>
+      <div class="note">Command: pnpm test. vitest — 76 files, 642 tests pass (3 new for DUB-19).</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback markdown — audit table covering every match-decision site in the four files named by the issue, plus the regression scenarios exercised by the automated suite.</div>
+      <div class="note">Pure CLI library change inside packages/cli/src/lib/git.ts. No TSX or browser surface modified.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-19-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Empty cherry + SHAs differ + head not ancestor of base → guard returns has unique (regression).</li>
+<li>Empty cherry + same SHA → returns no unique (legitimate equivalence).</li>
+<li>Empty cherry + head ancestor of base → returns no unique (legitimate equivalence).</li>
+<li>Non-empty cherry output (squash-merged child, truly unique commits) → unchanged behavior, existing fixture tests still pass.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Audit complete; documented in PR description which &#39;match&#39; decisions were reviewed.</div>
+      <div class="note">Full audit table in .reports/dub-19-qa.md covering all 9 match-decision sites across the four files named by the issue.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Every match-decision site verified to require a positive signal beyond empty output.</div>
+      <div class="note">8 of 9 sites already used positive signals (SHA equality, ancestor exit code, rebase/FF success). The lone vulnerable site, hasUniquePatchCommits, now requires SHA equality or ancestor confirmation before trusting empty output.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">New regression test that fails without the guard and passes with it.</div>
+      <div class="note">packages/cli/src/lib/git.cherry-empty.test.ts — primary test asserts has-unique=true for empty cherry + differing SHAs, which the pre-guard implementation could not produce (empty array → some() === false).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">No behavior change for the happy path.</div>
+      <div class="note">Non-empty cherry output flows through the identical `.some(startsWith(&#39;+&#39;))` logic. All 642 existing tests pass.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Confirmed happy path unchanged: filtering empty lines from cherry stdout does not affect .some(startsWith(&#39;+&#39;)) because empty strings do not start with &#39;+&#39;.</li>
+<li>Confirmed isAncestor direction matches `git cherry baseRef headRef` semantics — empty output ⟺ headRef reachable from baseRef.</li>
+<li>Confirmed fail-open semantics: helper exceptions in the confirmation path collapse to &#39;not confirmed&#39; → &#39;has unique&#39;, which is the safe direction (rebase instead of silent skip).</li>
+<li>No other callers of hasUniquePatchCommits beyond restack.ts:204; behavior change there is from a false &#39;no unique&#39; to a correct &#39;has unique&#39;, which triggers a rebase that should have run.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-14 (sync status taxonomy + reconciliation source tags)</div>
+  <div class="note">merged in commit 3e15a44 prior to this branch; no runtime coupling beyond shared use of lib/git.ts.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Safe to merge once review approves. Pure additive guard inside a library helper; no migrations, flags, or staged rollout needed.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Ship</div>
+  <div class="note">Squash-merge into main. The guard activates immediately for every `dub sync` and `dub restack` invocation; the worst-case happy-path effect is one extra `git rev-parse` + `git merge-base --is-ancestor` only when `git cherry` returns empty stdout.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-merge</div>
+  <div class="label">Monitor</div>
+  <div class="note">If `dub restack` starts attempting rebases that previously silently skipped, that is the guard catching the bug case (or a fixture quirk) — investigate the affected branch, not the guard.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>9df8839</strong> <code>9df8839649191a832e8d8d19932b959a45c234ae</code></div>
+  <pre>fix(sync): guard hasUniquePatchCommits against empty-cherry false equivalence [DUB-19]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">git.cherry-empty.test.ts</a>
+<a href="#tour" class="sub">dub-19-qa.md</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
