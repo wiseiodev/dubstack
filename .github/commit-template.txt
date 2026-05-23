@@ -1,12 +1,21 @@
-# type(scope): short imperative summary (<=72 chars)
+# type(scope): short imperative summary (<=72 chars, lowercase subject)
 #
-# Body (optional):
+# Allowed types: build, chore, ci, docs, feat, fix, perf, refactor,
+#                revert, style, test
+#
+# Body (optional, separated from subject by a blank line):
 # - What changed
 # - Why it changed
 # - Any trade-offs or follow-ups
 #
-# Footer (optional):
-# - BREAKING CHANGE: <details>
-# - Closes #123
+# Footer (REQUIRED — separated from body by a blank line):
+# - Must include exactly one Linear magic-word line, e.g.:
+#     Completes DUB-1
+#     Fixes DUB-12, DUB-34
+#   Magic words: Close[s|d], Fix[es|ed], Resolve[s|d], Complete[s|d],
+#                Implement[s|ed], Ref[s], References, Part of, Contributes to
+# - Optional trailers (one per line): BREAKING CHANGE: <details>, Co-authored-by: ...
 
 type(scope): summary
+
+Completes DUB-

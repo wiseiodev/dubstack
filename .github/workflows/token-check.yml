@@ -41,7 +41,7 @@ jobs:
 
       - name: Create rotation issue
         if: steps.expiry.outputs.needs_rotation == 'true' || steps.token_check.outcome == 'failure'
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const existing = await github.rest.issues.listForRepo({

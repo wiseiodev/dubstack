@@ -1,7 +1,15 @@
+<!--
+PR title must follow conventional commit format with a lowercase subject:
+  type(scope): short imperative summary
+Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+Enforced by the `PR Title` workflow.
+-->
+
 ## Summary
 
 - What changed?
 - Why was this needed?
+- Linear issue: DUB-
 
 ## Changes
 

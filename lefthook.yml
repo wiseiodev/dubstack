@@ -1,0 +1,16 @@
+pre-commit:
+  commands:
+    biome:
+      run: pnpm lint:fix:staged {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm commitlint:edit {1}
+
+pre-push:
+  commands:
+    checks:
+      # The {all_files} token keeps `lefthook run pre-push` from skipping local verification.
+      run: "pnpm checks # {all_files}"

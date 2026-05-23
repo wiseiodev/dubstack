@@ -1,0 +1,40 @@
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Allowed conventional types — kept in sync with @commitlint/config-conventional.
+          types: |
+            build
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            revert
+            style
+            test
+          # Reject subjects that start with an uppercase letter. Matches the
+          # spirit of the local commit-msg hook, which lints commit subjects
+          # via @commitlint/config-conventional.
+          subjectPattern: ^(?![A-Z]).+$
+          subjectPatternError: |
+            The PR title subject "{subject}" must start with a lowercase letter.
+            Example: "feat: add foo" not "feat: Add foo".
+          headerPattern: '^(\w+)(?:\(([^)]+)\))?!?: (.+)$'
+          requireScope: false
+          wip: true
