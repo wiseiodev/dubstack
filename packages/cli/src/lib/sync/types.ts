@@ -19,8 +19,9 @@ export interface SyncOptions {
 export interface BranchSyncOutcome {
   branch: string;
   status: BranchSyncStatus;
-  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none';
+  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none' | 'error';
   message: string;
+  recovery?: string[];
 }
 
 export interface SyncResult {
