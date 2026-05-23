@@ -1,6 +1,7 @@
-import { execa } from 'execa';
+import { execa, type Options } from 'execa';
 import { openUrl } from './browser';
 import { DubError } from './errors';
+import { type RetryOptions, retry } from './retry';
 
 /** Details of a GitHub Pull Request. */
 export interface PrInfo {
@@ -36,13 +37,88 @@ export interface PrMergeStatus {
   mergeStateStatus: string | null;
 }
 
+let ghRetryOverrides: Partial<RetryOptions> = {};
+
+/**
+ * Test-only seam: overrides retry options applied to every `gh` call wrapped
+ * by {@link runGh}. Tests use this to disable backoff sleeps and jitter so
+ * retry behavior can be exercised without wall-clock waits.
+ */
+export function __setGhRetryOptionsForTesting(
+  opts: Partial<RetryOptions>,
+): void {
+  ghRetryOverrides = opts;
+}
+
+/**
+ * Classifies a `gh`-call error as permanent (do not retry). Covers HTTP
+ * 401/403/404, the GraphQL "could not resolve to a pull request" variants,
+ * `no pull requests found`, and `ENOENT` (gh binary missing).
+ *
+ * The bare `not found` substring is intentionally *not* matched here even
+ * though `isPrNotFoundError` accepts it — OS-level and DNS errors can
+ * include `not found` (e.g. `host not found`) and we want those to retry.
+ * GitHub's actual 404 responses carry an explicit `HTTP 404` which the
+ * regex above already catches.
+ */
+function isPermanentGhError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const normalized = message.toLowerCase();
+  if (/\b(401|403|404)\b/.test(message)) return true;
+  if (normalized.includes('could not resolve to a pull request')) return true;
+  if (normalized.includes('could not resolve to a pullrequest')) return true;
+  if (normalized.includes('no pull requests found')) return true;
+  if (normalized.includes('enoent')) return true;
+  return false;
+}
+
+/**
+ * Runs `gh` with retry + exponential backoff. Permanent errors short-circuit
+ * via {@link isPermanentGhError}; other errors retry up to the configured
+ * limit (default 4 attempts). Stdout/stderr are normalized to strings — the
+ * call sites that read stdout never pass binary encodings, and `stdio:
+ * 'inherit'` callers ignore the return value.
+ */
+async function runGh(
+  args: string[],
+  options: Options = {},
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await retry(() => execa('gh', args, options), {
+    isPermanent: isPermanentGhError,
+    ...ghRetryOverrides,
+  });
+  return {
+    stdout: typeof result.stdout === 'string' ? result.stdout : '',
+    stderr: typeof result.stderr === 'string' ? result.stderr : '',
+  };
+}
+
+/**
+ * Unwraps the original error from a {@link retry} exhaustion wrapper so
+ * downstream classifiers (e.g. {@link isPrNotFoundError}) and DubError
+ * messages reflect the underlying cause. Unwraps recursively because a
+ * nested gh call (e.g. createPr's idempotency check) can produce a
+ * wrapper-of-wrapper chain.
+ */
+function unwrapRetryError(err: unknown): unknown {
+  let current: unknown = err;
+  while (
+    current instanceof Error &&
+    current.cause !== undefined &&
+    current.message.startsWith('retry: giving up')
+  ) {
+    current = current.cause;
+  }
+  return current;
+}
+
 /**
  * Ensures the `gh` CLI is installed and available in PATH.
  * @throws {DubError} If `gh` is not found.
  */
 export async function ensureGhInstalled(): Promise<void> {
   try {
-    await execa('gh', ['--version']);
+    await runGh(['--version']);
   } catch {
     throw new DubError('gh CLI not found.', [
       'Install the GitHub CLI from https://cli.github.com.',
@@ -57,7 +133,7 @@ export async function ensureGhInstalled(): Promise<void> {
  */
 export async function checkGhAuth(): Promise<void> {
   try {
-    await execa('gh', ['auth', 'status']);
+    await runGh(['auth', 'status']);
   } catch {
     throw new DubError('Not authenticated with GitHub.', [
       "Run 'gh auth login' and sign in with the 'repo' scope.",
@@ -74,8 +150,7 @@ export async function getPr(
   branch: string,
   cwd: string,
 ): Promise<PrInfo | null> {
-  const { stdout } = await execa(
-    'gh',
+  const { stdout } = await runGh(
     [
       'pr',
       'list',
@@ -114,8 +189,7 @@ export async function getPrByNumber(
 ): Promise<PrInfo | null> {
   let stdout: string;
   try {
-    const result = await execa(
-      'gh',
+    const result = await runGh(
       [
         'pr',
         'view',
@@ -129,8 +203,9 @@ export async function getPrByNumber(
     );
     stdout = result.stdout;
   } catch (error) {
-    if (isPrNotFoundError(error)) return null;
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    if (isPrNotFoundError(root)) return null;
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`, [
       `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
       "Run 'gh auth status' to verify authentication, then retry.",
@@ -166,8 +241,7 @@ export async function getBranchPrSyncInfo(
   branch: string,
   cwd: string,
 ): Promise<BranchPrSyncInfo> {
-  const { stdout } = await execa(
-    'gh',
+  const { stdout } = await runGh(
     [
       'pr',
       'list',
@@ -239,8 +313,7 @@ export async function getAllPrSyncInfoBatch(
 ): Promise<AllPrSyncInfoBatch> {
   let stdout: string;
   try {
-    const result = await execa(
-      'gh',
+    const result = await runGh(
       [
         'pr',
         'list',
@@ -255,7 +328,8 @@ export async function getAllPrSyncInfoBatch(
     );
     stdout = result.stdout;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(`Failed to list PRs: ${message}`, [
       "Run 'gh pr list --state all' manually to inspect the failure.",
       "Run 'gh auth status' to verify authentication, then retry.",
@@ -326,15 +400,15 @@ export async function getPrStateByNumber(
 ): Promise<BranchPrLifecycleState> {
   let stdout: string;
   try {
-    const result = await execa(
-      'gh',
+    const result = await runGh(
       ['pr', 'view', String(prNumber), '--json', 'state,mergedAt', '--jq', '.'],
       { cwd },
     );
     stdout = result.stdout;
   } catch (error) {
-    if (isPrNotFoundError(error)) return 'NONE';
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    if (isPrNotFoundError(root)) return 'NONE';
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(
       `Failed to fetch PR state for #${prNumber}: ${message}`,
       [
@@ -371,8 +445,7 @@ export async function getPrMergeStatusByNumber(
 ): Promise<PrMergeStatus> {
   let stdout: string;
   try {
-    const result = await execa(
-      'gh',
+    const result = await runGh(
       [
         'pr',
         'view',
@@ -386,13 +459,14 @@ export async function getPrMergeStatusByNumber(
     );
     stdout = result.stdout;
   } catch (error) {
-    if (isPrNotFoundError(error)) {
+    const root = unwrapRetryError(error);
+    if (isPrNotFoundError(root)) {
       return {
         mergeable: null,
         mergeStateStatus: null,
       };
     }
-    const message = error instanceof Error ? error.message : String(error);
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(
       `Failed to fetch mergeability for PR #${prNumber}: ${message}`,
       [
@@ -444,6 +518,21 @@ function isPrNotFoundError(error: unknown): boolean {
  * Parses the PR number from the URL printed to stdout by `gh pr create`,
  * avoiding an extra API round-trip.
  *
+ * Idempotency guard: before each retry attempt, calls {@link getPr} for the
+ * head branch. If a PR with the intended `title` already exists, returns it
+ * instead of retrying — this prevents phantom duplicates when the first
+ * attempt succeeded on GitHub but the response was lost to a transient
+ * network error (e.g. 502).
+ *
+ * Note: this function does not route the `gh pr create` call through
+ * {@link runGh} because the outer `retry` already implements retry semantics
+ * with the idempotency hook between attempts. The same `ghRetryOverrides`
+ * are forwarded to the outer `retry` so the test seam still applies.
+ * The nested `getPr` call inside the idempotency check uses its own
+ * `runGh`-driven retry — under sustained network failure this can compound
+ * to up to `maxAttempts × (1 + maxAttempts)` `gh` calls before exhaustion,
+ * bounded by the configured `maxAttempts` and `maxMs` of the retry helper.
+ *
  * @param branch - Head branch
  * @param base - Base branch the PR merges into
  * @param title - PR title
@@ -456,27 +545,58 @@ export async function createPr(
   bodyFile: string,
   cwd: string,
 ): Promise<PrInfo> {
-  let stdout: string;
+  const args = [
+    'pr',
+    'create',
+    '--head',
+    branch,
+    '--base',
+    base,
+    '--title',
+    title,
+    '--body-file',
+    bodyFile,
+  ];
+
+  let attempt = 0;
   try {
-    const result = await execa(
-      'gh',
-      [
-        'pr',
-        'create',
-        '--head',
-        branch,
-        '--base',
-        base,
-        '--title',
-        title,
-        '--body-file',
-        bodyFile,
-      ],
-      { cwd },
+    return await retry(
+      async (): Promise<PrInfo> => {
+        attempt++;
+        if (attempt > 1) {
+          const existing = await getPr(branch, cwd);
+          if (existing && existing.title === title) {
+            return existing;
+          }
+        }
+        const { stdout } = await execa('gh', args, { cwd });
+        const url = stdout.trim();
+        const numberMatch = url.match(/\/pull\/(\d+)$/);
+        if (!numberMatch) {
+          throw new DubError(`Unexpected output from 'gh pr create': ${url}`, [
+            "Inspect the printed URL; if a PR was created, rerun 'dub submit' to refresh metadata.",
+            "Run 'gh --version' to verify the installed CLI version, then retry.",
+          ]);
+        }
+        return {
+          number: Number.parseInt(numberMatch[1], 10),
+          url,
+          title,
+          body: '',
+        };
+      },
+      {
+        // DubError thrown from inside the loop is a parsing/validation
+        // failure — never retry. Otherwise defer to the standard classifier.
+        isPermanent: (err) =>
+          err instanceof DubError || isPermanentGhError(err),
+        ...ghRetryOverrides,
+      },
     );
-    stdout = result.stdout;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof DubError) throw error;
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     if (message.includes('403') || message.includes('insufficient')) {
       throw new DubError('GitHub token lacks required permissions.', [
         "Run 'gh auth login' and re-select the 'repo' scope.",
@@ -488,22 +608,6 @@ export async function createPr(
       'Confirm the branch has been pushed to the remote, then retry.',
     ]);
   }
-
-  const url = stdout.trim();
-  const numberMatch = url.match(/\/pull\/(\d+)$/);
-  if (!numberMatch) {
-    throw new DubError(`Unexpected output from 'gh pr create': ${url}`, [
-      "Inspect the printed URL; if a PR was created, rerun 'dub submit' to refresh metadata.",
-      "Run 'gh --version' to verify the installed CLI version, then retry.",
-    ]);
-  }
-
-  return {
-    number: Number.parseInt(numberMatch[1], 10),
-    url,
-    title,
-    body: '',
-  };
 }
 
 /**
@@ -517,13 +621,12 @@ export async function updatePrBody(
   cwd: string,
 ): Promise<void> {
   try {
-    await execa(
-      'gh',
-      ['pr', 'edit', String(prNumber), '--body-file', bodyFile],
-      { cwd },
-    );
+    await runGh(['pr', 'edit', String(prNumber), '--body-file', bodyFile], {
+      cwd,
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     if (message.includes('403') || message.includes('insufficient')) {
       throw new DubError('GitHub token lacks required permissions.', [
         "Run 'gh auth login' and re-select the 'repo' scope.",
@@ -546,11 +649,10 @@ export async function retargetPrBase(
   cwd: string,
 ): Promise<void> {
   try {
-    await execa('gh', ['pr', 'edit', String(target), '--base', baseBranch], {
-      cwd,
-    });
+    await runGh(['pr', 'edit', String(target), '--base', baseBranch], { cwd });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(
       `Failed to retarget PR '${target}' to '${baseBranch}': ${message}`,
       [
@@ -584,9 +686,10 @@ export async function mergePr(
     args.push('--delete-branch');
   }
   try {
-    await execa('gh', args, { cwd, stdio: 'inherit' });
+    await runGh(args, { cwd, stdio: 'inherit' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     throw new DubError(`Failed to merge PR #${prNumber}: ${message}`, [
       `Run 'gh pr view ${prNumber} --web' to inspect required checks and reviews.`,
       `Run 'dub merge-check --pr ${prNumber}' to validate DubStack merge order.`,
@@ -638,9 +741,10 @@ export async function openPrInBrowser(
     ? ['pr', 'view', target, '--web']
     : ['pr', 'view', '--web'];
   try {
-    await execa('gh', args, { cwd, stdio: 'inherit' });
+    await runGh(args, { cwd, stdio: 'inherit' });
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
     if (message.toLowerCase().includes('no pull requests')) {
       throw new DubError(
         target
