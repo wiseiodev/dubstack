@@ -255,7 +255,7 @@ describe('getAllPrSyncInfoBatch', () => {
     });
   });
 
-  it('issues a single gh pr list call with the documented JSON fields', async () => {
+  it('issues a single gh pr list call with only the fields BranchPrSyncInfo needs', async () => {
     mockExeca.mockResolvedValueOnce({ stdout: '[]' });
 
     await getAllPrSyncInfoBatch('/repo');
@@ -269,7 +269,7 @@ describe('getAllPrSyncInfoBatch', () => {
         '--state',
         'all',
         '--json',
-        'number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup',
+        'headRefName,baseRefName,state,mergedAt',
         '--limit',
         '100',
       ],

@@ -198,7 +198,12 @@ export async function sync(
       const hasLocal = await branchExists(branch, cwd);
       if (hasLocal) localTrackedBranches.push(branch);
     }
-    const prBatch = await getAllPrSyncInfoBatch(cwd);
+    // Skip the gh round-trip when there are no non-root branches to look up
+    // (e.g. a stack containing only a root branch).
+    const prBatch =
+      stackBranches.length > 0
+        ? await getAllPrSyncInfoBatch(cwd)
+        : { byBranch: new Map<string, BranchPrSyncInfo>(), truncated: false };
     const lookupPrSyncInfo = async (
       branch: string,
     ): Promise<BranchPrSyncInfo> => {

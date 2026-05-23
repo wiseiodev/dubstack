@@ -247,7 +247,7 @@ export async function getAllPrSyncInfoBatch(
         '--state',
         'all',
         '--json',
-        'number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup',
+        'headRefName,baseRefName,state,mergedAt',
         '--limit',
         String(BATCH_PR_LIST_LIMIT),
       ],

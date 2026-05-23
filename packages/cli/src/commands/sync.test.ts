@@ -1138,6 +1138,18 @@ describe('sync', () => {
       expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
     });
 
+    it('skips the batch gh call when the stack has no non-root branches', async () => {
+      mockGetCurrentBranch.mockResolvedValue('main');
+      mockReadState.mockResolvedValue(
+        makeState([{ name: 'main', parent: null, type: 'root' }]),
+      );
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockGetAllPrSyncInfoBatch).not.toHaveBeenCalled();
+      expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
+    });
+
     it('falls back to per-branch lookup when the batch reports truncation', async () => {
       mockReadState.mockResolvedValue(
         makeState([
