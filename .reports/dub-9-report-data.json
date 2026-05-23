@@ -1,0 +1,283 @@
+{
+  "meta": {
+    "workId": "DUB-9",
+    "title": "dub mcp server with read-only tools",
+    "artifactId": "dub-9",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-9-dub-mcp-server-with-read-only-tools",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-9",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 9,
+    "additions": 998,
+    "deletions": 29,
+    "diffStat": "9 files changed, 998 insertions(+), 29 deletions(-)"
+  },
+  "prompt": "Build a stdio JSON-RPC MCP server for DubStack with read-only tools: log, doctor, status, parent, children, trunk, and history. Expose schemas via tools/list, return structured JSON, audit each tool call in dub history, add an integration test that spawns the server, and document installation with `claude mcp add dubstack dub mcp`.",
+  "tldr": "Adds `dub mcp`, a dependency-free stdio MCP server exposing read-only DubStack tools, plus `dub log --json`, audit history for MCP tool calls, a spawned integration test, and docs for installing the server.",
+  "why": {
+    "motivation": [
+      "MCP lets Claude Code and other MCP-aware agents inspect a tracked DubStack repository through typed tool calls instead of free-form shell commands.",
+      "Keeping the first slice read-only provides useful agent context while leaving mutation confirmation policy to the next slice."
+    ],
+    "before": [
+      "DubStack had CLI commands for stack inspection, but no MCP server or tool schema surface.",
+      "`dub log` only rendered an ASCII tree, so agents had no canonical structured stack-tree shape to consume.",
+      "There was no per-tool audit trail for agent-driven DubStack inspection."
+    ],
+    "after": [
+      "`dub mcp` speaks newline-delimited stdio JSON-RPC with `initialize`, `tools/list`, `tools/call`, `ping`, and `notifications/initialized` support.",
+      "Seven read-only tools return JSON through MCP `content` and `structuredContent`, reusing existing command helpers where possible.",
+      "`dub log --json` and `dubstack.log` share the same structured stack-tree helper.",
+      "Every MCP `tools/call` appends a dedicated entry to `dub history`."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "new",
+      "additions": 494,
+      "deletions": 0,
+      "explanation": "Implements the stdio JSON-RPC MCP server, tool registry, tool dispatch, structured JSON responses, status aggregation, and per-tool history audit. Request handling is queued so responses are deterministic and buffered requests flush before EOF exit.",
+      "snippet": "const TOOLS: ToolDefinition[] = [\n  { name: 'dubstack.log', description: 'Return the tracked DubStack stack tree as structured JSON.', inputSchema: { /* ... */ } },\n  { name: 'dubstack.doctor', description: 'Return DubStack health issues and remediation steps.', inputSchema: { /* ... */ } },\n  { name: 'dubstack.status', description: 'Return current branch, tracking, PR state, and drift issues.', inputSchema: EMPTY_SCHEMA },\n];",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 34,
+      "deletions": 4,
+      "explanation": "Wires the new top-level `dub mcp` command and adds `--json` support to both `dub log` and `dub ls`, printing the same JSON helper consumed by the MCP log tool.",
+      "snippet": "program\n  .command('mcp')\n  .description('Start the DubStack read-only MCP server over stdio')\n  .action(async () => {\n    await mcp(process.cwd(), { version });\n  });",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/log.ts",
+      "changeType": "mod",
+      "additions": 126,
+      "deletions": 24,
+      "explanation": "Adds `logJson` and JSON branch/tree types while preserving existing ASCII rendering behavior. Shared stack selection keeps `--stack`, `--all`, and `--reverse` semantics consistent between text and JSON output.",
+      "snippet": "export interface LogJsonBranch {\n  name: string;\n  type: 'root' | 'branch';\n  parent: string | null;\n  current: boolean;\n  exists: boolean;\n  prNumber: number | null;\n  prLink: string | null;\n  children: LogJsonBranch[];\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.test.ts",
+      "changeType": "new",
+      "additions": 201,
+      "deletions": 0,
+      "explanation": "Integration test spawns the MCP server with `tsx`, sends `initialize`, `tools/list`, and `tools/call dubstack.log`, asserts the structured response shape, and confirms the call appears in `dub history`.",
+      "snippet": "server.send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'dubstack.log', arguments: {} } });\nconst logResponse = await server.nextJson();\nexpect(logResult.structuredContent).toMatchObject({ currentBranch: 'feat/a' });",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/log.test.ts",
+      "changeType": "mod",
+      "additions": 54,
+      "deletions": 1,
+      "explanation": "Adds coverage for the JSON tree helper so `dub log --json` and `dubstack.log` have a locked response shape with current branch, branch existence, PR number, parent, and children metadata.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/guides/mcp.mdx",
+      "changeType": "new",
+      "additions": 58,
+      "deletions": 0,
+      "explanation": "New guide documents the Claude install command, available read-only tools, audit history behavior, and supported MCP JSON-RPC methods.",
+      "snippet": "claude mcp add dubstack dub mcp",
+      "snippetLanguage": "bash",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/guides/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Adds the MCP guide to the docs navigation.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/log.mdx",
+      "changeType": "mod",
+      "additions": 4,
+      "deletions": 0,
+      "explanation": "Documents the new `dub log --json` flag alongside existing stack/all/reverse options.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-9-qa.md",
+      "changeType": "new",
+      "additions": 26,
+      "deletions": 0,
+      "explanation": "Self-QA fallback artifact because no `.tsx` files changed and the feature is proven through protocol-level subprocess tests and repo gates rather than a browser recording.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "MCP stdout safety",
+      "location": "packages/cli/src/commands/mcp.ts",
+      "rationale": "Stdio MCP requires stdout to contain only JSON-RPC messages. The server writes protocol messages directly and does not use console logging in the MCP command path."
+    },
+    {
+      "title": "Audit semantics",
+      "location": "packages/cli/src/commands/mcp.ts:365",
+      "rationale": "Every `tools/call` appends a `dub mcp tools/call <name>` history entry independently of the long-running `dub mcp` process lifecycle."
+    },
+    {
+      "title": "Shared log JSON shape",
+      "location": "packages/cli/src/commands/log.ts:67",
+      "rationale": "`dubstack.log` delegates to `logJson`, the same helper used by `dub log --json`, so the MCP and CLI JSON shapes cannot drift separately."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "integration",
+      "label": "Spawn MCP server and call `dubstack.log`",
+      "status": "done",
+      "evidence": "`packages/cli/src/commands/mcp.test.ts` starts `tsx src/index.ts mcp`, sends `initialize`, `tools/list`, and `tools/call dubstack.log`, then asserts response shape and history audit."
+    },
+    {
+      "kind": "unit",
+      "label": "JSON log helper shape",
+      "status": "done",
+      "evidence": "`packages/cli/src/commands/log.test.ts` asserts current branch, root/child nesting, branch existence, and PR number in `logJson`."
+    },
+    {
+      "kind": "manual",
+      "label": "MCP docs install path",
+      "status": "done",
+      "evidence": "`apps/docs/content/docs/guides/mcp.mdx` documents `claude mcp add dubstack dub mcp` and the exposed tools."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 201 files in 37ms. No fixes applied."
+    },
+    {
+      "name": "Type check (turbo: docs + dubstack)",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 successful, 2 total. docs cache hit; dubstack ran `tsc --noEmit`."
+    },
+    {
+      "name": "Full test suite",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "Test Files 72 passed (72); Tests 552 passed (552); docs tests passed 2/2."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No `.tsx` files changed and there is no browser-demoable surface. The feature is a CLI stdio protocol server plus MDX docs.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-9-qa.md",
+    "caption": "Self-QA fallback covering MCP subprocess behavior, audit history, shared JSON log shape, and required repo gates.",
+    "scenarios": [
+      "MCP server initializes and advertises the read-only tool list.",
+      "`dubstack.log` returns the structured stack tree for a tracked branch.",
+      "MCP tool invocation is appended to `dub history`.",
+      "`dub log --json` uses the same `logJson` shape as `dubstack.log`.",
+      "Required repo gates pass after the implementation and adversarial hardening."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New `packages/cli/src/commands/mcp.ts` implementing stdio JSON-RPC per the MCP spec",
+      "status": "satisfied",
+      "evidence": "`mcp.ts` reads newline-delimited JSON-RPC from stdin, writes responses to stdout, and supports initialize/ping/tools/list/tools/call/initialized notification."
+    },
+    {
+      "criterion": "Tool schemas defined and exposed via `tools/list` MCP method",
+      "status": "satisfied",
+      "evidence": "`TOOLS` registry defines JSON schemas; `tools/list` returns that registry. Verified in `mcp.test.ts`."
+    },
+    {
+      "criterion": "All read-only tools listed above return structured JSON",
+      "status": "satisfied",
+      "evidence": "`callTool` implements `dubstack.log`, `dubstack.doctor`, `dubstack.status`, `dubstack.parent`, `dubstack.children`, `dubstack.trunk`, and `dubstack.history`; results include `structuredContent` and JSON text content."
+    },
+    {
+      "criterion": "`dubstack.log` returns the same shape as `dub log --json`",
+      "status": "satisfied",
+      "evidence": "`dubstack.log` calls `logJson`; `dub log --json` prints `logJson`."
+    },
+    {
+      "criterion": "Every MCP tool invocation appears in `dub history` for audit",
+      "status": "satisfied",
+      "evidence": "`appendMcpHistory` writes one history entry per `tools/call`; `mcp.test.ts` asserts `dub mcp tools/call dubstack.log` appears in history."
+    },
+    {
+      "criterion": "Integration test: spawn the MCP server, send `tools/list`, send a `tools/call dubstack.log`, assert response shape",
+      "status": "satisfied",
+      "evidence": "`packages/cli/src/commands/mcp.test.ts` covers the spawned server protocol flow."
+    },
+    {
+      "criterion": "Docs page added at `apps/docs/content/docs/guides/mcp.mdx`",
+      "status": "satisfied",
+      "evidence": "Guide added and linked from `apps/docs/content/docs/guides/meta.json`."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged that request handling used fire-and-forget `handleLine` calls. Fixed by queueing request processing and waiting for the final buffered request before resolving on stdin EOF, preserving response order and one-shot piped request behavior."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies",
+      "status": "No external dependencies detected — Linear says blocked by none."
+    }
+  ],
+  "rollout": {
+    "summary": "New read-only MCP surface behind an explicit `dub mcp` command. No migration and no mutating tools in this slice.",
+    "steps": [
+      {
+        "when": "Install",
+        "label": "Register MCP server",
+        "details": "Run `claude mcp add dubstack dub mcp` from a shell where `dub` is available."
+      },
+      {
+        "when": "Use",
+        "label": "Ask for stack context",
+        "details": "MCP clients can call `dubstack.log`, `dubstack.status`, or the branch query tools from any initialized DubStack repo."
+      },
+      {
+        "when": "Follow-up",
+        "label": "Add mutating tools with confirmation policy",
+        "details": "This slice intentionally excludes mutations. The next slice should settle the HITL default before exposing create/restack/submit operations."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "e404905f72729d51369f5390c2e46bb064bbfcb8",
+    "shortSha": "e404905",
+    "message": "feat: add read-only MCP server"
+  }
+}
