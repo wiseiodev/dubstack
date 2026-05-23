@@ -166,7 +166,7 @@ describe('writeState and readState roundtrip', () => {
                 head_sha: 'feat-head',
                 base_sha: 'main-head',
                 base_branch: 'main',
-                source: 'sync-adopt-remote',
+                source: 'sync-adopt-remote-safe',
               },
             },
           ],
@@ -179,8 +179,54 @@ describe('writeState and readState roundtrip', () => {
       head_sha: 'feat-head',
       base_sha: 'main-head',
       base_branch: 'main',
-      source: 'sync-adopt-remote',
+      source: 'sync-adopt-remote-safe',
     });
+  });
+
+  it('migrates legacy reconcile source values on read', async () => {
+    await initState(dir);
+    const legacyState = {
+      stacks: [
+        {
+          id: 'legacy-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              sync_source: 'sync',
+              last_submitted_version: {
+                head_sha: 'h',
+                base_sha: 'b',
+                base_branch: 'main',
+                version_number: null,
+                source: 'sync',
+              },
+              last_reconciled_version: {
+                head_sha: 'h',
+                base_sha: 'b',
+                base_branch: 'main',
+                source: 'sync-noop',
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as DubState;
+    await writeState(legacyState, dir);
+    const loaded = await readState(dir);
+    const featA = loaded.stacks[0].branches[1];
+    expect(featA.sync_source).toBe('sync-adopt-remote-safe');
+    expect(featA.last_submitted_version?.source).toBe('sync-adopt-remote-safe');
+    expect(featA.last_reconciled_version?.source).toBe('sync-no-change');
   });
 
   it('creates parent directory if missing', async () => {

@@ -1,0 +1,331 @@
+{
+  "meta": {
+    "workId": "DUB-14",
+    "title": "Expand sync status taxonomy + reconciliation source tags",
+    "artifactId": "dub-14",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-14-expand-sync-status-taxonomy-reconciliation-source-tags",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-14",
+    "prUrl": "https://github.com/wiseiodev/dubstack/pull/46"
+  },
+  "stats": {
+    "fileCount": 11,
+    "additions": 871,
+    "deletions": 56,
+    "diffStat": "11 files changed, 871 insertions(+), 56 deletions(-)"
+  },
+  "prompt": "Implement DUB-14: expand the sync status taxonomy from 9 to 13 statuses, replace the flat `sync_source` field with a richer ReconcileSource enum, and surface a per-sync histogram in the support bundle.",
+  "tldr": "Adds 4 sync statuses (remote-restacked, squash-merged-with-trailing-commits, non-conflicting-divergence, parent-merged-orphan), a 14-value `ReconcileSource` enum that replaces the legacy `sync_source` string, and a histogram of reconcile sources persisted to `state.last_sync` and surfaced via the support bundle. Includes refinements that auto-FF with parent adoption when local is a strict subset and auto-rebase non-conflicting divergence.",
+  "why": {
+    "motivation": [
+      "Support bundles and telemetry need to attribute every reconciliation to a specific decision path so we can debug sync regressions without source diving.",
+      "The 9-status taxonomy collapsed several distinct decisions into `reconcile-needed` and lost the signal users need to recover trailing commits or notice a remote restack.",
+      "Sync had no awareness of remote-side restacks or parent-PR merges; users had to manually retarget bases when remote moved underneath their stack."
+    ],
+    "before": [
+      "`BranchSyncStatus` had 9 values; remote-restacked / squash-trailing / parent-merged / non-conflicting cases all fell into `reconcile-needed` or were silently mis-classified.",
+      "`sync_source` was the flat union `'submit' | 'sync' | 'imported'`; provenance was lost as soon as a branch was touched by sync.",
+      "Support bundle had no signal about the last sync run — agents reproducing a bug had to ask the user what happened."
+    ],
+    "after": [
+      "`BranchSyncStatus` now has 13 values, including dedicated statuses for remote-restacked, squash + trailing commits, parent-merged-orphan, and non-conflicting divergence.",
+      "`ReconcileSource` is a 14-value union recorded on every per-branch outcome and persisted in `last_submitted_version.source`, `last_reconciled_version.source`, and `sync_source`.",
+      "`state.last_sync.reconcile_sources` holds a per-sync histogram; the support bundle surfaces it under a new `sync` source in both data and markdown form."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/sync/types.ts",
+      "changeType": "mod",
+      "additions": 43,
+      "deletions": 0,
+      "explanation": "Adds the 4 new `BranchSyncStatus` values, the full `ReconcileSource` union, a `RECONCILE_SOURCES` const tuple for iteration, a `ReconcileSourceHistogram` type, and extends `BranchSyncOutcome` and `SyncResult` to carry the reconcile source for each branch and the per-sync histogram.",
+      "snippet": "export type ReconcileSource =\n  | 'submit'\n  | 'sync-no-change'\n  | 'sync-adopt-remote-safe'\n  | 'sync-adopt-remote-divergent'\n  | 'sync-adopt-remote-parent'\n  | 'sync-rebase-onto-remote'\n  | 'sync-rebase-onto-parent'\n  | 'sync-remote-restacked'\n  | 'sync-parent-merged-reparent'\n  | 'sync-squash-merged-cleanup'\n  | 'sync-keep-local'\n  | 'sync-skip'\n  | 'sync-force'\n  | 'imported';",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/sync/branch-status.ts",
+      "changeType": "mod",
+      "additions": 46,
+      "deletions": 0,
+      "explanation": "Extends `classifyBranchSyncStatus` with optional inputs that let callers feed in PR base info, parent-PR-merged signal, remote ancestry of the new parent, an explicit `squashMergedWithTrailingCommits` flag, and a `rebaseOntoRemoteClean` trial result. The classifier returns one of the new statuses when the corresponding triggers are present and otherwise behaves as before.",
+      "snippet": "if (input.squashMergedWithTrailingCommits) {\n  return 'squash-merged-with-trailing-commits';\n}\nif (input.parentPrMerged) {\n  return 'parent-merged-orphan';\n}\n// ...\nif (remoteParentDiffers && input.remoteContainsNewParentHistory) {\n  return 'remote-restacked';\n}\nif (input.rebaseOntoRemoteClean === true) {\n  return 'non-conflicting-divergence';\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/cleanup.ts",
+      "changeType": "mod",
+      "additions": 9,
+      "deletions": 1,
+      "explanation": "Adds the new `merged-pr-with-trailing-commits` cleanup reason. When PR is MERGED and `isMergedByPatchId` is supplied, the helper now classifies the entry as having trailing commits whenever not every branch commit landed in trunk. The branch still gets deleted; the new reason lets the sync command surface a recovery message.",
+      "snippet": "if (prState === 'MERGED') {\n  let reason: CleanupReason = 'merged-pr';\n  if (input.isMergedByPatchId) {\n    const allInTrunk = await input.isMergedByPatchId(branch);\n    if (!allInTrunk) reason = 'merged-pr-with-trailing-commits';\n  }\n  toDelete.push({ branch, reason });\n  continue;\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/state.ts",
+      "changeType": "mod",
+      "additions": 58,
+      "deletions": 1,
+      "explanation": "Updates `Branch` so the three reconciliation-related fields use the new `ReconcileSource` type, adds a `LastSyncSummary` record on `DubState`, and rewires the normalizer to migrate legacy values (`sync`, `sync-noop`, `sync-restack`, `sync-adopt-remote`) to their new equivalents while preserving `last_sync` only when present.",
+      "snippet": "const LEGACY_RECONCILE_SOURCE_MAP: Record<string, ReconcileSource> = {\n  sync: 'sync-adopt-remote-safe',\n  'sync-adopt-remote': 'sync-adopt-remote-safe',\n  'sync-noop': 'sync-no-change',\n  'sync-restack': 'sync-rebase-onto-remote',\n};",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 251,
+      "deletions": 7,
+      "explanation": "Wires the new classifier inputs (remote base, parent ancestry), adds handlers for the 4 new statuses, records reconcile sources per outcome, tracks branches reparented due to a merged parent, attempts an auto-rebase trial for `reconcile-needed`, refines `needs-remote-sync-safe` to adopt the remote parent when the PR base moved, generalizes `markBranchSynced` to accept any `ReconcileSource`, and persists the per-sync histogram in `state.last_sync`.",
+      "snippet": "state.last_sync = {\n  timestamp: new Date().toISOString(),\n  reconcile_sources: { ...result.reconcileSources },\n};\nawait writeState(state, cwd);",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/support-bundle.ts",
+      "changeType": "mod",
+      "additions": 58,
+      "deletions": 3,
+      "explanation": "Adds a `sync` source to the support bundle with `lastSyncAt` and a `reconcileSources` histogram. Markdown formatter renders the histogram in count-descending order under a new section.",
+      "snippet": "async function defaultCollectSync(cwd: string): Promise<SupportSyncContext> {\n  let state: DubState;\n  try {\n    state = await readState(cwd);\n  } catch {\n    return { lastSyncAt: null, reconcileSources: {} };\n  }\n  const lastSync = state.last_sync ?? null;\n  return {\n    lastSyncAt: lastSync?.timestamp ?? null,\n    reconcileSources: lastSync?.reconcile_sources ?? {},\n  };\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/branch-status.test.ts",
+      "changeType": "mod",
+      "additions": 77,
+      "deletions": 0,
+      "explanation": "Adds tests for each new status returned by the classifier, including the negative case where `rebaseOntoRemoteClean === false` stays on `reconcile-needed`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/cleanup.test.ts",
+      "changeType": "mod",
+      "additions": 26,
+      "deletions": 0,
+      "explanation": "Adds coverage for the new `merged-pr-with-trailing-commits` reason and confirms the plain `merged-pr` reason when patch-id reports all commits in trunk.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.test.ts",
+      "changeType": "mod",
+      "additions": 271,
+      "deletions": 0,
+      "explanation": "Adds an `expanded status taxonomy` describe block with seven tests for the new statuses, refinements, and histogram persistence. Adds module mocks for `rebaseBranchOntoRef` and `isMergedByPatchId`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/state.test.ts",
+      "changeType": "mod",
+      "additions": 49,
+      "deletions": 1,
+      "explanation": "Adds coverage for legacy reconcile-source migration on read.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/support-bundle.test.ts",
+      "changeType": "mod",
+      "additions": 26,
+      "deletions": 0,
+      "explanation": "Adds the new `sync` source to the fixture bundle and asserts the markdown formatter renders the histogram and last-sync timestamp.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Auto-rebase is destructive on success",
+      "location": "packages/cli/src/commands/sync.ts (reconcile-needed branch)",
+      "rationale": "The trial calls `rebaseBranchOntoRef`, which rewrites the local branch on success. A `console.log` precedes the call so the user sees it, but reviewers should confirm the behavior matches the DUB-14 spec (auto-rebase clean divergence) and that the message is clear enough."
+    },
+    {
+      "title": "Legacy reconcile-source migration in normalizeBranch",
+      "location": "packages/cli/src/lib/state.ts (LEGACY_RECONCILE_SOURCE_MAP)",
+      "rationale": "Older state files persisted `sync`, `sync-noop`, `sync-restack`, or `sync-adopt-remote`. Read-side migration maps each to a new value; reviewers should check the mapping doesn't change behavior of subsequent code paths (especially the `priorBaseline?.source ?? entry.sync_source ?? 'imported'` fallback in `markBranchSynced`)."
+    },
+    {
+      "title": "Refinement: needs-remote-sync-safe silently adopts parent",
+      "location": "packages/cli/src/commands/sync.ts (needs-remote-sync-safe handler)",
+      "rationale": "When local is a strict subset of remote and the PR base differs, we auto-FF and adopt the remote parent. An explicit `console.log` is emitted before the mutation, but this is a non-interactive behavior change. Confirm it's the intended interpretation of the DUB-14 'auto-FF when remote superset' refinement."
+    },
+    {
+      "title": "Histogram persistence in last_sync",
+      "location": "packages/cli/src/commands/sync.ts (before writeState)",
+      "rationale": "We assign `state.last_sync` even when the loop short-circuits before populating outcomes. Reviewers should confirm the data shape is always valid (default `{}` is fine) and that downstream consumers (support bundle) handle the empty histogram case."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "Classifier returns each new status for its triggers (and stays put when triggers are absent)",
+      "status": "done",
+      "evidence": "branch-status.test.ts adds 5 new tests; full file 13 tests."
+    },
+    {
+      "kind": "unit",
+      "label": "Cleanup tags MERGED branches with trailing commits separately",
+      "status": "done",
+      "evidence": "cleanup.test.ts adds 2 new tests; full file 9 tests."
+    },
+    {
+      "kind": "integration",
+      "label": "Sync command emits each new status with correct action + reconcile source and persists last_sync",
+      "status": "done",
+      "evidence": "sync.test.ts adds 7 new tests in the `expanded status taxonomy (DUB-14)` describe block."
+    },
+    {
+      "kind": "unit",
+      "label": "State migration of legacy reconcile-source values on read",
+      "status": "done",
+      "evidence": "state.test.ts adds the 'migrates legacy reconcile source values on read' test."
+    },
+    {
+      "kind": "unit",
+      "label": "Support bundle markdown surfaces histogram and last-sync timestamp",
+      "status": "done",
+      "evidence": "support-bundle.test.ts adds the 'includes reconcile-source histogram in markdown when last sync exists' test."
+    },
+    {
+      "kind": "manual",
+      "label": "Run `dub sync` against a stack with a squash-merged PR + trailing commits and confirm the warning + cleanup",
+      "status": "pending",
+      "evidence": "Requires a live GitHub repo; outside CI scope."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Format + lint",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . — Checked 207 files. No fixes applied."
+    },
+    {
+      "name": "Type check",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit across docs + dubstack — 2 tasks successful."
+    },
+    {
+      "name": "Unit + integration tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "vitest — 73 test files, 598 tests passed (15 added)."
+    },
+    {
+      "name": "Evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "DUB-14 does not change AI metadata or prompts. Per AGENTS.md §6, evals are only required when those change. Local provider is not configured in this workspace."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "DUB-14 only touches CLI library and state-shape code; no `.tsx` files are in this diff and there is no browser-renderable surface to record.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-14-qa.md",
+    "caption": "Test suite + manual smoke playbook captured in the QA fallback document.",
+    "scenarios": [
+      "Classifier surfaces each of the 4 new statuses for its trigger inputs.",
+      "Sync command auto-rebases non-conflicting divergence and records sync-rebase-onto-remote.",
+      "Sync command adopts the remote parent on remote-restacked branches.",
+      "Sync command emits a parent-merged-orphan outcome for children reparented during cleanup.",
+      "Sync command emits a squash-merged-with-trailing-commits outcome with reflog recovery guidance.",
+      "Sync command auto-FF + adopts parent on needs-remote-sync-safe with a moved PR base.",
+      "Support bundle markdown shows the per-source histogram in descending order."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`BranchSyncStatus` extended with the 4 new statuses",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/sync/types.ts — union now includes remote-restacked, squash-merged-with-trailing-commits, non-conflicting-divergence, parent-merged-orphan."
+    },
+    {
+      "criterion": "`classifyBranchSyncStatus` returns the right status for each scenario",
+      "status": "satisfied",
+      "evidence": "branch-status.ts + branch-status.test.ts cover all four new statuses + negative cases."
+    },
+    {
+      "criterion": "Per-status handling in commands/sync.ts with default actions per the table",
+      "status": "satisfied",
+      "evidence": "sync.ts handlers: remote-restacked (auto-take + adopt parent), parent-merged-orphan (reparent), squash-merged-with-trailing-commits (cleanup + warn), non-conflicting-divergence (auto-rebase)."
+    },
+    {
+      "criterion": "`ReconcileSource` enum used in place of free-form strings",
+      "status": "satisfied",
+      "evidence": "state.ts types reference ReconcileSource for last_submitted_version.source, last_reconciled_version.source, and sync_source; markBranchSynced uses the union; recorded per outcome."
+    },
+    {
+      "criterion": "Support bundle surfaces source histogram for the most recent sync",
+      "status": "satisfied",
+      "evidence": "support-bundle.ts exposes a `sync` source with `reconcileSources`; markdown renders 'Last Sync Reconcile Sources' section."
+    },
+    {
+      "criterion": "Tests covering each new status (squash with trailing, remote-restacked, parent-merged-orphan, non-conflicting-divergence)",
+      "status": "satisfied",
+      "evidence": "sync.test.ts — expanded status taxonomy describe block has 7 tests covering the 4 statuses + refinements + persistence."
+    },
+    {
+      "criterion": "Tests covering the refinements (silent adopt in unsubmitted; auto-FF when remote superset)",
+      "status": "satisfied",
+      "evidence": "sync.test.ts — 'unsubmitted in non-interactive adopts silently when SHAs already equal' and 'needs-remote-sync auto-FFs and adopts remote parent when local is strict subset'."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 2,
+    "nitpick": 0,
+    "findings": [
+      "Important: auto-rebase trial in reconcile-needed is destructive on success. Resolved by emitting a `console.log` before the rebase attempt so the user sees the mutation.",
+      "Important: needs-remote-sync-safe silently adopts the remote parent in non-interactive mode. Resolved by emitting a `console.log` naming the new parent before the state mutation.",
+      "Minor: the squash-merged-with-trailing-commits warning did not mention `git reflog`. Resolved by updating the message to explicitly point users at `git reflog` and `dub track`."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-6 — git cherry patch-id squash-merge detection",
+      "status": "Done — `isMergedByPatchId` is used as the trailing-commits detector in cleanup."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure CLI library change, no flag/gate required. State file shape is forward-compatible via legacy-value migration on read.",
+    "steps": [
+      {
+        "when": "Pre-merge",
+        "label": "Land PR #46 once review approves",
+        "details": "Branch passes lint, typecheck, and the full test suite locally; CI will re-run the same gates."
+      },
+      {
+        "when": "Post-merge",
+        "label": "No follow-up required",
+        "details": "Existing state files migrate on first read via LEGACY_RECONCILE_SOURCE_MAP. New histogram is populated on the first sync after the upgrade."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "52d44847e987028096d681911e9d1f294d69cefa",
+    "shortSha": "52d4484",
+    "message": "feat(sync): expand status taxonomy + reconciliation source tags"
+  }
+}
