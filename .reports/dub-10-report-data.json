@@ -1,0 +1,208 @@
+{
+  "meta": {
+    "workId": "DUB-10",
+    "title": "Apply retry to all gh calls + idempotency guard on createPr",
+    "artifactId": "dub-10",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-10-apply-retry-to-all-gh-calls-idempotency-guard-on-createpr",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-10",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 3,
+    "additions": 425,
+    "deletions": 70,
+    "diffStat": "3 files changed, 425 insertions(+), 70 deletions(-)"
+  },
+  "prompt": "Wrap every `gh` call in `lib/github.ts` with the DUB-2 retry helper. Add an idempotency guard before retrying `createPr` so a successful first attempt followed by a transient 502 doesn't create a duplicate PR.",
+  "tldr": "`gh` API calls now retry transient failures via the DUB-2 helper with permanent-error short-circuiting. `createPr` checks for a phantom-duplicate PR (matching title) before each retry attempt.",
+  "why": {
+    "motivation": [
+      "Transient GitHub 5xx and network blips were surfacing as hard failures from `dub submit`, `dub merge-next`, and `dub sync`.",
+      "A successful `createPr` whose response was lost to a 502 would silently re-create the PR on the next attempt, leaving duplicate PRs against the same branch."
+    ],
+    "before": [
+      "Each `gh` call in `lib/github.ts` issued a single `execa('gh', ...)` and rethrew on the first failure.",
+      "`createPr` had no idempotency guard; any retry path (manual or otherwise) risked phantom duplicates."
+    ],
+    "after": [
+      "A new internal `runGh` helper drives every `gh` call through the DUB-2 `retry` helper with an `isPermanentGhError` classifier (HTTP 401/403/404, GraphQL PR-not-found variants, `ENOENT`).",
+      "`createPr` keeps its own retry loop and calls `getPr(branch)` before each retry attempt — if a PR with the intended title already exists, it returns that PR instead of issuing another `gh pr create`.",
+      "`unwrapRetryError` recursively peels `retry: giving up after N attempts` wrappers so `DubError` messages and the `isPrNotFoundError` classifier still see the underlying cause."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/github.ts",
+      "changeType": "mod",
+      "additions": 244,
+      "deletions": 70,
+      "explanation": "Introduces `runGh` (private), `isPermanentGhError`, `unwrapRetryError`, and the `__setGhRetryOptionsForTesting` test seam. Refactors every gh call site — including `ensureGhInstalled`, `checkGhAuth`, `getPr`, `getPrByNumber`, `getBranchPrSyncInfo`, `getAllPrSyncInfoBatch`, `getPrStateByNumber`, `getPrMergeStatusByNumber`, `updatePrBody`, `retargetPrBase`, `mergePr`, and `openPrInBrowser` — to flow through `runGh`. `createPr` keeps its own retry loop so it can interleave the idempotency `getPr(branch)` check between attempts.",
+      "snippet": "async function runGh(\n  args: string[],\n  options: Options = {},\n): Promise<{ stdout: string; stderr: string }> {\n  const result = await retry(() => execa('gh', args, options), {\n    isPermanent: isPermanentGhError,\n    ...ghRetryOverrides,\n  });\n  return {\n    stdout: typeof result.stdout === 'string' ? result.stdout : '',\n    stderr: typeof result.stderr === 'string' ? result.stderr : '',\n  };\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/github.test.ts",
+      "changeType": "mod",
+      "additions": 181,
+      "deletions": 0,
+      "explanation": "Adds 10 new test cases covering the retry wrapper (transient → success, permanent short-circuit, exhaustion wrapping) and the createPr idempotency guard (phantom duplicate returns existing PR, unrelated title triggers retry, permanent 403 short-circuits). Adds `__setGhRetryOptionsForTesting` setup in `beforeEach` so retries run without wall-clock backoff.",
+      "snippet": "it('returns the existing PR when a phantom duplicate is detected on retry', async () => {\n  mockExeca\n    .mockRejectedValueOnce(new Error('502 Bad Gateway'))\n    .mockResolvedValueOnce({\n      stdout: JSON.stringify({\n        number: 77,\n        url: phantomUrl,\n        title: 'feat: x',\n        body: '',\n      }),\n    });\n\n  const result = await createPr('feat/x', 'main', 'feat: x', '/tmp/body.md', '/repo');\n  expect(result.number).toBe(77);\n  expect(mockExeca).toHaveBeenCalledTimes(2);\n});",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-10-qa.md",
+      "changeType": "new",
+      "additions": 70,
+      "deletions": 0,
+      "explanation": "Self-QA fallback. No `.tsx` files changed and the work is pure CLI library logic, so a Playwright video has no useful surface. The report enumerates the wrapped call sites, the permanent-error classifier coverage, the createPr idempotency contract, and the quality-gate evidence.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Permanent-error classifier scope",
+      "location": "packages/cli/src/lib/github.ts:isPermanentGhError",
+      "rationale": "The classifier governs whether a `gh` failure short-circuits or retries. It intentionally drops the bare `not found` substring (kept in `isPrNotFoundError`) to avoid false positives from OS/DNS messages like `host not found`. Worth a second pair of eyes on the regex/string set."
+    },
+    {
+      "title": "createPr idempotency loop semantics",
+      "location": "packages/cli/src/lib/github.ts:createPr",
+      "rationale": "Uses a manual `retry(...)` rather than `runGh` because the idempotency `getPr` check needs to run between attempts. `ghRetryOverrides` are forwarded so the test seam still applies. The nested `getPr` itself goes through `runGh` and can compound under sustained network failure — documented in the JSDoc."
+    },
+    {
+      "title": "unwrapRetryError recursion",
+      "location": "packages/cli/src/lib/github.ts:unwrapRetryError",
+      "rationale": "Recursively peels `retry: giving up after N attempts` wrappers so downstream classifiers and DubError messages see the underlying cause. Termination relies on the wrapper's message prefix; non-wrapper errors return as-is."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "gh retry behavior (5 cases) and createPr idempotency guard (5 cases)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/github.test.ts — 10 new specs covering transient→success retry, permanent short-circuit on 404/403, retry exhaustion wrapper, mergePr transient retry, phantom-duplicate return, retry-when-no-PR, retry-when-unrelated-PR, no-retry on 403, and wrapped error after exhaustion."
+    },
+    {
+      "kind": "unit",
+      "label": "Full vitest suite",
+      "status": "done",
+      "evidence": "`pnpm test` → 71 files / 560 tests passing (no regressions in command/lib/test fixtures that depend on github.ts)."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Biome clean across 199 files."
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit clean for `dubstack` and `docs`."
+    },
+    {
+      "name": "Tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "560 tests passing across 71 files."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files changed; the work is a pure CLI library refactor with no UI surface.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-10-qa.md",
+    "caption": "Deterministic proof via Vitest unit tests; see fallback QA file for the wrapped-callsite enumeration and quality-gate evidence.",
+    "scenarios": [
+      "Transient 502 → retry → success (getPr, mergePr).",
+      "Permanent 403/404 → short-circuit (updatePrBody, getPrByNumber, createPr).",
+      "Retry exhaustion → wrapped error preserves the underlying cause via unwrapRetryError.",
+      "createPr phantom duplicate → returns the existing PR without a second create call.",
+      "createPr no-existing-PR → retries the create."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "Every `execa('gh', ...)` call in `lib/github.ts` wrapped via the retry helper.",
+      "status": "satisfied",
+      "evidence": "All gh call sites (probes, list/view/create/edit/merge, browser open) now flow through `runGh`. `createPr` uses a manual `retry(...)` with the same `ghRetryOverrides` forwarded; that bypass is documented in the function's JSDoc."
+    },
+    {
+      "criterion": "Permanent errors short-circuit (no retry on 404, 403, etc.).",
+      "status": "satisfied",
+      "evidence": "`isPermanentGhError` covers HTTP 401/403/404, GraphQL PR-not-found variants, `no pull requests found`, and `ENOENT`. Verified by `short-circuits getPrByNumber on permanent 404`, `short-circuits updatePrBody on permanent 403`, and `does not retry createPr on permanent 403` test cases."
+    },
+    {
+      "criterion": "Transient errors (502, network timeout) retry up to 4 times with backoff.",
+      "status": "satisfied",
+      "evidence": "Inherits defaults from `lib/retry.ts` (`maxAttempts: 4`, `baseMs: 100`, `maxMs: 2000`). Verified by `retries getPr on transient failure and succeeds` (3 calls) and `retries up to maxAttempts then wraps the failure` (4 calls)."
+    },
+    {
+      "criterion": "`createPr` performs a `getPr` check before retrying to avoid phantom duplicates.",
+      "status": "satisfied",
+      "evidence": "`createPr` retry callback calls `getPr(branch, cwd)` when `attempt > 1`. If the returned PR's title matches the intended title, it is returned without another `gh pr create`. Verified by `returns the existing PR when a phantom duplicate is detected on retry`."
+    },
+    {
+      "criterion": "Tests cover transient → success, permanent → throw, and phantom-duplicate scenarios.",
+      "status": "satisfied",
+      "evidence": "10 new specs in `packages/cli/src/lib/github.test.ts`."
+    },
+    {
+      "criterion": "No behavior change for successful first attempts.",
+      "status": "satisfied",
+      "evidence": "Successful first attempts skip the idempotency check (`attempt > 1` guard) and exit `retry` after one call. Existing single-attempt tests (`getPr returns PrInfo`, `createPr parses PR number from stdout URL`, etc.) pass unchanged."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 2,
+    "nitpick": 0,
+    "findings": [
+      "Resolved (critical): `openPrInBrowser` was unwrapped — now flows through `runGh` with `unwrapRetryError` in the catch block.",
+      "Resolved (critical): documented the intentional `execa` bypass inside `createPr`'s retry loop, with the rationale that `ghRetryOverrides` are explicitly forwarded so the test seam still applies.",
+      "Resolved (important): tightened `isPermanentGhError` — dropped the bare `not found` substring (kept in `isPrNotFoundError`) and added `ENOENT` so transient OS/DNS errors that happen to include `not found` are still retried.",
+      "Acknowledged (minor): nested `getPr` retry inside `createPr` can compound to up to `maxAttempts × (1 + maxAttempts)` gh calls under sustained network failure. Documented in the `createPr` JSDoc; bounded by `maxMs`."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-2 retry helper (lib/retry.ts)",
+      "status": "satisfied — merged in 5f14fb9"
+    }
+  ],
+  "rollout": {
+    "summary": "Library-only change shipped as a normal merge. No flags, no migrations.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship",
+        "details": "`feat(cli)` PR lands on `main`; subsequent `dub` releases pick up the retry coverage automatically."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Observe",
+        "details": "Watch for any new `retry: giving up after 4 attempts` messages in user reports — they indicate sustained GitHub degradation, not a regression in this change."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "741d85a15299b4286ade4701f456f45150fa373c",
+    "shortSha": "741d85a",
+    "message": "feat(cli): retry+idempotency for gh calls in lib/github.ts (DUB-10)"
+  }
+}
