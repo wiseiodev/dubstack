@@ -465,8 +465,9 @@ describe('sync', () => {
 
     expect(captured).toBeInstanceOf(DubError);
     expect(captured?.message).toContain(
-      "Sync aborted by user while reconciling 'feat/a'",
+      "Sync aborted while reconciling 'feat/a'",
     );
+    expect(captured?.message).toContain('prompting is disabled');
     expect(captured?.recovery.length).toBeGreaterThan(0);
     expect(mockHardResetBranchToRef).not.toHaveBeenCalled();
   });

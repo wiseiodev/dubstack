@@ -59,14 +59,21 @@ import {
 } from './stack-maintenance';
 
 /**
- * Marker DubError for the "Abort this command" choice in the three-way
- * reconcile prompt. Used to bypass DUB-13's per-branch failure-isolation
- * catch so user-requested aborts halt the entire sync.
+ * Marker DubError for the `abort` reconcile decision. Used to bypass DUB-13's
+ * per-branch failure-isolation catch so an abort halts the entire sync.
+ *
+ * The decision can be reached two ways and the message reflects which:
+ * - User picks "Abort this command" in the interactive three-way prompt.
+ * - `--no-interactive` without `--force` falls back to ABORT as the
+ *   safest non-interactive default.
  */
 class SyncAbortError extends DubError {
-  constructor(branch: string) {
-    super(`Sync aborted by user while reconciling '${branch}'.`, [
-      "Run 'dub sync' again to retry the reconcile flow.",
+  constructor(branch: string, interactive: boolean) {
+    const message = interactive
+      ? `Sync aborted by user while reconciling '${branch}'.`
+      : `Sync aborted while reconciling '${branch}': prompting is disabled (--no-interactive) and no --force was given, so the safe default is to abort.`;
+    super(message, [
+      "Run 'dub sync' again interactively to choose between rebase/take-remote/abort.",
       "Pass '--force --no-interactive' to take the remote version without prompting.",
       "Pass '--force' alone if you want the prompt but a fallback take-remote on --no-interactive shells.",
     ]);
@@ -613,7 +620,7 @@ export async function sync(
         });
 
         if (decision === 'abort') {
-          throw new SyncAbortError(branch);
+          throw new SyncAbortError(branch, options.interactive);
         }
 
         if (decision === 'take-remote') {

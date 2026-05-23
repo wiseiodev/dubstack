@@ -14,14 +14,17 @@ export interface RestackRollbackResult {
 
 /**
  * Rolls a mid-conflict restack back to its pre-restack state using the
- * snapshot saved in `undo.json` + `restack-progress.json`.
+ * snapshot saved in `undo.json` (written by `dub restack` before any rebase
+ * begins). `restack-progress.json` is not read — it is only deleted at the
+ * end so a future `dub continue` does not pick up the cancelled operation.
  *
  * Steps:
- * 1. Abort the in-progress git rebase (if any).
- * 2. Check out the branch the user was on before the restack.
- * 3. Force every snapshotted branch back to its pre-restack tip.
- * 4. Restore the pre-restack `state.json`.
- * 5. Clear the undo entry and the restack-progress file.
+ * 1. Read the undo snapshot and confirm it is a restack snapshot.
+ * 2. Abort the in-progress git rebase (if any).
+ * 3. Check out the branch the user was on before the restack.
+ * 4. Force every snapshotted branch back to its pre-restack tip.
+ * 5. Restore the pre-restack `state.json`.
+ * 6. Clear the undo entry and delete `restack-progress.json`.
  *
  * Used by the cancel-and-rollback choice in the restack conflict prompt.
  */
