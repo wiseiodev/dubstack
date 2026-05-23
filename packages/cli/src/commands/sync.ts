@@ -15,10 +15,11 @@ import {
   rebaseBranchOntoRef,
   remoteBranchExists,
 } from '../lib/git';
+import type { BranchPrSyncInfo } from '../lib/github';
 import {
   checkGhAuth,
   ensureGhInstalled,
-  getBranchPrLifecycleState,
+  getAllPrSyncInfoBatch,
   getBranchPrSyncInfo,
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
@@ -197,9 +198,18 @@ export async function sync(
       const hasLocal = await branchExists(branch, cwd);
       if (hasLocal) localTrackedBranches.push(branch);
     }
+    const prBatch = await getAllPrSyncInfoBatch(cwd);
+    const lookupPrSyncInfo = async (
+      branch: string,
+    ): Promise<BranchPrSyncInfo> => {
+      const cached = prBatch.byBranch.get(branch);
+      if (cached) return cached;
+      if (prBatch.truncated) return getBranchPrSyncInfo(branch, cwd);
+      return { state: 'NONE', baseRefName: null };
+    };
     const cleanupPlan = await buildCleanupPlan({
       branches: localTrackedBranches,
-      getPrStatus: (branch) => getBranchPrLifecycleState(branch, cwd),
+      getPrStatus: async (branch) => (await lookupPrSyncInfo(branch)).state,
       isMergedIntoAnyRoot: async (branch) => {
         for (const root of roots) {
           const compareRef = rootHasRemote.get(root) ? `origin/${root}` : root;
@@ -280,7 +290,7 @@ export async function sync(
           stateBranchMap.get(branch)?.last_submitted_version != null,
       });
       const prSyncInfo = hasRemote
-        ? await getBranchPrSyncInfo(branch, cwd)
+        ? await lookupPrSyncInfo(branch)
         : { state: 'NONE' as const, baseRefName: null };
       const localParent = stateBranchMap.get(branch)?.parent ?? null;
       if (

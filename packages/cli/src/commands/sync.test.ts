@@ -35,6 +35,7 @@ vi.mock('../lib/operation-state.js', () => ({
 vi.mock('../lib/github.js', () => ({
   checkGhAuth: vi.fn(),
   ensureGhInstalled: vi.fn(),
+  getAllPrSyncInfoBatch: vi.fn(),
   getBranchPrLifecycleState: vi.fn(),
   getBranchPrSyncInfo: vi.fn(),
   retargetPrBase: vi.fn(),
@@ -56,6 +57,7 @@ import {
 import {
   checkGhAuth,
   ensureGhInstalled,
+  getAllPrSyncInfoBatch,
   getBranchPrLifecycleState,
   getBranchPrSyncInfo,
   retargetPrBase,
@@ -99,6 +101,9 @@ const mockGetBranchPrLifecycleState = getBranchPrLifecycleState as ReturnType<
   typeof vi.fn
 >;
 const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as ReturnType<typeof vi.fn>;
+const mockGetAllPrSyncInfoBatch = getAllPrSyncInfoBatch as ReturnType<
+  typeof vi.fn
+>;
 const mockRetargetPrBase = retargetPrBase as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
@@ -151,6 +156,12 @@ beforeEach(() => {
   mockGetBranchPrSyncInfo.mockResolvedValue({
     state: 'OPEN',
     baseRefName: 'main',
+  });
+  // Default: empty batch flagged as truncated so existing tests exercise the
+  // per-branch fallback (preserving prior mock-based expectations).
+  mockGetAllPrSyncInfoBatch.mockResolvedValue({
+    byBranch: new Map(),
+    truncated: true,
   });
   mockRetargetPrBase.mockResolvedValue(undefined);
   mockDetectActiveOperation.mockResolvedValue('none');
@@ -438,7 +449,10 @@ describe('sync', () => {
         { name: 'feat/a', parent: 'main' },
       ]),
     );
-    mockGetBranchPrLifecycleState.mockResolvedValue('MERGED');
+    mockGetBranchPrSyncInfo.mockResolvedValue({
+      state: 'MERGED',
+      baseRefName: 'main',
+    });
 
     const result = await sync('/repo', {
       interactive: false,
@@ -462,9 +476,10 @@ describe('sync', () => {
         { name: 'feat/b', parent: 'feat/a' },
       ]),
     );
-    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
-      branch === 'feat/a' ? 'MERGED' : 'OPEN',
-    );
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => ({
+      state: branch === 'feat/a' ? 'MERGED' : 'OPEN',
+      baseRefName: branch === 'feat/a' ? 'main' : 'feat/a',
+    }));
     const logSpy = vi.spyOn(console, 'log');
 
     try {
@@ -500,10 +515,10 @@ describe('sync', () => {
         { name: 'feat/c', parent: 'feat/b' },
       ]),
     );
-    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
-      branch === 'feat/a' ? 'MERGED' : 'OPEN',
-    );
     mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') {
+        return { state: 'MERGED', baseRefName: 'main' };
+      }
       if (branch === 'feat/b') {
         return { state: 'OPEN', baseRefName: 'feat/a' };
       }
@@ -593,9 +608,10 @@ describe('sync', () => {
         },
       ],
     });
-    mockGetBranchPrLifecycleState.mockImplementation(async (branch: string) =>
-      branch === 'feat/a' ? 'MERGED' : 'OPEN',
-    );
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => ({
+      state: branch === 'feat/a' ? 'MERGED' : 'OPEN',
+      baseRefName: branch === 'feat/a' ? 'main' : 'feat/a',
+    }));
 
     const result = await sync('/repo', {
       interactive: false,
@@ -1071,5 +1087,78 @@ describe('sync', () => {
         expect.stringContaining('dub abort'),
       ]),
     );
+  });
+
+  describe('batched PR sync info', () => {
+    it('uses the batched map and skips per-branch gh calls when not truncated', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'feat/a' },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map([
+          ['feat/a', { state: 'OPEN', baseRefName: 'main' }],
+          ['feat/b', { state: 'OPEN', baseRefName: 'feat/a' }],
+        ]),
+        truncated: false,
+      });
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockGetAllPrSyncInfoBatch).toHaveBeenCalledTimes(1);
+      expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
+      expect(mockGetBranchPrLifecycleState).not.toHaveBeenCalled();
+    });
+
+    it('cleans a merged branch using the batched map without per-branch calls', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map([
+          ['feat/a', { state: 'MERGED', baseRefName: 'main' }],
+        ]),
+        truncated: false,
+      });
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockDeleteBranch).toHaveBeenCalledWith('feat/a', '/repo');
+      expect(result.cleaned).toContain('feat/a');
+      expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
+    });
+
+    it('falls back to per-branch lookup when the batch reports truncation', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+      // Branch absent from the truncated batch must trigger a per-branch call.
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map(),
+        truncated: true,
+      });
+      mockGetBranchPrSyncInfo.mockResolvedValue({
+        state: 'OPEN',
+        baseRefName: 'main',
+      });
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      expect(mockGetBranchPrSyncInfo).toHaveBeenCalledWith('feat/a', '/repo');
+    });
   });
 });

@@ -16,6 +16,7 @@ import {
   checkGhAuth,
   createPr,
   ensureGhInstalled,
+  getAllPrSyncInfoBatch,
   getBranchPrLifecycleState,
   getBranchPrSyncInfo,
   getPr,
@@ -206,6 +207,132 @@ describe('getPrMergeStatusByNumber', () => {
       mergeable: null,
       mergeStateStatus: null,
     });
+  });
+});
+
+describe('getAllPrSyncInfoBatch', () => {
+  it('returns a map keyed by headRefName with classified state', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 1,
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+        },
+        {
+          number: 2,
+          headRefName: 'feat/b',
+          baseRefName: 'feat/a',
+          state: 'CLOSED',
+          mergedAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          number: 3,
+          headRefName: 'feat/c',
+          baseRefName: 'main',
+          state: 'CLOSED',
+          mergedAt: null,
+        },
+      ]),
+    });
+
+    const result = await getAllPrSyncInfoBatch('/repo');
+
+    expect(result.truncated).toBe(false);
+    expect(result.byBranch.get('feat/a')).toEqual({
+      state: 'OPEN',
+      baseRefName: 'main',
+    });
+    expect(result.byBranch.get('feat/b')).toEqual({
+      state: 'MERGED',
+      baseRefName: 'feat/a',
+    });
+    expect(result.byBranch.get('feat/c')).toEqual({
+      state: 'CLOSED',
+      baseRefName: 'main',
+    });
+  });
+
+  it('issues a single gh pr list call with the documented JSON fields', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '[]' });
+
+    await getAllPrSyncInfoBatch('/repo');
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--json',
+        'number,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup',
+        '--limit',
+        '100',
+      ],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('returns an empty map when no PRs exist', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '[]' });
+    const result = await getAllPrSyncInfoBatch('/repo');
+    expect(result.byBranch.size).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('flags truncated when the page limit is hit', async () => {
+    const entries = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      headRefName: `feat/${i}`,
+      baseRefName: 'main',
+      state: 'OPEN',
+      mergedAt: null,
+    }));
+    mockExeca.mockResolvedValueOnce({ stdout: JSON.stringify(entries) });
+
+    const result = await getAllPrSyncInfoBatch('/repo');
+
+    expect(result.truncated).toBe(true);
+    expect(result.byBranch.size).toBe(100);
+  });
+
+  it('keeps the first PR per branch when gh returns duplicates', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 5,
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+        },
+        {
+          number: 4,
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'CLOSED',
+          mergedAt: '2026-01-01T00:00:00Z',
+        },
+      ]),
+    });
+
+    const result = await getAllPrSyncInfoBatch('/repo');
+
+    expect(result.byBranch.get('feat/a')).toEqual({
+      state: 'OPEN',
+      baseRefName: 'main',
+    });
+  });
+
+  it('throws a DubError when gh fails', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('network down'));
+    await expect(getAllPrSyncInfoBatch('/repo')).rejects.toThrow(
+      'Failed to list PRs',
+    );
   });
 });
 
