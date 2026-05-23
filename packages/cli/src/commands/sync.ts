@@ -5,6 +5,7 @@ import {
   branchExists,
   checkoutBranch,
   checkoutRemoteBranch,
+  clearStaleNamespacedFetchRefs,
   deleteBranch,
   fastForwardBranchToRef,
   fetchBranches,
@@ -12,6 +13,7 @@ import {
   getRefSha,
   hardResetBranchToRef,
   isAncestor,
+  pruneRemote,
   rebaseBranchOntoRef,
   remoteBranchExists,
 } from '../lib/git';
@@ -155,12 +157,19 @@ export async function sync(
   const reparentedBranchNames = new Set<string>();
 
   try {
+    const allTrackedBranches = new Set(
+      state.stacks.flatMap((s) => s.branches.map((b) => b.name)),
+    );
+    await clearStaleNamespacedFetchRefs(allTrackedBranches, cwd);
+
     console.log('🌲 Fetching branches from remote...');
     const toFetch = [...new Set([...roots, ...stackBranches])];
     if (toFetch.length > 0) {
       await fetchBranches(toFetch, cwd);
       result.fetched = toFetch;
     }
+
+    await pruneRemote('origin', cwd);
 
     for (const root of roots) {
       const remoteRef = `origin/${root}`;

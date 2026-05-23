@@ -1,16 +1,23 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestRepo, gitInRepo } from '../../test/helpers';
+import {
+  attachBareRemote,
+  createTestRepo,
+  gitInRepo,
+} from '../../test/helpers';
 import { DubError } from './errors';
 import {
   branchExists,
   checkoutBranch,
+  clearStaleNamespacedFetchRefs,
   commitStaged,
   commitStagedFromFile,
   createBranch,
+  DUBSTACK_FETCH_REF_PREFIX,
   deleteBranch,
   fastForwardBranchToRef,
+  fetchBranches,
   forceBranchTo,
   getBranchTip,
   getCurrentBranch,
@@ -22,6 +29,9 @@ import {
   isGitRepo,
   isValidBranchName,
   isWorkingTreeClean,
+  listNamespacedFetchRefs,
+  namespacedFetchRef,
+  pruneRemote,
   rebaseOnto,
   stageAll,
 } from './git';
@@ -372,6 +382,122 @@ describe('commitStagedFromFile', () => {
     fs.writeFileSync(messagePath, 'test: no staged changes\n');
 
     await expect(commitStagedFromFile(messagePath, dir)).rejects.toThrow(
+      DubError,
+    );
+  });
+});
+
+describe('fetchBranches', () => {
+  let remoteCleanup: () => Promise<void>;
+
+  beforeEach(async () => {
+    const remote = await attachBareRemote(dir);
+    remoteCleanup = remote.cleanup;
+    await gitInRepo(dir, ['push', 'origin', 'main']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'a']);
+    await gitInRepo(dir, ['push', 'origin', 'feat/a']);
+    await gitInRepo(dir, ['checkout', 'main']);
+  });
+
+  afterEach(async () => {
+    await remoteCleanup();
+  });
+
+  it('writes fetched tip to refs/dubstack/fetch-head/<branch>', async () => {
+    // Move remote forward so a fetch actually has work to do.
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a2');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'a2']);
+    await gitInRepo(dir, ['push', 'origin', 'feat/a']);
+    const remoteSha = (
+      await gitInRepo(dir, ['rev-parse', 'feat/a'])
+    ).stdout.trim();
+    // Reset local feat/a to simulate a "stale local" state.
+    await gitInRepo(dir, ['reset', '--hard', 'HEAD^']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    await fetchBranches(['feat/a'], dir);
+
+    const namespaced = (
+      await gitInRepo(dir, ['rev-parse', namespacedFetchRef('feat/a')])
+    ).stdout.trim();
+    expect(namespaced).toBe(remoteSha);
+  });
+
+  it('leaves the user FETCH_HEAD untouched (--no-write-fetch-head)', async () => {
+    const fetchHeadPath = path.join(dir, '.git', 'FETCH_HEAD');
+    const manualContent = 'sentinel value written by user\n';
+    fs.writeFileSync(fetchHeadPath, manualContent);
+
+    await fetchBranches(['feat/a'], dir);
+
+    expect(fs.readFileSync(fetchHeadPath, 'utf8')).toBe(manualContent);
+  });
+
+  it('does not fetch remote tags (--no-tags)', async () => {
+    // Tag a commit on the remote that should NOT be pulled in.
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    await gitInRepo(dir, ['tag', 'v9.9.9-test']);
+    await gitInRepo(dir, ['push', 'origin', 'v9.9.9-test']);
+    await gitInRepo(dir, ['tag', '-d', 'v9.9.9-test']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    await fetchBranches(['feat/a'], dir);
+
+    const { stdout } = await gitInRepo(dir, ['tag', '-l']);
+    expect(stdout.trim()).toBe('');
+  });
+
+  it('skips missing remote refs without throwing', async () => {
+    await expect(
+      fetchBranches(['no-such-branch'], dir),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('clearStaleNamespacedFetchRefs', () => {
+  it('deletes refs whose source branch is not in the keep set', async () => {
+    await gitInRepo(dir, [
+      'update-ref',
+      `${DUBSTACK_FETCH_REF_PREFIX}feat/keep`,
+      'HEAD',
+    ]);
+    await gitInRepo(dir, [
+      'update-ref',
+      `${DUBSTACK_FETCH_REF_PREFIX}feat/stale`,
+      'HEAD',
+    ]);
+
+    const deleted = await clearStaleNamespacedFetchRefs(['feat/keep'], dir);
+
+    expect(deleted).toEqual([`${DUBSTACK_FETCH_REF_PREFIX}feat/stale`]);
+    const remaining = await listNamespacedFetchRefs(dir);
+    expect(remaining).toEqual([`${DUBSTACK_FETCH_REF_PREFIX}feat/keep`]);
+  });
+
+  it('returns an empty list when nothing under the namespace exists', async () => {
+    const deleted = await clearStaleNamespacedFetchRefs(['anything'], dir);
+    expect(deleted).toEqual([]);
+  });
+});
+
+describe('pruneRemote', () => {
+  it('runs against the configured remote without throwing', async () => {
+    const remote = await attachBareRemote(dir);
+    try {
+      await gitInRepo(dir, ['push', 'origin', 'main']);
+      await expect(pruneRemote('origin', dir)).resolves.toBeUndefined();
+    } finally {
+      await remote.cleanup();
+    }
+  });
+
+  it('throws a DubError when the remote does not exist', async () => {
+    await expect(pruneRemote('nope-not-a-remote', dir)).rejects.toThrow(
       DubError,
     );
   });
