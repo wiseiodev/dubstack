@@ -457,6 +457,30 @@ describe('fetchBranches', () => {
       fetchBranches(['no-such-branch'], dir),
     ).resolves.toBeUndefined();
   });
+
+  it('still opportunistically updates refs/remotes/origin/<branch>', async () => {
+    // Downstream sync code reads origin/<branch> directly. With our
+    // explicit refspec, git must keep that tracking ref in step via the
+    // configured `+refs/heads/*:refs/remotes/origin/*` refspec. If a git
+    // version or repo config ever breaks that invariant, this test fails.
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a-opportunistic');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'a-opportunistic']);
+    await gitInRepo(dir, ['push', 'origin', 'feat/a']);
+    const remoteSha = (
+      await gitInRepo(dir, ['rev-parse', 'feat/a'])
+    ).stdout.trim();
+    await gitInRepo(dir, ['reset', '--hard', 'HEAD^']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    await fetchBranches(['feat/a'], dir);
+
+    const trackingSha = (
+      await gitInRepo(dir, ['rev-parse', 'refs/remotes/origin/feat/a'])
+    ).stdout.trim();
+    expect(trackingSha).toBe(remoteSha);
+  });
 });
 
 describe('clearStaleNamespacedFetchRefs', () => {
