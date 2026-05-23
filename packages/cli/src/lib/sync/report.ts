@@ -10,12 +10,14 @@ export function printSyncSummary(result: SyncResult): void {
   const keptLocal = result.branches.filter(
     (b) => b.action === 'kept-local',
   ).length;
+  const cached = result.branches.filter((b) => b.status === 'fresh').length;
   const worktreeSkipped = result.branches.filter(
     (b) => b.status === 'checked-out-elsewhere',
   ).length;
   const worktreeSuffix =
     worktreeSkipped > 0 ? ` (${worktreeSkipped} checked-out-elsewhere)` : '';
+  const cachedSuffix = cached > 0 ? `, ${cached} fresh-cached` : '';
   console.log(
-    `✔ Sync complete: ${synced} synced, ${keptLocal} kept-local, ${skipped} skipped${worktreeSuffix}, ${result.cleaned.length} cleaned`,
+    `✔ Sync complete: ${synced} synced, ${keptLocal} kept-local, ${skipped} skipped${worktreeSuffix}${cachedSuffix}, ${result.cleaned.length} cleaned`,
   );
 }

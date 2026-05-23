@@ -8,19 +8,21 @@ export type BranchSyncStatus =
   | 'needs-remote-sync-safe'
   | 'needs-remote-sync'
   | 'reconcile-needed'
-  | 'local-ahead';
+  | 'local-ahead'
+  | 'fresh';
 
 export interface SyncOptions {
   force: boolean;
   restack: boolean;
   all: boolean;
   interactive: boolean;
+  fresh: boolean;
 }
 
 export interface BranchSyncOutcome {
   branch: string;
   status: BranchSyncStatus;
-  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none';
+  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none' | 'cached';
   message: string;
 }
 
