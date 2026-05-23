@@ -1,0 +1,216 @@
+{
+  "meta": {
+    "workId": "DUB-19",
+    "title": "Range-diff empty-output bug guard + regression test",
+    "artifactId": "dub-19",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-19-range-diff-empty-output-bug-guard-regression-test",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-19",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 3,
+    "additions": 197,
+    "deletions": 7,
+    "diffStat": "3 files changed, 197 insertions(+), 7 deletions(-)"
+  },
+  "prompt": "Defensive guard + regression test against the Graphite v1.7.18 range-diff bug class: never treat the empty output of a comparison command as 'they match.' Audit every match-decision site in lib/sync/branch-status.ts, lib/sync/cleanup.ts, commands/sync.ts, and lib/git.ts, then add a positive-signal guard plus a regression test that fails without it.",
+  "tldr": "lib/git.ts:hasUniquePatchCommits collapsed empty `git cherry` stdout to 'no unique commits = equivalent', the same bug class Graphite hit in v1.7.18. The helper now requires SHA equality or `headRef`-reachable-from-`baseRef` before treating empty output as equivalence; otherwise it fails open ('has unique') so callers do not silently drop local work. New regression test in git.cherry-empty.test.ts fails on the pre-guard implementation.",
+  "why": {
+    "motivation": [
+      "Audit the four named files for any place that decides 'matches / doesn't match' from a git command's stdout.",
+      "Eliminate the specific class of bug where an empty output is treated as 'equivalent' without a positive confirming signal.",
+      "Lock the behavior in with a regression test so the bug cannot reappear."
+    ],
+    "before": [
+      "hasUniquePatchCommits(baseRef, headRef) split cherry stdout, trimmed, and returned `lines.some(startsWith('+'))`.",
+      "Empty stdout → empty array → some() returns false → caller (restack.ts:204) interprets as 'no unique commits' and SKIPS the rebase.",
+      "If `git cherry` ever produced empty output for a non-equivalent pair (the Graphite bug pattern: obscure git config, commit-msg encoding edge case, etc.), local commits would be silently dropped without any visible signal."
+    ],
+    "after": [
+      "Non-empty cherry output: behavior unchanged — same `.some(startsWith('+'))` decision.",
+      "Empty cherry output: helper requires a positive equivalence signal — SHA equality OR `headRef` is an ancestor of `baseRef`. If either holds, it returns false (no unique). If neither holds, it returns true (has unique) so callers do not silently discard local work.",
+      "Failure of the confirming check (e.g., one of the refs cannot be resolved) collapses to 'not confirmed', which again returns true — always the safe direction."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 37,
+      "deletions": 7,
+      "explanation": "Restructured hasUniquePatchCommits so that empty `git cherry` stdout goes through isPatchEquivalenceConfirmed (SHA equality + ancestor check) instead of collapsing to false. Non-empty path is unchanged. Added a JSDoc note tying the guard to the Graphite v1.7.18 bug class.",
+      "snippet": "if (lines.length === 0) {\n  return !(await isPatchEquivalenceConfirmed(baseRef, headRef, cwd));\n}\nreturn lines.some((line) => line.startsWith('+'));",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/git.cherry-empty.test.ts",
+      "changeType": "new",
+      "additions": 108,
+      "deletions": 0,
+      "explanation": "Vitest regression suite that mocks execa to simulate the three empty-output situations. Test 1 fails on the pre-guard implementation: empty cherry + differing SHAs + head not ancestor of base must return true. Tests 2 and 3 confirm the legitimate equivalence paths (same SHA, head ancestor of base) still return false.",
+      "snippet": "it('reports unique commits when cherry is empty but SHAs differ (guard)', async () => {\n  // empty cherry, distinct SHAs, head NOT an ancestor of base\n  await expect(hasUniquePatchCommits('main', 'feat', '/repo')).resolves.toBe(true);\n});",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-19-qa.md",
+      "changeType": "new",
+      "additions": 52,
+      "deletions": 0,
+      "explanation": "Self-QA fallback markdown — non-browser change so no Playwright video. Contains the per-site audit table for the four files in scope, the guard description, and the scenarios exercised by the automated suite.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Audit completeness",
+      "location": "packages/cli/src/lib/sync/branch-status.ts, packages/cli/src/lib/sync/cleanup.ts, packages/cli/src/commands/sync.ts, packages/cli/src/lib/git.ts",
+      "rationale": "The audit table in .reports/dub-19-qa.md walks every match-decision site in the four files named by the issue. hasUniquePatchCommits is the only one that consumed empty stdout as a match signal; the rest already use positive signals (SHA equality, ancestor exit code, rebase success). Confirm nothing was missed."
+    },
+    {
+      "title": "Direction of the ancestor check",
+      "location": "packages/cli/src/lib/git.ts:isPatchEquivalenceConfirmed",
+      "rationale": "Empty `git cherry baseRef headRef` means `rev-list baseRef..headRef` is empty, which happens when headRef is reachable from baseRef (or head == base). The guard therefore calls `isAncestor(headRef, baseRef)`. Verify the direction matches the cherry semantics — flipping it would invert the guard."
+    },
+    {
+      "title": "Fail-open semantics",
+      "location": "packages/cli/src/lib/git.ts:hasUniquePatchCommits",
+      "rationale": "When the confirming check throws (refs missing, transient git failure), the catch returns false → outer `!` flips to true → 'has unique'. This is intentional: erroneously running a rebase is recoverable; silently skipping one is not. Confirm this matches the project's preferred error stance."
+    },
+    {
+      "title": "Caller behavior change",
+      "location": "packages/cli/src/commands/restack.ts:204",
+      "rationale": "restack.ts:204 still treats `!hasUniquePatches` as 'skip the rebase'. The guard now produces fewer false 'no unique' results, so previously-skipped branches in the bug case will rebase instead. The happy paths (squash-merged children, truly unique commits) remain identical."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "Empty cherry + differing SHAs + head not ancestor of base → has unique (guard)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.cherry-empty.test.ts — fails without the guard, passes with it."
+    },
+    {
+      "kind": "unit",
+      "label": "Empty cherry + identical SHAs → no unique",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.cherry-empty.test.ts — exercises the SHA-equality confirmation branch."
+    },
+    {
+      "kind": "unit",
+      "label": "Empty cherry + head ancestor of base → no unique",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/git.cherry-empty.test.ts — exercises the isAncestor confirmation branch."
+    },
+    {
+      "kind": "integration",
+      "label": "Happy paths in git.test.ts continue to pass",
+      "status": "done",
+      "evidence": "Existing fixture tests 'returns true when a branch has unique work' and 'returns false when squash-merged upstream' produce non-empty cherry output and are unaffected by the guard."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "lint",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . — 222 files, no fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit across docs + dubstack — 0 errors."
+    },
+    {
+      "name": "tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "vitest — 76 files, 642 tests pass (3 new for DUB-19)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Pure CLI library change inside packages/cli/src/lib/git.ts. No TSX or browser surface modified.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-19-qa.md",
+    "caption": "Self-QA fallback markdown — audit table covering every match-decision site in the four files named by the issue, plus the regression scenarios exercised by the automated suite.",
+    "scenarios": [
+      "Empty cherry + SHAs differ + head not ancestor of base → guard returns has unique (regression).",
+      "Empty cherry + same SHA → returns no unique (legitimate equivalence).",
+      "Empty cherry + head ancestor of base → returns no unique (legitimate equivalence).",
+      "Non-empty cherry output (squash-merged child, truly unique commits) → unchanged behavior, existing fixture tests still pass."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "Audit complete; documented in PR description which 'match' decisions were reviewed.",
+      "status": "satisfied",
+      "evidence": "Full audit table in .reports/dub-19-qa.md covering all 9 match-decision sites across the four files named by the issue."
+    },
+    {
+      "criterion": "Every match-decision site verified to require a positive signal beyond empty output.",
+      "status": "satisfied",
+      "evidence": "8 of 9 sites already used positive signals (SHA equality, ancestor exit code, rebase/FF success). The lone vulnerable site, hasUniquePatchCommits, now requires SHA equality or ancestor confirmation before trusting empty output."
+    },
+    {
+      "criterion": "New regression test that fails without the guard and passes with it.",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/git.cherry-empty.test.ts — primary test asserts has-unique=true for empty cherry + differing SHAs, which the pre-guard implementation could not produce (empty array → some() === false)."
+    },
+    {
+      "criterion": "No behavior change for the happy path.",
+      "status": "satisfied",
+      "evidence": "Non-empty cherry output flows through the identical `.some(startsWith('+'))` logic. All 642 existing tests pass."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Confirmed happy path unchanged: filtering empty lines from cherry stdout does not affect .some(startsWith('+')) because empty strings do not start with '+'.",
+      "Confirmed isAncestor direction matches `git cherry baseRef headRef` semantics — empty output ⟺ headRef reachable from baseRef.",
+      "Confirmed fail-open semantics: helper exceptions in the confirmation path collapse to 'not confirmed' → 'has unique', which is the safe direction (rebase instead of silent skip).",
+      "No other callers of hasUniquePatchCommits beyond restack.ts:204; behavior change there is from a false 'no unique' to a correct 'has unique', which triggers a rebase that should have run."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-14 (sync status taxonomy + reconciliation source tags)",
+      "status": "merged in commit 3e15a44 prior to this branch; no runtime coupling beyond shared use of lib/git.ts."
+    }
+  ],
+  "rollout": {
+    "summary": "Safe to merge once review approves. Pure additive guard inside a library helper; no migrations, flags, or staged rollout needed.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship",
+        "details": "Squash-merge into main. The guard activates immediately for every `dub sync` and `dub restack` invocation; the worst-case happy-path effect is one extra `git rev-parse` + `git merge-base --is-ancestor` only when `git cherry` returns empty stdout."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Monitor",
+        "details": "If `dub restack` starts attempting rebases that previously silently skipped, that is the guard catching the bug case (or a fixture quirk) — investigate the affected branch, not the guard."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "9df8839649191a832e8d8d19932b959a45c234ae",
+    "shortSha": "9df8839",
+    "message": "fix(sync): guard hasUniquePatchCommits against empty-cherry false equivalence [DUB-19]"
+  }
+}
