@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-5 - --force-with-lease for all pushes + remote-tracking SHA discipline</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-5</div>
+        <h1>DUB-5 - --force-with-lease for all pushes + remote-tracking SHA discipline</h1>
+        <div class="meta"><span><strong>2</strong> files</span>
+<span><span class="add">+211</span> / <span class="del">-10</span></span>
+<span>branch <strong>feature/dub-5--force-with-lease-for-all-pushes-remote-tracking-sha</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Switch all pushes from raw --force to --force-with-lease keyed on a locally-tracked SHA (refs/dubstack/last-pushed/&lt;branch&gt;) so that background fetches by IDEs can&#39;t defeat the lease and silently overwrite a teammate&#39;s work.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>pushBranch now uses --force-with-lease=refs/heads/&lt;branch&gt;:&lt;trackedSha&gt; against a locally-maintained ref under refs/dubstack/last-pushed/&lt;branch&gt;. The tracking ref is only written by pushBranch itself on a successful push, so background fetches can&#39;t move it. Lease rejections surface a DubError pointing the user at `dub sync`.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Without --force-with-lease, dub submit can silently overwrite teammate pushes during the same branch&#39;s lifecycle.</p>
+<p class="lede">Bare --force-with-lease leases against refs/remotes/origin/&lt;branch&gt;, which IDE/tool background fetches update silently — defeating the lease (the &#39;Graphite gotcha&#39;).</p>
+<p class="lede">Maintaining our own refs/dubstack/last-pushed/&lt;branch&gt; and leasing against it scopes the lease to state only dub touches.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>pushBranch ran `git push --force-with-lease origin &lt;branch&gt;` with no expect value.</li>
+<li>Background `git fetch` from any tool could move refs/remotes/origin/&lt;branch&gt; to a third-party SHA, making the bare lease succeed against that updated tracking ref.</li>
+<li>Push generic-errored with &#39;Failed to push&#39; on rejection — no specific recovery for lease failures.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>pushBranch reads refs/dubstack/last-pushed/&lt;branch&gt; and pushes with --force-with-lease=refs/heads/&lt;branch&gt;:&lt;trackedSha&gt;.</li>
+<li>On success it updates the tracking ref to the freshly-pushed SHA, so the next push is protected against any new third-party work.</li>
+<li>Lease rejections raise DubError(&#39;Push of \&#39;&lt;branch&gt;\&#39; refused: remote has updates not reflected in our last-pushed ref.&#39;) with a recovery hint to run `dub sync`.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+107</span> <span class="del">-10</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Replaces the bare --force-with-lease pushBranch with one keyed on refs/dubstack/last-pushed/&lt;branch&gt;. Adds helpers lastPushedRef, readLastPushedSha, writeLastPushedSha, plus isLeaseRejectionError to distinguish lease failures from generic push errors.</p>
+    <div class="code"><pre>export async function pushBranch(branch: string, cwd: string): Promise&lt;void&gt; {
+  const trackedSha = await readLastPushedSha(branch, cwd);
+  const leaseArg = trackedSha
+    ? `--force-with-lease=refs/heads/${branch}:${trackedSha}`
+    : &#39;--force-with-lease&#39;;
+
+  try {
+    await execa(&#39;git&#39;, [&#39;push&#39;, leaseArg, &#39;origin&#39;, branch], { cwd });
+  } catch (error) {
+    const details = readGitCommandOutput(error);
+    if (isLeaseRejectionError(details)) {
+      throw new DubError(
+        formatGitFailure(
+          `Push of &#39;${branch}&#39; refused: remote has updates not reflected in our last-pushed ref.`,
+          details,
+        ),
+        [
+          `Run &#39;dub sync&#39; to reconcile remote updates, then retry &#39;dub submit&#39;.`,
+          `Run &#39;git fetch origin ${branch}&#39; and inspect &#39;origin/${branch}&#39; to see the third-party changes.`,
+        ],
+      );
+    }
+    throw new DubError(
+      formatGitFailure(`Failed to push &#39;${branch}&#39;.`, details),
+      [
+        `Run &#39;dub sync&#39; to reconcile remote updates, then retry the push.`,
+        `Run &#39;git push --force-with-lease origin ${branch}&#39; manually to see the underlying error.`,
+      ],
+    );
+  }
+
+  const newSha = await getBranchTip(branch, cwd);
+  await writeLastPushedSha(branch, newSha, cwd);
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+104</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a pushBranch describe-block that runs real git pushes against a bare remote in a temp dir. Tests cover: first-push records the tracked SHA; second push succeeds when tracked SHA matches reality; concurrent third-party push triggers a lease error, surfaces the recovery hint, and leaves the tracked SHA unchanged so retry-after-sync works.</p>
+    <div class="code"><pre>it(&#39;refuses with a lease error when a third party pushed concurrently&#39;, async () =&gt; {
+  await pushBranch(&#39;feat/lease&#39;, dir);
+  const trackedSha = await readLastPushedSha(&#39;feat/lease&#39;, dir);
+  // ...clone bare remote into otherDir, third-party commit, push...
+  await gitInRepo(dir, [&#39;fetch&#39;, &#39;origin&#39;, &#39;feat/lease&#39;]);
+
+  const err = await pushBranch(&#39;feat/lease&#39;, dir).catch((e) =&gt; e);
+  expect(err).toBeInstanceOf(DubError);
+  expect(err.message).toMatch(
+    /refused: remote has updates not reflected in our last-pushed ref/,
+  );
+  expect((err as DubError).recovery.join(&#39;\n&#39;)).toMatch(/dub sync/);
+
+  expect(await readLastPushedSha(&#39;feat/lease&#39;, dir)).toBe(trackedSha);
+});</pre></div>
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Lease argument shape</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts pushBranch</code> Per git docs, --force-with-lease=&lt;refname&gt;:&lt;expect&gt; takes the remote-side ref path (refs/heads/&lt;branch&gt;) and the SHA we expect that ref to currently hold. Confirm refname is constructed correctly and expect comes from the dubstack tracking ref, not from refs/remotes/origin/.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Lease-vs-generic error detection</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts isLeaseRejectionError</code> Detection matches &#39;stale info&#39; (case-insensitive) in concatenated stderr/stdout. This is git&#39;s documented message for --force-with-lease rejection. Confirm this won&#39;t false-positive on non-lease errors and won&#39;t false-negative if git changes wording.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Tracking-ref atomicity on failure</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts pushBranch</code> writeLastPushedSha is only called after a successful push. On lease failure the tracked SHA stays at the old value so retry-after-sync still leases correctly. Test &#39;refuses with a lease error...&#39; asserts this.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">First-push fallback gap</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts pushBranch trackedSha branch</code> When refs/dubstack/last-pushed/&lt;branch&gt; does not exist (first push), code falls back to bare --force-with-lease, which leases against the stale-prone refs/remotes/origin/&lt;branch&gt;. Documented limitation; not in the issue&#39;s acceptance criteria. Confirm this is acceptable.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pushBranch records last-pushed SHA on first push</div>
+      <div class="note">packages/cli/src/lib/git.test.ts — &#39;pushes and records the last-pushed SHA on first push&#39;</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Lease succeeds when our tracked SHA matches reality on remote (acceptance criterion)</div>
+      <div class="note">packages/cli/src/lib/git.test.ts — &#39;lease succeeds when our tracked SHA matches reality on remote&#39;</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Concurrent third-party push refuses with lease error (acceptance criterion)</div>
+      <div class="note">packages/cli/src/lib/git.test.ts — &#39;refuses with a lease error when a third party pushed concurrently&#39;</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lastPushedRef returns the expected ref path</div>
+      <div class="note">packages/cli/src/lib/git.test.ts — &#39;returns the dubstack ref path for a branch&#39;</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">biome lint+format</div>
+      <div class="note">Command: pnpm checks. Checked 188 files in 49ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">typecheck</div>
+      <div class="note">Command: pnpm typecheck. 2 packages clean (dubstack + docs)</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">unit tests</div>
+      <div class="note">Command: pnpm test. 68 test files / 503 tests passed (10.3s)</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Fallback QA: 3 new unit tests exercise the lease behavior against a real bare git remote.</div>
+      <div class="note">Pure git library change with no UI surface. Behavior is verified by deterministic unit tests that exercise real git push against a bare remote.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-5-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>First push records the tracked SHA and matches the remote ref.</li>
+<li>Lease succeeds when our tracked SHA still matches the remote (acceptance criterion).</li>
+<li>Concurrent third-party push triggers a lease error with a `dub sync` recovery hint; the tracked SHA is left unchanged so retry-after-sync works (acceptance criterion).</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pushBranch uses git push --force-with-lease=&lt;refname&gt;:&lt;sha&gt; with our tracked SHA</div>
+      <div class="note">packages/cli/src/lib/git.ts pushBranch constructs --force-with-lease=refs/heads/&lt;branch&gt;:&lt;trackedSha&gt; from readLastPushedSha.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">After every successful push from dub submit and dub sync, write refs/dubstack/last-pushed/&lt;branch&gt; to the new SHA</div>
+      <div class="note">writeLastPushedSha is called at the tail of pushBranch on success. dub submit calls pushBranch directly; dub sync re-submits via submitRefreshedStacks → submit → pushBranch.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Lease failure surfaces a DubError with recovery hint to run dub sync and retry</div>
+      <div class="note">isLeaseRejectionError detects &#39;stale info&#39;; pushBranch throws DubError(&#39;Push of &lt;branch&gt; refused: remote has updates not reflected in our last-pushed ref.&#39;) with recovery [&quot;Run &#39;dub sync&#39; to reconcile remote updates, then retry &#39;dub submit&#39;.&quot;, ...].</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Unit test: simulate concurrent third-party push, verify our push refuses with lease error</div>
+      <div class="note">git.test.ts &#39;refuses with a lease error when a third party pushed concurrently&#39; — clones bare remote, third-party pushes, asserts DubError with lease message and unchanged tracked SHA.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Unit test: lease succeeds when our tracked SHA matches reality</div>
+      <div class="note">git.test.ts &#39;lease succeeds when our tracked SHA matches reality on remote&#39; — pushes twice without third-party interference, asserts no throw and tracked ref advances.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer initially flagged a critical that proved to be correct-by-design on re-analysis (lease refname semantics).</li>
+<li>Minor: lease detection via &#39;stale info&#39; substring is workable for current git but could be brittle across versions. Mitigated by the generic-push-error fallback also listing dub sync as a recovery step.</li>
+<li>Minor (documented as follow-up): first-push fallback uses bare --force-with-lease, which is vulnerable to the same background-fetch race for the very first push only. Not in acceptance criteria; subsequent pushes are fully protected.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">External dependencies</div>
+  <div class="note">No external dependencies detected</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">No data migration. Tracking refs (refs/dubstack/last-pushed/&lt;branch&gt;) are created lazily on first successful push per branch. No user-visible config or workflow changes outside the new DubError message on lease failure.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Ship</div>
+  <div class="note">Squash-merge into main; semantic-release picks up the feat: commit and publishes a new minor version of the dubstack CLI.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">After ship</div>
+  <div class="label">Monitor</div>
+  <div class="note">Watch user reports for unexpected &#39;Push of &lt;branch&gt; refused&#39; errors. Expected legitimate trigger: a teammate pushed to the same branch between our last submit and this one.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>f647527</strong> <code>f647527dd25a4f378fda33460c9c2f76d46141c2</code></div>
+  <pre>feat(git): force-with-lease scoped to dubstack-tracked SHA
+
+Switch pushBranch from a bare --force-with-lease to one keyed on our
+own refs/dubstack/last-pushed/&lt;branch&gt; tracking ref. The default lease
+target (refs/remotes/origin/&lt;branch&gt;) is updated by background fetches
+from IDEs and watchers, which silently defeats the lease and lets a
+push overwrite a teammate&#39;s work. The tracking ref is only written by
+pushBranch itself (which is invoked by dub submit and, transitively,
+dub sync), so background tools can&#39;t move it.
+
+Lease rejections now raise a DubError with a recovery hint to run
+&#39;dub sync&#39; and retry.
+
+Completes DUB-5</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">git.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
