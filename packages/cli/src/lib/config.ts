@@ -3,8 +3,11 @@ import * as path from 'node:path';
 import { DubError } from './errors';
 import { getDubDir } from './state';
 
+export type McpMode = 'read-only' | 'interactive' | 'trusted';
+
 export interface DubConfig {
   aiAssistantEnabled: boolean;
+  mcpMode: McpMode;
   ai: {
     defaults: {
       createMetadata: boolean;
@@ -46,6 +49,7 @@ type DeepPartial<T> =
 
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
+  mcpMode: 'interactive',
   ai: {
     defaults: {
       createMetadata: false,
@@ -126,6 +130,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
       typeof config.aiAssistantEnabled === 'boolean'
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
+    mcpMode: normalizeMcpMode(config.mcpMode),
     ai: {
       defaults: {
         createMetadata:
@@ -202,6 +207,13 @@ function normalizeAiProviderSelection(
     return value;
   }
   return DEFAULT_CONFIG.ai.provider.selected;
+}
+
+function normalizeMcpMode(value: unknown): McpMode {
+  if (value === 'read-only' || value === 'interactive' || value === 'trusted') {
+    return value;
+  }
+  return DEFAULT_CONFIG.mcpMode;
 }
 
 function normalizeAiProviderModel(value: unknown): string | null {

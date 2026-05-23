@@ -1,9 +1,13 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import { getCurrentBranch } from '../lib/git';
 import { readHistory } from '../lib/history';
 import { type DubState, initState, writeState } from '../lib/state';
+import { configMcpMode } from './config';
+import { type ConfirmMutatingFn, mcp } from './mcp';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -92,6 +96,12 @@ describe('mcp command', () => {
       'dubstack.children',
       'dubstack.trunk',
       'dubstack.history',
+      'dubstack.create',
+      'dubstack.modify',
+      'dubstack.submit',
+      'dubstack.sync',
+      'dubstack.checkout',
+      'dubstack.delete',
     ]);
 
     server.send({
@@ -150,6 +160,253 @@ describe('mcp command', () => {
     ).toBe(false);
   });
 });
+
+describe('mcp mutating tools', () => {
+  it('refuses dubstack.create in read-only mode and audits the refusal', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    await configMcpMode(dir, 'read-only');
+
+    const confirm = vi.fn<ConfirmMutatingFn>();
+    const response = await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.create',
+        arguments: { name: 'feat/b' },
+      },
+    });
+
+    const result = response.result as {
+      content: Array<{ text: string }>;
+      isError: boolean;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(
+      'dubstack.create refused: repo is in read-only MCP mode. Run `dub config mcp-mode interactive` to enable mutating tools.',
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await getCurrentBranch(dir)).toBe('feat/a');
+
+    const entries = await readHistory(dir, { limit: 5 });
+    expect(
+      entries.some(
+        (entry) =>
+          entry.status === 'error' &&
+          entry.command.startsWith('dub mcp tools/call dubstack.create'),
+      ),
+    ).toBe(true);
+  });
+
+  it('runs dubstack.checkout in trusted mode without confirmation', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    await configMcpMode(dir, 'trusted');
+
+    const confirm = vi.fn<ConfirmMutatingFn>();
+    const response = await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.checkout',
+        arguments: { branch: 'main' },
+      },
+    });
+
+    const result = response.result as {
+      isError?: boolean;
+      structuredContent: { result: { branch: string } };
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent.result.branch).toBe('main');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await getCurrentBranch(dir)).toBe('main');
+  });
+
+  it('runs dubstack.checkout in interactive mode only after confirmation', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    await configMcpMode(dir, 'interactive');
+
+    const confirm = vi
+      .fn<ConfirmMutatingFn>()
+      .mockResolvedValue({ confirmed: true, reason: 'ok' });
+    const response = await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.checkout',
+        arguments: { branch: 'main' },
+      },
+    });
+
+    const result = response.result as {
+      isError?: boolean;
+      structuredContent: { result: { branch: string } };
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent.result.branch).toBe('main');
+    expect(confirm).toHaveBeenCalledWith('dubstack.checkout', {
+      branch: 'main',
+    });
+    expect(await getCurrentBranch(dir)).toBe('main');
+  });
+
+  it('refuses in interactive mode when the user declines', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    await configMcpMode(dir, 'interactive');
+
+    const confirm = vi
+      .fn<ConfirmMutatingFn>()
+      .mockResolvedValue({ confirmed: false, reason: 'declined' });
+    const response = await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.checkout',
+        arguments: { branch: 'main' },
+      },
+    });
+
+    const result = response.result as {
+      isError?: boolean;
+      content: Array<{ text: string }>;
+    };
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe('declined');
+    expect(await getCurrentBranch(dir)).toBe('feat/a');
+  });
+});
+
+async function runMcpCall(
+  cwd: string,
+  confirmMutating: ConfirmMutatingFn,
+  message: unknown,
+): Promise<Record<string, unknown>> {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.setEncoding('utf8');
+
+  const responses: Record<string, unknown>[] = [];
+  let buffer = '';
+  output.on('data', (chunk: string) => {
+    buffer += chunk;
+    const parts = buffer.split('\n');
+    buffer = parts.pop() ?? '';
+    for (const part of parts) {
+      if (part.trim()) {
+        responses.push(JSON.parse(part) as Record<string, unknown>);
+      }
+    }
+  });
+
+  const done = mcp(cwd, { input, output, confirmMutating });
+
+  input.write(`${JSON.stringify(message)}\n`);
+  input.end();
+  await done;
+
+  if (responses.length === 0) {
+    throw new Error('No MCP response received.');
+  }
+  return responses[responses.length - 1];
+}
 
 async function stopMcpChild(
   process: ChildProcessWithoutNullStreams,

@@ -3,6 +3,7 @@ dist
 coverage
 .git/dubstack
 .playwright-cli
+.claude/scheduled_tasks.lock
 
 .worktrees
 .dispatch
