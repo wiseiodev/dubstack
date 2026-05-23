@@ -275,8 +275,8 @@
     ]
   },
   "commit": {
-    "sha": "pending",
-    "shortSha": "pending",
+    "sha": "891243b5f0b1573d383c61fa1248edb15db063ae",
+    "shortSha": "891243b",
     "message": "feat(sync): cache fetch decisions via last_synced_at + --fresh flag"
   }
 }
