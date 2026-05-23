@@ -19,6 +19,7 @@ import {
   fastForwardBranchToRef,
   fetchBranches,
   forceBranchTo,
+  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCurrentBranch,
   getDiffBetween,
@@ -110,6 +111,26 @@ describe('listWorktreeCheckouts', () => {
       ]).catch(() => {});
       await fs.promises.rm(worktreeDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('formatWorktreeCheckoutSkipMessage', () => {
+  it('defaults to the sync follow-up hint', () => {
+    expect(formatWorktreeCheckoutSkipMessage('feat/a', '/repo-worktree')).toBe(
+      "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub sync` from that worktree to update it.",
+    );
+  });
+
+  it('supports command-specific follow-up hints', () => {
+    expect(
+      formatWorktreeCheckoutSkipMessage(
+        'feat/a',
+        '/repo-worktree',
+        'dub restack',
+      ),
+    ).toBe(
+      "ℹ Skipped 'feat/a' — checked out in /repo-worktree.\n   Run `dub restack` from that worktree to update it.",
+    );
   });
 });
 

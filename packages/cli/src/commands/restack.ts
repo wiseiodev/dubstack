@@ -110,7 +110,11 @@ export async function restack(cwd: string): Promise<RestackResult> {
   for (const step of steps) {
     if (step.status === 'skipped' && step.worktreePath) {
       console.log(
-        formatWorktreeCheckoutSkipMessage(step.branch, step.worktreePath),
+        formatWorktreeCheckoutSkipMessage(
+          step.branch,
+          step.worktreePath,
+          'dub restack',
+        ),
       );
     }
   }

@@ -10,8 +10,8 @@ vi.mock('../lib/git.js', () => ({
   fastForwardBranchToRef: vi.fn(),
   fetchBranches: vi.fn(),
   formatWorktreeCheckoutSkipMessage: vi.fn(
-    (branch: string, worktreePath: string) =>
-      `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`dub sync\` from that worktree to update it.`,
+    (branch: string, worktreePath: string, command = 'dub sync') =>
+      `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`${command}\` from that worktree to update it.`,
   ),
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),

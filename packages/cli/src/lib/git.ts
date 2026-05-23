@@ -87,8 +87,9 @@ async function realpathOrResolve(inputPath: string): Promise<string> {
 export function formatWorktreeCheckoutSkipMessage(
   branch: string,
   worktreePath: string,
+  command = 'dub sync',
 ): string {
-  return `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`dub sync\` from that worktree to update it.`;
+  return `ℹ Skipped '${branch}' — checked out in ${worktreePath}.\n   Run \`${command}\` from that worktree to update it.`;
 }
 
 /**

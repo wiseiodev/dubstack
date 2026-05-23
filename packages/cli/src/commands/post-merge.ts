@@ -94,7 +94,11 @@ export async function postMerge(
       const worktreePath = worktreeCheckouts.get(branchName);
       if (worktreePath) {
         console.log(
-          formatWorktreeCheckoutSkipMessage(branchName, worktreePath),
+          formatWorktreeCheckoutSkipMessage(
+            branchName,
+            worktreePath,
+            'dub post-merge',
+          ),
         );
         result.skipped.push(branchName);
         continue;
