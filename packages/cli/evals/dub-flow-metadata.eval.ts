@@ -337,7 +337,7 @@ index 0000000..3333333
       branchPrefix: 'feat/',
       requiredKeywords: ['flow', 'context'],
       headlineKeywords: ['flow', 'context'],
-      headlineForbiddenKeywords: ['release', 'skill', 'readme'],
+      headlineForbiddenKeywords: ['release-notes', 'skill', 'readme'],
     },
   },
 ];
