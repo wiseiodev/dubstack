@@ -59,7 +59,12 @@ export async function postMerge(
         const stack = findStackForBranch(state, originalBranch);
         if (!stack) {
           throw new DubError(
-            `Branch '${originalBranch}' is not part of any stack. Run 'dub create' first.`,
+            `Branch '${originalBranch}' is not part of any stack.`,
+            [
+              "Run 'dub create <branch>' to start a stack from this branch.",
+              "Run 'dub post-merge --all' to process every tracked stack instead.",
+              "Run 'dub checkout <branch>' to switch to a tracked branch.",
+            ],
           );
         }
         return [stack];
@@ -115,9 +120,12 @@ export async function postMerge(
         );
         if (!fastForwarded) {
           throw new DubError(
-            `Post-merge could not fast-forward trunk '${root}' to '${remoteRef}'.\n` +
-              'Refresh your local trunk first, then rerun the maintenance flow.\n' +
-              `  git checkout ${root} && git pull --ff-only origin ${root}`,
+            `Post-merge could not fast-forward trunk '${root}' to '${remoteRef}'.`,
+            [
+              `Run 'git checkout ${root} && git pull --ff-only origin ${root}' to refresh trunk.`,
+              "Rerun 'dub post-merge' once the trunk is current.",
+              "Run 'dub sync' to reconcile divergence before retrying.",
+            ],
           );
         }
       }
@@ -125,8 +133,13 @@ export async function postMerge(
       const restackResult = await restack(cwd);
       if (restackResult.status === 'conflict') {
         throw new DubError(
-          `Post-merge restack hit conflicts on '${restackResult.conflictBranch ?? 'unknown'}'.\n` +
-            "Resolve conflicts, then run 'dub continue --ai' to let DubStack try the small conflict for you. Run 'dub continue' to resume manually or 'dub abort' to cancel.",
+          `Post-merge restack hit conflicts on '${restackResult.conflictBranch ?? 'unknown'}'.`,
+          [
+            'Resolve conflicts and stage the resolved files.',
+            "Run 'dub continue --ai' to let DubStack try the resolution.",
+            "Run 'dub continue' after resolving manually.",
+            "Run 'dub abort' to cancel and roll back progress.",
+          ],
         );
       }
     }

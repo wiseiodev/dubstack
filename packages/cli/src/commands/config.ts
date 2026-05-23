@@ -173,7 +173,9 @@ export async function configAiModel(
 function parseAiAssistantState(value: string): boolean {
   if (value === 'on') return true;
   if (value === 'off') return false;
-  throw new DubError("Value must be either 'on' or 'off'.");
+  throw new DubError("Value must be either 'on' or 'off'.", [
+    "Pass 'on' to enable or 'off' to disable.",
+  ]);
 }
 
 function resolveAiDefaultKey(
@@ -184,6 +186,7 @@ function resolveAiDefaultKey(
   if (target === 'flow') return 'flow';
   throw new DubError(
     "Config target must be one of 'create', 'submit', or 'flow'.",
+    ["Pass one of: 'create', 'submit', or 'flow' as the target."],
   );
 }
 
@@ -198,6 +201,7 @@ function parseAiProvider(value: string): AiProvider {
   }
   throw new DubError(
     "AI provider must be one of 'auto', 'gemini', 'gateway', or 'bedrock'.",
+    ["Pass one of: 'auto', 'gemini', 'gateway', or 'bedrock'."],
   );
 }
 
@@ -207,13 +211,17 @@ function parseAiModelProvider(value: string): AiModelProvider {
   }
   throw new DubError(
     "AI model provider must be one of 'gemini', 'gateway', or 'bedrock'.",
+    ["Pass one of: 'gemini', 'gateway', or 'bedrock' as --provider."],
   );
 }
 
 function normalizeModelOverride(value: string | undefined): string {
   const model = value?.trim() ?? '';
   if (model.length === 0) {
-    throw new DubError('Model override cannot be empty.');
+    throw new DubError('Model override cannot be empty.', [
+      'Pass a non-empty model identifier.',
+      "Pass '--clear' instead to remove the override.",
+    ]);
   }
   return model;
 }

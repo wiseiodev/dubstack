@@ -15,15 +15,17 @@ export async function trunk(
   const state = await readState(cwd);
   const stack = findStackForBranch(state, branch);
   if (!stack) {
-    throw new DubError(
-      `Branch '${branch}' is not tracked. Run 'dub track ${branch} --parent <branch>' first.`,
-    );
+    throw new DubError(`Branch '${branch}' is not tracked.`, [
+      `Run 'dub track ${branch} --parent <branch>' to track it.`,
+      "Run 'dub log' to see currently tracked branches.",
+    ]);
   }
   const root = stack.branches.find((candidate) => candidate.type === 'root');
   if (!root) {
-    throw new DubError(
-      `Stack for '${branch}' is missing a root branch. Re-run 'dub track' to repair metadata.`,
-    );
+    throw new DubError(`Stack for '${branch}' is missing a root branch.`, [
+      "Run 'dub track <root>' to mark the trunk as the stack root.",
+      "Run 'dub doctor' to inspect the stack for metadata damage.",
+    ]);
   }
   return { branch, trunk: root.name };
 }

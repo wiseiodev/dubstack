@@ -39,15 +39,17 @@ export async function log(
   let stacksToRender = state.stacks;
   if (options.stack && !options.all) {
     if (!currentBranch) {
-      throw new DubError(
-        'Cannot determine current branch for --stack mode. Checkout a branch first.',
-      );
+      throw new DubError('Cannot determine current branch for --stack mode.', [
+        "Run 'dub checkout <branch>' to attach HEAD to a branch.",
+        "Rerun 'dub log --all' to render every tracked stack instead.",
+      ]);
     }
     const currentStack = findStackForBranch(state, currentBranch);
     if (!currentStack) {
-      throw new DubError(
-        `Current branch '${currentBranch}' is not tracked. Run 'dub track ${currentBranch} --parent <branch>' first.`,
-      );
+      throw new DubError(`Current branch '${currentBranch}' is not tracked.`, [
+        `Run 'dub track ${currentBranch} --parent <branch>' to track it.`,
+        "Rerun 'dub log --all' to render every tracked stack instead.",
+      ]);
     }
     stacksToRender = [currentStack];
   }

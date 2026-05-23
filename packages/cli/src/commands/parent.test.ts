@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { readState } from '../lib/state';
 import { parent } from './parent';
@@ -50,6 +51,10 @@ describe('parent command', () => {
     vi.mocked(getCurrentBranch).mockResolvedValue('feat/a');
     vi.mocked(readState).mockResolvedValue({ stacks: [] });
 
-    await expect(parent('/tmp/repo')).rejects.toThrow('dub track');
+    await expect(parent('/tmp/repo')).rejects.toMatchObject({
+      message: expect.stringContaining("'feat/a' is not tracked"),
+      recovery: expect.arrayContaining([expect.stringContaining('dub track')]),
+    });
+    await expect(parent('/tmp/repo')).rejects.toBeInstanceOf(DubError);
   });
 });

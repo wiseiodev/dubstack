@@ -16,6 +16,10 @@ export function assertStateInvariants(stacks: Stack[]) {
         if (branch.parent !== null) {
           throw new DubError(
             `Invalid stack '${stack.id}': root '${branch.name}' must have no parent.`,
+            [
+              "Run 'dub doctor' to inspect the stack.",
+              `Run 'dub track ${branch.name} --parent null' is not supported; restore state from backup or rerun 'dub init'.`,
+            ],
           );
         }
         continue;
@@ -23,6 +27,10 @@ export function assertStateInvariants(stacks: Stack[]) {
       if (!branch.parent || !branchMap.has(branch.parent)) {
         throw new DubError(
           `Invalid stack '${stack.id}': branch '${branch.name}' has missing parent '${branch.parent ?? 'null'}'.`,
+          [
+            "Run 'dub doctor' to identify the missing parent.",
+            `Run 'dub track ${branch.name} --parent <branch>' to re-parent the affected branch onto a known parent.`,
+          ],
         );
       }
     }

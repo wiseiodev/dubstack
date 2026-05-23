@@ -66,6 +66,10 @@ export function assertAcyclic(stack: Stack): void {
     if (visiting.has(name)) {
       throw new DubError(
         `Invalid stack '${stack.id}': cycle detected at '${name}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack for metadata damage.",
+          "Run 'dub track <branch> --parent <branch>' to repair the offending parent link.",
+        ],
       );
     }
 

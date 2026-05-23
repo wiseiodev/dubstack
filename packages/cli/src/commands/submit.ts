@@ -99,7 +99,10 @@ export async function submit(
   deps: SubmitDependencies = DEFAULT_DEPS,
 ): Promise<SubmitResult> {
   if (options.ai && options.noAi) {
-    throw new DubError("'--ai' cannot be combined with '--no-ai'.");
+    throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
+      "Pass '--ai' alone to force AI-generated PR descriptions.",
+      "Pass '--no-ai' alone to skip AI generation for this run.",
+    ]);
   }
 
   const plan = await getSubmitPlan(cwd, options);
@@ -112,9 +115,10 @@ export async function submit(
         : config.ai.defaults.submitDescription;
 
   if (useAi && !config.aiAssistantEnabled) {
-    throw new DubError(
-      "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
-    );
+    throw new DubError('AI assistant is disabled for this repo.', [
+      "Run 'dub config ai-assistant on' to enable AI for this repo.",
+      "Rerun 'dub submit --no-ai' to submit without AI for this run.",
+    ]);
   }
   const templates = useAi ? await readMetadataTemplates(cwd) : null;
 
@@ -234,17 +238,20 @@ export async function getSubmitPlan(
   const stack = findStackForBranch(state, currentBranch);
 
   if (!stack) {
-    throw new DubError(
-      `Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
-    );
+    throw new DubError(`Branch '${currentBranch}' is not part of any stack.`, [
+      "Run 'dub create <branch>' to start a stack from this branch.",
+      "Run 'dub track <branch>' to track this branch on a parent.",
+      "Run 'dub checkout <branch>' to switch to a tracked branch.",
+    ]);
   }
 
   const ordered = topologicalOrder(stack);
   const currentEntry = ordered.find((b) => b.name === currentBranch);
   if (currentEntry?.type === 'root') {
-    throw new DubError(
-      "Cannot submit from a root branch. Run 'dub up' or 'dub checkout <branch>' first.",
-    );
+    throw new DubError('Cannot submit from a root branch.', [
+      "Run 'dub up' to move to the next branch above this trunk.",
+      "Run 'dub checkout <branch>' to switch to a stacked branch.",
+    ]);
   }
 
   const requestedPath = options.path ?? 'current';
@@ -268,7 +275,8 @@ export async function getSubmitPlan(
   }
 
   if (blockers.length > 0) {
-    throw new DubError(buildBranchingErrorMessage(blockers, currentBranch));
+    const { message, recovery } = buildBranchingError(blockers, currentBranch);
+    throw new DubError(message, recovery);
   }
 
   const rootBranch =
@@ -296,15 +304,20 @@ function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
   let cursor = branchMap.get(currentBranch);
 
   if (!cursor) {
-    throw new DubError(
-      `Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
-    );
+    throw new DubError(`Branch '${currentBranch}' is not part of any stack.`, [
+      "Run 'dub create <branch>' to start a stack from this branch.",
+      "Run 'dub track <branch>' to track this branch on a parent.",
+    ]);
   }
 
   while (cursor) {
     if (seen.has(cursor.name)) {
       throw new DubError(
         `Stack metadata is invalid: cycle detected while tracing '${currentBranch}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack and surface the bad parent link.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch.",
+        ],
       );
     }
     seen.add(cursor.name);
@@ -314,6 +327,10 @@ function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
     if (!cursor) {
       throw new DubError(
         `Stack metadata is invalid: missing parent branch while tracing '${currentBranch}'.`,
+        [
+          "Run 'dub doctor' to identify the missing parent.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch onto a known parent.",
+        ],
       );
     }
   }
@@ -344,23 +361,26 @@ function findBranchingBlockers(ordered: Branch[]): SubmitBranchingBlocker[] {
   return blockers.sort((a, b) => a.parent.localeCompare(b.parent));
 }
 
-function buildBranchingErrorMessage(
+function buildBranchingError(
   blockers: SubmitBranchingBlocker[],
   currentBranch: string,
-): string {
+): { message: string; recovery: string[] } {
   const details = blockers
     .map((blocker) => `${blocker.parent} -> ${blocker.children.join(', ')}`)
     .join('\n  - ');
-  return (
+  const message =
     'Branching stacks are not supported by submit in this mode.\n' +
     `Found ${blockers.length} branching parent(s):\n` +
     `  - ${details}\n` +
-    `Current branch: '${currentBranch}'\n` +
-    'Fix options:\n' +
-    '  1. Submit only your current linear path: dub submit --path current\n' +
-    '  2. Retry with safe auto-fix: dub submit --path stack --fix\n' +
-    '  3. Re-parent to linearize manually: dub track <child> --parent <branch>'
-  );
+    `Current branch: '${currentBranch}'`;
+  return {
+    message,
+    recovery: [
+      "Run 'dub submit --path current' to submit only your current linear path.",
+      "Run 'dub submit --path stack --fix' to retry with safe auto-fix.",
+      "Run 'dub track <child> --parent <branch>' to re-parent and linearize manually.",
+    ],
+  };
 }
 
 async function updateAllPrBodies(
@@ -454,6 +474,10 @@ async function getDiffForPrDescription(
   } catch {
     throw new DubError(
       `Failed to generate an AI PR summary for '${branchName}' because its diff could not be loaded.`,
+      [
+        `Run 'git fetch origin ${branchName}' to ensure the branch and its parent are present locally.`,
+        "Rerun 'dub submit --no-ai' to submit without an AI-generated description.",
+      ],
     );
   }
 }

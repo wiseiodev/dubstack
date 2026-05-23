@@ -61,6 +61,9 @@ describe('delete command', () => {
     ).rejects.toThrow(DubError);
     await expect(
       deleteCommand(cwd, 'feat/a', { interactive: false }),
-    ).rejects.toThrow('--force');
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Delete requires confirmation'),
+      recovery: expect.arrayContaining([expect.stringContaining('--force')]),
+    });
   });
 });

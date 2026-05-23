@@ -57,7 +57,11 @@ export async function mergeCheck(
   const previousState = await getPrStateByNumber(metadata.prev_pr, cwd);
   if (previousState !== 'MERGED') {
     throw new DubError(
-      `PR #${pr.number} cannot be merged yet. Previous stack PR #${metadata.prev_pr} is '${previousState}'. Merge it first.`,
+      `PR #${pr.number} cannot be merged yet. Previous stack PR #${metadata.prev_pr} is '${previousState}'.`,
+      [
+        `Run 'dub merge-next --pr ${metadata.prev_pr}' to merge the previous PR first.`,
+        `Run 'gh pr view ${metadata.prev_pr}' to inspect the previous PR's status.`,
+      ],
     );
   }
 
@@ -69,7 +73,12 @@ export async function mergeCheck(
     SAFE_MERGE_STATE_STATUSES.has(mergeStateStatus);
   if (!safelyMergeable) {
     throw new DubError(
-      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeable}' and mergeStateStatus='${mergeStateStatus}'. Resolve or resubmit the branch before merging.`,
+      `PR #${pr.number} is not mergeable on GitHub. GitHub reports mergeable='${mergeable}' and mergeStateStatus='${mergeStateStatus}'.`,
+      [
+        `Run 'gh pr view ${pr.number} --web' to inspect required checks and reviews.`,
+        "Run 'dub sync' to reconcile remote drift, then 'dub submit' to refresh the PR.",
+        'Retry once required checks pass.',
+      ],
     );
   }
 

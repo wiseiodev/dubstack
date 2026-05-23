@@ -35,9 +35,10 @@ export async function getRepoRoot(cwd: string): Promise<string> {
     });
     return stdout.trim();
   } catch {
-    throw new DubError(
-      'Not a git repository. Run this command inside a git repo.',
-    );
+    throw new DubError('Not a git repository.', [
+      "Run 'git init' in the desired project directory.",
+      "Run 'cd <repo>' to switch into an existing git repository and retry.",
+    ]);
   }
 }
 
@@ -54,16 +55,18 @@ export async function getCurrentBranch(cwd: string): Promise<string> {
     );
     const branch = stdout.trim();
     if (branch === 'HEAD') {
-      throw new DubError(
-        'HEAD is detached. Checkout a branch before running this command.',
-      );
+      throw new DubError('HEAD is detached.', [
+        "Run 'git checkout <branch>' to attach HEAD to a branch.",
+        "Run 'dub checkout' to pick a tracked branch interactively.",
+      ]);
     }
     return branch;
   } catch (error) {
     if (error instanceof DubError) throw error;
-    throw new DubError(
-      'Repository has no commits. Make at least one commit first.',
-    );
+    throw new DubError('Repository has no commits.', [
+      'Make at least one commit (e.g. \'git commit --allow-empty -m "init"\').',
+      "Rerun 'dub init' after committing if you have not yet initialized.",
+    ]);
   }
 }
 
@@ -107,7 +110,11 @@ export async function isValidBranchName(
  */
 export async function createBranch(name: string, cwd: string): Promise<void> {
   if (await branchExists(name, cwd)) {
-    throw new DubError(`Branch '${name}' already exists.`);
+    throw new DubError(`Branch '${name}' already exists.`, [
+      `Run 'dub checkout ${name}' to switch to the existing branch.`,
+      'Pick a different branch name and retry.',
+      `Run 'dub delete ${name}' to remove the existing branch first.`,
+    ]);
   }
   await execa('git', ['checkout', '-b', name], { cwd });
 }
@@ -123,11 +130,18 @@ export async function checkoutBranch(name: string, cwd: string): Promise<void> {
   } catch (error) {
     const details = readGitCommandOutput(error);
     if (isMissingBranchCheckoutError(details, name)) {
-      throw new DubError(`Branch '${name}' not found.`);
+      throw new DubError(`Branch '${name}' not found.`, [
+        "Run 'dub log' to see tracked branches.",
+        `Run 'git fetch && git checkout ${name}' if the branch only exists on the remote.`,
+      ]);
     }
 
     throw new DubError(
       formatGitFailure(`Failed to checkout branch '${name}'.`, details),
+      [
+        "Run 'git status' to inspect uncommitted changes blocking checkout.",
+        "Run 'git stash' to set aside local changes, then retry the checkout.",
+      ],
     );
   }
 }
@@ -140,7 +154,10 @@ export async function deleteBranch(name: string, cwd: string): Promise<void> {
   try {
     await execa('git', ['branch', '-D', name], { cwd });
   } catch {
-    throw new DubError(`Failed to delete branch '${name}'. It may not exist.`);
+    throw new DubError(`Failed to delete branch '${name}'.`, [
+      `Run 'git branch --list ${name}' to confirm the branch exists.`,
+      `Run 'git branch -D ${name}' manually to inspect the underlying error.`,
+    ]);
   }
 }
 
@@ -156,13 +173,15 @@ export async function deleteLocalBranch(
     await execa('git', ['branch', force ? '-D' : '-d', name], { cwd });
   } catch {
     if (force) {
-      throw new DubError(
-        `Failed to delete branch '${name}'. It may not exist or be checked out.`,
-      );
+      throw new DubError(`Failed to delete branch '${name}'.`, [
+        `Run 'git branch --list ${name}' to confirm the branch exists.`,
+        `Run 'git checkout <other>' to switch off '${name}' if it is currently checked out.`,
+      ]);
     }
-    throw new DubError(
-      `Branch '${name}' is not fully merged. Re-run with --force to delete it.`,
-    );
+    throw new DubError(`Branch '${name}' is not fully merged.`, [
+      `Run 'dub delete ${name} --force' to delete it anyway.`,
+      `Run 'dub log' to confirm whether '${name}' has unmerged work.`,
+    ]);
   }
 }
 
@@ -184,7 +203,10 @@ export async function forceBranchTo(
     }
   } catch (error) {
     if (error instanceof DubError) throw error;
-    throw new DubError(`Failed to reset branch '${name}' to ${sha}.`);
+    throw new DubError(`Failed to reset branch '${name}' to ${sha}.`, [
+      "Run 'git status' to inspect the working tree.",
+      `Run 'git branch -f ${name} ${sha}' manually to inspect the underlying error.`,
+    ]);
   }
 }
 
@@ -214,10 +236,12 @@ export async function rebaseOnto(
   try {
     await execa('git', ['rebase', '--onto', newBase, oldBase, branch], { cwd });
   } catch {
-    throw new DubError(
-      `Conflict while restacking '${branch}'.\n` +
-        '  Resolve conflicts, stage changes, then run: dub restack --continue',
-    );
+    throw new DubError(`Conflict while restacking '${branch}'.`, [
+      'Resolve conflicts and stage the resolved files.',
+      "Run 'dub continue --ai' to let DubStack try the resolution.",
+      "Run 'dub continue' (or 'dub restack --continue') after resolving manually.",
+      "Run 'dub abort' to cancel and roll back progress.",
+    ]);
   }
 }
 
@@ -232,9 +256,11 @@ export async function rebaseContinue(cwd: string): Promise<void> {
       env: { GIT_EDITOR: 'true' },
     });
   } catch {
-    throw new DubError(
-      'Failed to continue rebase. Ensure all conflicts are resolved and staged.',
-    );
+    throw new DubError('Failed to continue rebase.', [
+      "Run 'git status' to see remaining unmerged paths.",
+      "Run 'git add <file>' for each resolved file, then rerun 'dub continue'.",
+      "Run 'dub abort' to cancel the rebase if it can't be continued.",
+    ]);
   }
 }
 
@@ -245,7 +271,10 @@ export async function rebaseAbort(cwd: string): Promise<void> {
   try {
     await execa('git', ['rebase', '--abort'], { cwd });
   } catch {
-    throw new DubError('Failed to abort rebase.');
+    throw new DubError('Failed to abort rebase.', [
+      "Run 'git rebase --abort' manually to inspect the underlying error.",
+      "Run 'git status' to confirm whether a rebase is actually in progress.",
+    ]);
   }
 }
 
@@ -263,6 +292,10 @@ export async function getMergeBase(
   } catch {
     throw new DubError(
       `Could not find common ancestor between '${a}' and '${b}'.`,
+      [
+        `Run 'git log --oneline ${a}' to confirm the branch has commits.`,
+        `Run 'git fetch origin' to fetch missing history, then retry.`,
+      ],
     );
   }
 }
@@ -276,7 +309,10 @@ export async function getBranchTip(name: string, cwd: string): Promise<string> {
     const { stdout } = await execa('git', ['rev-parse', name], { cwd });
     return stdout.trim();
   } catch {
-    throw new DubError(`Branch '${name}' not found.`);
+    throw new DubError(`Branch '${name}' not found.`, [
+      "Run 'dub log' to see tracked branches.",
+      `Run 'git fetch && git checkout ${name}' if the branch only exists on the remote.`,
+    ]);
   }
 }
 
@@ -296,12 +332,17 @@ export async function getLastCommitMessage(
     );
     const message = stdout.trim();
     if (!message) {
-      throw new DubError(`Branch '${branch}' has no commits.`);
+      throw new DubError(`Branch '${branch}' has no commits.`, [
+        `Run 'git log ${branch}' to confirm the branch has commits.`,
+        'Make at least one commit on the branch before retrying.',
+      ]);
     }
     return message;
   } catch (error) {
     if (error instanceof DubError) throw error;
-    throw new DubError(`Failed to read commit message for '${branch}'.`);
+    throw new DubError(`Failed to read commit message for '${branch}'.`, [
+      `Run 'git log -1 ${branch}' manually to inspect the underlying error.`,
+    ]);
   }
 }
 
@@ -315,9 +356,10 @@ export async function pushBranch(branch: string, cwd: string): Promise<void> {
       cwd,
     });
   } catch {
-    throw new DubError(
-      `Failed to push '${branch}'. The remote ref may have been updated by someone else.`,
-    );
+    throw new DubError(`Failed to push '${branch}'.`, [
+      `Run 'dub sync' to reconcile remote updates, then retry the push.`,
+      `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
+    ]);
   }
 }
 
@@ -329,7 +371,10 @@ export async function stageAll(cwd: string): Promise<void> {
   try {
     await execa('git', ['add', '-A'], { cwd });
   } catch {
-    throw new DubError('Failed to stage changes.');
+    throw new DubError('Failed to stage changes.', [
+      "Run 'git add -A' manually to inspect the underlying error.",
+      "Run 'git status' to verify the working tree state.",
+    ]);
   }
 }
 
@@ -346,7 +391,9 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
   } catch (error: unknown) {
     const exitCode = (error as { exitCode?: number }).exitCode;
     if (exitCode === 1) return true;
-    throw new DubError('Failed to check staged changes.');
+    throw new DubError('Failed to check staged changes.', [
+      "Run 'git diff --cached' manually to inspect the underlying error.",
+    ]);
   }
 }
 
@@ -361,9 +408,11 @@ export async function commitStaged(
   try {
     await execa('git', ['commit', '-m', message], { cwd });
   } catch {
-    throw new DubError(
-      'Commit failed. Ensure there are staged changes and git hooks pass.',
-    );
+    throw new DubError('Commit failed.', [
+      "Run 'git status' to confirm there are staged changes.",
+      "Run 'git commit' manually to see pre-commit hook output.",
+      "Run 'git add <files>' to stage missing changes, then retry.",
+    ]);
   }
 }
 
@@ -378,9 +427,11 @@ export async function commitStagedFromFile(
   try {
     await execa('git', ['commit', '--file', filePath], { cwd });
   } catch {
-    throw new DubError(
-      'Commit failed. Ensure there are staged changes and git hooks pass.',
-    );
+    throw new DubError('Commit failed.', [
+      "Run 'git status' to confirm there are staged changes.",
+      "Run 'git commit' manually to see pre-commit hook output.",
+      "Run 'git add <files>' to stage missing changes, then retry.",
+    ]);
   }
 }
 
@@ -405,9 +456,11 @@ export async function commit(
   try {
     await execa('git', args, { cwd, stdio: 'inherit' });
   } catch {
-    throw new DubError(
-      'Commit failed. Ensure there are staged changes and git hooks pass.',
-    );
+    throw new DubError('Commit failed.', [
+      "Run 'git status' to confirm there are staged changes.",
+      "Run 'git commit' manually to see pre-commit hook output.",
+      "Run 'git add <files>' to stage missing changes, then retry.",
+    ]);
   }
 }
 
@@ -434,6 +487,10 @@ export async function amendCommit(
   } catch (e) {
     throw new DubError(
       `Amend failed: ${e instanceof Error ? e.message : String(e)}`,
+      [
+        "Run 'git commit --amend' manually to see pre-commit hook output.",
+        "Run 'git status' to confirm whether there are staged changes to amend.",
+      ],
     );
   }
 }
@@ -453,7 +510,10 @@ export async function interactiveRebase(
   try {
     await execa('git', ['rebase', '-i', base], { cwd, stdio: 'inherit' });
   } catch {
-    throw new DubError('Interactive rebase failed or was cancelled.');
+    throw new DubError('Interactive rebase failed or was cancelled.', [
+      "Run 'git status' to confirm whether a rebase is still in progress.",
+      "Run 'dub abort' if you no longer want to keep the rebase.",
+    ]);
   }
 }
 
@@ -468,7 +528,9 @@ export async function interactiveStage(cwd: string): Promise<void> {
   try {
     await execa('git', ['add', '-p'], { cwd, stdio: 'inherit' });
   } catch {
-    throw new DubError('Interactive staging failed.');
+    throw new DubError('Interactive staging failed.', [
+      "Run 'git add -p' manually to inspect the underlying error.",
+    ]);
   }
 }
 
@@ -482,7 +544,9 @@ export async function stageUpdate(cwd: string): Promise<void> {
   try {
     await execa('git', ['add', '-u'], { cwd });
   } catch {
-    throw new DubError('Failed to stage updates.');
+    throw new DubError('Failed to stage updates.', [
+      "Run 'git add -u' manually to inspect the underlying error.",
+    ]);
   }
 }
 
@@ -565,9 +629,10 @@ export async function getDiffBetween(
     });
     return stdout;
   } catch {
-    throw new DubError(
-      `Failed to diff '${headRef}' against '${baseRef}'. Verify both refs exist and are reachable.`,
-    );
+    throw new DubError(`Failed to diff '${headRef}' against '${baseRef}'.`, [
+      `Run 'git rev-parse ${baseRef}' and 'git rev-parse ${headRef}' to confirm both refs exist.`,
+      `Run 'git fetch origin' to fetch missing history, then retry.`,
+    ]);
   }
 }
 
@@ -593,6 +658,10 @@ export async function hasUniquePatchCommits(
   } catch {
     throw new DubError(
       `Failed to compare patch-equivalent commits for '${headRef}' against '${baseRef}'.`,
+      [
+        `Run 'git cherry ${baseRef} ${headRef}' manually to inspect the underlying error.`,
+        `Run 'git fetch origin' to fetch missing history, then retry.`,
+      ],
     );
   }
 }
@@ -615,7 +684,9 @@ export async function listBranches(cwd: string): Promise<string[]> {
     );
     return stdout.trim().split('\n').filter(Boolean);
   } catch {
-    throw new DubError('Failed to list branches.');
+    throw new DubError('Failed to list branches.', [
+      "Run 'git branch' manually to inspect the underlying error.",
+    ]);
   }
 }
 
@@ -644,7 +715,10 @@ export async function fetchBranches(
       if (output.includes("couldn't find remote ref")) {
         continue;
       }
-      throw new DubError(`Failed to fetch branches from '${remote}'.`);
+      throw new DubError(`Failed to fetch branches from '${remote}'.`, [
+        `Run 'git fetch ${remote}' manually to inspect the underlying error.`,
+        `Run 'git remote -v' to verify '${remote}' is configured correctly.`,
+      ]);
     }
   }
 }
@@ -675,7 +749,10 @@ export async function getRefSha(ref: string, cwd: string): Promise<string> {
     const { stdout } = await execa('git', ['rev-parse', ref], { cwd });
     return stdout.trim();
   } catch {
-    throw new DubError(`Failed to read ref '${ref}'.`);
+    throw new DubError(`Failed to read ref '${ref}'.`, [
+      `Run 'git rev-parse ${ref}' manually to confirm the ref exists.`,
+      `Run 'git fetch origin' to fetch missing remote refs, then retry.`,
+    ]);
   }
 }
 
@@ -697,6 +774,10 @@ export async function isAncestor(
     if (exitCode === 1) return false;
     throw new DubError(
       `Failed to compare ancestry between '${ancestor}' and '${descendant}'.`,
+      [
+        `Run 'git rev-parse ${ancestor}' and 'git rev-parse ${descendant}' to confirm both refs exist.`,
+        `Run 'git fetch origin' to fetch missing history, then retry.`,
+      ],
     );
   }
 }
@@ -716,6 +797,10 @@ export async function checkoutRemoteBranch(
   } catch {
     throw new DubError(
       `Failed to create local branch '${branch}' from '${remote}/${branch}'.`,
+      [
+        `Run 'git fetch ${remote} ${branch}' to refresh the remote ref.`,
+        `Run 'git checkout -B ${branch} ${remote}/${branch}' manually to inspect the error.`,
+      ],
     );
   }
 }
@@ -740,6 +825,10 @@ export async function hardResetBranchToRef(
         `Failed to hard reset '${branch}' to '${ref}'.`,
         readGitCommandOutput(error),
       ),
+      [
+        "Run 'git status' to inspect uncommitted changes blocking the reset.",
+        "Run 'git stash' to set aside local changes, then retry.",
+      ],
     );
   }
 }

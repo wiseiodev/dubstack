@@ -265,9 +265,7 @@ describe('create with --ai', () => {
           createGateway,
         },
       ),
-    ).rejects.toThrow(
-      "Branch name is required. Pass '<branch-name>' or use '--ai'.",
-    );
+    ).rejects.toThrow('Branch name is required.');
 
     expect(generateText).not.toHaveBeenCalled();
   });
@@ -487,7 +485,7 @@ describe('create with --ai', () => {
           createGateway,
         },
       ),
-    ).rejects.toThrow("Enable it with 'dub config ai-assistant on'.");
+    ).rejects.toThrow('AI assistant is disabled for this repo.');
   });
 
   it('redacts sensitive staged diff content before sending prompt to AI', async () => {

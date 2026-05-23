@@ -323,11 +323,16 @@ async function defaultCollectStack(cwd: string): Promise<SupportStackContext> {
     if (visited.has(cursor.name)) {
       throw new DubError(
         `Detected a cycle in tracked stack state while resolving path for '${currentBranch}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack for metadata damage.",
+          "Run 'dub track <branch> --parent <branch>' to repair the offending parent link.",
+        ],
       );
     }
     if (remainingSteps <= 0) {
       throw new DubError(
         `Exceeded path traversal limit while resolving stack path for '${currentBranch}'.`,
+        ["Run 'dub doctor' to inspect the stack for metadata damage."],
       );
     }
     visited.add(cursor.name);

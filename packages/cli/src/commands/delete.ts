@@ -50,9 +50,11 @@ export async function deleteCommand(
 
   if (!options.force && !options.quiet) {
     if (!interactive) {
-      throw new DubError(
-        'Delete requires confirmation. Re-run with --force or interactively.',
-      );
+      throw new DubError('Delete requires confirmation.', [
+        "Rerun 'dub delete <branch> --force' to skip the confirmation prompt.",
+        "Rerun 'dub delete <branch> -q' to skip prompts and accept the planned deletion.",
+        'Rerun the command in an interactive terminal to confirm interactively.',
+      ]);
     }
     const confirmed = await confirmDelete(preview.targets);
     if (!confirmed) {

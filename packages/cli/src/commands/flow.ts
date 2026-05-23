@@ -122,7 +122,10 @@ export async function flow(
   };
 
   if (options.ai && options.noAi) {
-    throw new DubError("'--ai' cannot be combined with '--no-ai'.");
+    throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
+      "Pass '--ai' alone to force AI generation for this run.",
+      "Pass '--no-ai' alone to skip AI generation for this run.",
+    ]);
   }
 
   validateStageMode(options);
@@ -136,23 +139,27 @@ export async function flow(
         : config.ai.defaults.flow;
 
   if (!useAi) {
-    throw new DubError(
-      "dub flow requires AI. Re-run with '--ai' or enable it with 'dub config ai-defaults flow on'.",
-    );
+    throw new DubError('dub flow requires AI.', [
+      "Rerun 'dub flow --ai' to force AI generation for this run.",
+      "Run 'dub config ai-defaults flow on' to make AI the default for flow.",
+    ]);
   }
 
   if (!config.aiAssistantEnabled) {
-    throw new DubError(
-      "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
-    );
+    throw new DubError('AI assistant is disabled for this repo.', [
+      "Run 'dub config ai-assistant on' to enable AI for this repo.",
+      "Use 'dub create' and 'dub submit' separately if you need a non-AI path.",
+    ]);
   }
 
   await stageChanges(cwd, options, resolvedDeps);
 
   if (!(await resolvedDeps.hasStagedChanges(cwd))) {
-    throw new DubError(
-      "No staged changes. Stage files with 'git add' or rerun with '-a', '-u', or '-p'.",
-    );
+    throw new DubError('No staged changes.', [
+      "Run 'git add <files>' to stage changes for this flow.",
+      "Rerun 'dub flow -a' to stage all changes before flow runs.",
+      "Rerun 'dub flow -u' to stage tracked file updates only.",
+    ]);
   }
 
   const parentBranch = await resolvedDeps.getCurrentBranch(cwd);
@@ -256,6 +263,7 @@ function validateStageMode(options: FlowOptions): void {
   if (activeModes.length > 1) {
     throw new DubError(
       "Choose only one staging mode: '--all', '--update', or '--patch'.",
+      ["Pass only one of '--all', '--update', or '--patch' per run."],
     );
   }
 }
@@ -307,7 +315,11 @@ function renderFlowPreview(
 async function promptApprovalChoice(): Promise<ApprovalChoice> {
   if (!(process.stdout.isTTY && process.stdin.isTTY)) {
     throw new DubError(
-      "Flow requires confirmation in an interactive terminal. Re-run with '-y' to auto-approve.",
+      'Flow requires confirmation in an interactive terminal.',
+      [
+        "Rerun 'dub flow -y' to auto-approve without prompting.",
+        "Rerun 'dub flow --dry-run' to preview the generated output without committing.",
+      ],
     );
   }
 

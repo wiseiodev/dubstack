@@ -291,18 +291,29 @@ export function validateResolutionPaths(
   const seen = new Set<string>();
   for (const res of resolutions) {
     if (seen.has(res.path)) {
-      throw new DubError(`Duplicate resolution path: ${res.path}`);
+      throw new DubError(`Duplicate resolution path: ${res.path}`, [
+        "Rerun 'dub continue --ai' to ask the AI for fresh resolutions.",
+        "Resolve the conflict manually and run 'dub continue'.",
+      ]);
     }
     seen.add(res.path);
     if (!allowed.has(res.path)) {
       throw new DubError(
         `AI returned path "${res.path}" which is not a conflicted file. Aborting for safety.`,
+        [
+          "Rerun 'dub continue --ai' to ask the AI for fresh resolutions.",
+          "Resolve the conflict manually and run 'dub continue'.",
+        ],
       );
     }
     const resolved = path.resolve(cwd, res.path);
     if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) {
       throw new DubError(
         `Path "${res.path}" resolves outside repository. Aborting for safety.`,
+        [
+          "Rerun 'dub continue --ai' to ask the AI for fresh resolutions.",
+          "Resolve the conflict manually and run 'dub continue'.",
+        ],
       );
     }
   }
@@ -315,20 +326,30 @@ export async function applyResolution(
 ): Promise<void> {
   const filePath = path.resolve(cwd, file);
   if (!filePath.startsWith(cwd + path.sep)) {
-    throw new DubError(`Refusing to write outside repository: ${file}`);
+    throw new DubError(`Refusing to write outside repository: ${file}`, [
+      "Resolve the conflict manually inside the repository and run 'dub continue'.",
+      "Run 'dub abort' to cancel the current operation.",
+    ]);
   }
 
   // Reject symlinks to prevent writes outside the repo
   try {
     const stat = fs.lstatSync(filePath);
     if (stat.isSymbolicLink()) {
-      throw new DubError(`Refusing to write to symlinked path: ${file}`);
+      throw new DubError(`Refusing to write to symlinked path: ${file}`, [
+        "Resolve the symlinked file manually and run 'dub continue'.",
+        "Run 'dub abort' to cancel the current operation.",
+      ]);
     }
   } catch (err) {
     if (err instanceof DubError) throw err;
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new DubError(
         `Conflicted file "${file}" does not exist. Aborting for safety.`,
+        [
+          "Run 'git status' to confirm the conflicted file list.",
+          "Rerun 'dub continue --ai' to ask the AI for fresh resolutions.",
+        ],
       );
     }
     throw err;

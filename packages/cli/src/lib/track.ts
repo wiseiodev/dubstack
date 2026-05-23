@@ -27,10 +27,15 @@ export async function validateTrackParent(
   parent: string,
 ): Promise<void> {
   if (branch === parent) {
-    throw new DubError('Branch cannot be its own parent.');
+    throw new DubError('Branch cannot be its own parent.', [
+      'Pick a different parent branch and retry.',
+    ]);
   }
   if (!(await branchExists(parent, cwd))) {
-    throw new DubError(`Parent branch '${parent}' does not exist locally.`);
+    throw new DubError(`Parent branch '${parent}' does not exist locally.`, [
+      `Run 'git fetch && git checkout ${parent}' to fetch the parent first.`,
+      "Run 'dub log' to see existing tracked branches.",
+    ]);
   }
 }
 
@@ -43,7 +48,10 @@ export async function trackBranch(
 ): Promise<TrackBranchResult> {
   const { branch, parent } = options;
   if (!(await branchExists(branch, cwd))) {
-    throw new DubError(`Branch '${branch}' does not exist locally.`);
+    throw new DubError(`Branch '${branch}' does not exist locally.`, [
+      `Run 'git checkout -b ${branch}' to create the branch first.`,
+      `Run 'git fetch && git checkout ${branch}' to pull it from the remote.`,
+    ]);
   }
   await validateTrackParent(cwd, branch, parent);
 
@@ -62,11 +70,18 @@ export async function trackBranch(
     (entry) => entry.name === branch,
   );
   if (!branchEntry) {
-    throw new DubError(`Branch '${branch}' is missing from tracked state.`);
+    throw new DubError(`Branch '${branch}' is missing from tracked state.`, [
+      "Run 'dub doctor' to inspect tracked state for damage.",
+      `Run 'dub track ${branch} --parent <branch>' to re-add it explicitly.`,
+    ]);
   }
   if (branchEntry.type === 'root') {
     throw new DubError(
       `Branch '${branch}' is a stack root and cannot be re-parented.`,
+      [
+        "Run 'dub log' to inspect the stack and find a non-root branch.",
+        `Run 'dub untrack ${branch}' first if you need to detach the root.`,
+      ],
     );
   }
   if (branchEntry.parent === parent) {
@@ -77,6 +92,10 @@ export async function trackBranch(
   if (descendants.has(parent)) {
     throw new DubError(
       `Cannot track '${branch}' onto '${parent}' because it would create a cycle.`,
+      [
+        'Pick a parent branch that is not a descendant of the target.',
+        "Run 'dub log' to inspect the stack layout.",
+      ],
     );
   }
 
@@ -97,7 +116,9 @@ export async function trackBranch(
 
   const movingRoot = movingBranches.find((entry) => entry.name === branch);
   if (!movingRoot) {
-    throw new DubError(`Failed to move subtree for '${branch}'.`);
+    throw new DubError(`Failed to move subtree for '${branch}'.`, [
+      "Run 'dub doctor' to inspect the stack for metadata damage.",
+    ]);
   }
   movingRoot.parent = parent;
   movingRoot.type = undefined;

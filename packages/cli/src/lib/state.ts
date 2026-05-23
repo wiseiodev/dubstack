@@ -78,15 +78,18 @@ export async function getDubDir(cwd: string): Promise<string> {
 export async function readState(cwd: string): Promise<DubState> {
   const statePath = await getStatePath(cwd);
   if (!fs.existsSync(statePath)) {
-    throw new DubError("DubStack is not initialized. Run 'dub init' first.");
+    throw new DubError('DubStack is not initialized.', [
+      "Run 'dub init' in the repository to initialize DubStack state.",
+    ]);
   }
   try {
     const raw = fs.readFileSync(statePath, 'utf-8');
     return normalizeState(JSON.parse(raw) as DubState);
   } catch {
-    throw new DubError(
-      "State file is corrupted. Delete .git/dubstack and run 'dub init' to re-initialize.",
-    );
+    throw new DubError('State file is corrupted.', [
+      "Run 'rm -rf .git/dubstack' to remove the corrupted state.",
+      "Run 'dub init' to re-initialize after removing the state directory.",
+    ]);
   }
 }
 
@@ -193,7 +196,10 @@ export function addBranchToStack(
   parentRevision?: string,
 ): void {
   if (findStackForBranch(state, child)) {
-    throw new DubError(`Branch '${child}' is already tracked in a stack.`);
+    throw new DubError(`Branch '${child}' is already tracked in a stack.`, [
+      `Run 'dub untrack ${child}' to detach it before re-adding.`,
+      `Run 'dub track ${child} --parent <branch>' to move it under a new parent.`,
+    ]);
   }
 
   const childBranch: Branch = {

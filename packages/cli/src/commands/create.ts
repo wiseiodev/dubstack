@@ -78,7 +78,10 @@ export async function create(
   const normalizedOptions = options ?? {};
 
   if (normalizedOptions.ai && normalizedOptions.noAi) {
-    throw new DubError("'--ai' cannot be combined with '--no-ai'.");
+    throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
+      "Pass '--ai' alone to AI-generate the branch and commit.",
+      "Pass '--no-ai' alone to skip AI generation for this run.",
+    ]);
   }
 
   const config = await readConfig(cwd);
@@ -97,24 +100,33 @@ export async function create(
     !useAi
   ) {
     throw new DubError(
-      "'--all', '--update', and '--patch' require '-m' or '--ai'. Pass a commit message or let AI generate one.",
+      "'--all', '--update', and '--patch' require '-m' or '--ai'.",
+      [
+        "Pass '-m \"<message>\"' alongside '--all', '--update', or '--patch'.",
+        "Pass '--ai' to let DubStack generate the commit message.",
+      ],
     );
   }
 
   if (useAi && normalizedOptions.message) {
-    throw new DubError("'--ai' cannot be combined with '-m'.");
+    throw new DubError("'--ai' cannot be combined with '-m'.", [
+      "Drop '--ai' to use the message you supplied.",
+      "Drop '-m' to let AI generate the commit message.",
+    ]);
   }
 
   if (!useAi && !name?.trim()) {
-    throw new DubError(
-      "Branch name is required. Pass '<branch-name>' or use '--ai'.",
-    );
+    throw new DubError('Branch name is required.', [
+      "Pass '<branch-name>' as the first argument to 'dub create'.",
+      "Pass '--ai' to AI-generate the branch name from staged changes.",
+    ]);
   }
 
   if (useAi && name?.trim()) {
-    throw new DubError(
-      "Do not pass <branch-name> with '--ai'. It generates branch and commit names from staged changes.",
-    );
+    throw new DubError("Do not pass <branch-name> with '--ai'.", [
+      "Drop the branch argument and let '--ai' generate the name from staged changes.",
+      "Drop '--ai' to keep the explicit branch name you supplied.",
+    ]);
   }
 
   const state = await ensureState(cwd);
@@ -132,23 +144,37 @@ export async function create(
     }
 
     if (!(await hasStagedChanges(cwd))) {
-      const hint =
+      const isAggregateFlag =
         normalizedOptions.all ||
         normalizedOptions.update ||
-        normalizedOptions.patch
-          ? 'No changes to commit.'
-          : useAi
-            ? "No staged changes. Stage files with 'git add' or use '-a' with '--ai'."
-            : "No staged changes. Stage files with 'git add' or use '-a' to stage all.";
-      throw new DubError(hint);
+        normalizedOptions.patch;
+      const message = isAggregateFlag
+        ? 'No changes to commit.'
+        : 'No staged changes.';
+      const recovery: string[] = isAggregateFlag
+        ? [
+            "Edit and save the files you want to commit, then rerun 'dub create'.",
+            "Run 'git status' to confirm the working tree has changes.",
+          ]
+        : useAi
+          ? [
+              "Run 'git add <files>' to stage the changes you want to commit.",
+              "Rerun 'dub create -a --ai' to stage all changes and generate metadata.",
+            ]
+          : [
+              "Run 'git add <files>' to stage the changes you want to commit.",
+              'Rerun \'dub create -a -m "<message>"\' to stage all changes at once.',
+            ];
+      throw new DubError(message, recovery);
     }
   }
 
   if (useAi) {
     if (!config.aiAssistantEnabled) {
-      throw new DubError(
-        "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
-      );
+      throw new DubError('AI assistant is disabled for this repo.', [
+        "Run 'dub config ai-assistant on' to enable AI for this repo.",
+        "Rerun 'dub create <branch> -m \"<message>\"' without '--ai'.",
+      ]);
     }
 
     const stagedDiff = await getDiff(cwd, true);
@@ -174,17 +200,25 @@ export async function create(
   }
 
   if (!branchName) {
-    throw new DubError(
-      "Branch name is required. Pass '<branch-name>' or use '--ai'.",
-    );
+    throw new DubError('Branch name is required.', [
+      "Pass '<branch-name>' as the first argument to 'dub create'.",
+      "Pass '--ai' to AI-generate the branch name from staged changes.",
+    ]);
   }
 
   if (!(await isValidBranchName(branchName, cwd))) {
-    throw new DubError(`Branch name '${branchName}' is invalid.`);
+    throw new DubError(`Branch name '${branchName}' is invalid.`, [
+      'Use only ASCII letters, digits, slashes, dots, dashes, and underscores.',
+      'Avoid leading dashes, double-dots, and trailing slashes; rerun with a new name.',
+    ]);
   }
 
   if (await branchExists(branchName, cwd)) {
-    throw new DubError(`Branch '${branchName}' already exists.`);
+    throw new DubError(`Branch '${branchName}' already exists.`, [
+      `Run 'dub checkout ${branchName}' to switch to the existing branch.`,
+      "Rerun 'dub create <branch>' with a different name.",
+      `Run 'dub delete ${branchName}' to remove the existing branch first.`,
+    ]);
   }
 
   await saveUndoEntry(
@@ -220,7 +254,11 @@ export async function create(
     } catch (error) {
       const reason = error instanceof DubError ? error.message : String(error);
       throw new DubError(
-        `Branch '${branchName}' was created but commit failed: ${reason}. Run 'dub undo' to clean up.`,
+        `Branch '${branchName}' was created but commit failed: ${reason}.`,
+        [
+          "Run 'dub undo' to roll back the branch creation.",
+          'Resolve the underlying commit error and rerun the same create command.',
+        ],
       );
     }
     return { branch: branchName, parent, committed: commitMessage };

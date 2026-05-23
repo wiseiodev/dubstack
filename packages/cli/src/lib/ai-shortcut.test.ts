@@ -80,7 +80,12 @@ describe('preprocessCliArgs', () => {
   it('fails non-interactive likely typos with suggestion', async () => {
     await expect(
       preprocessCliArgs(['submt'], known, false, vi.fn()),
-    ).rejects.toThrow("Did you mean 'submit'");
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("Unknown command 'submt'"),
+      recovery: expect.arrayContaining([
+        expect.stringContaining("Did you mean 'dub submit'"),
+      ]),
+    });
   });
 
   it('uses interactive typo choice when tty is available', async () => {

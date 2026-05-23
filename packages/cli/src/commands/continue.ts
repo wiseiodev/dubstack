@@ -31,17 +31,19 @@ export async function continueCommand(
         return { continued: 'ai-resolve' };
       }
     } catch {
-      throw new DubError(
-        'Failed to check for merge conflicts. Ensure you are in a git repository.',
-      );
+      throw new DubError('Failed to check for merge conflicts.', [
+        "Run 'git status' to confirm you are inside a git repository.",
+        'Resolve any underlying git errors and retry the command.',
+      ]);
     }
   }
 
   const active = await detectActiveOperation(cwd);
   if (active === 'none') {
-    throw new DubError(
-      'No operation in progress. Start a restack or resolve a rebase first.',
-    );
+    throw new DubError('No operation in progress.', [
+      "Run 'dub restack' to start restacking the current stack.",
+      "Run 'git rebase --continue' if you have an in-progress rebase outside DubStack.",
+    ]);
   }
 
   if (active === 'restack') {

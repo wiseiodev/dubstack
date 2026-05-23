@@ -22,9 +22,10 @@ interface InitResult {
  */
 export async function init(cwd: string): Promise<InitResult> {
   if (!(await isGitRepo(cwd))) {
-    throw new DubError(
-      'Not a git repository. Run this command inside a git repo.',
-    );
+    throw new DubError('Not a git repository.', [
+      "Run 'git init' in the desired project directory.",
+      "Run 'cd <repo>' to switch into an existing git repository, then rerun 'dub init'.",
+    ]);
   }
 
   const status = await initState(cwd);

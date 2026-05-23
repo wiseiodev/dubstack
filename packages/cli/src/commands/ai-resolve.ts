@@ -84,7 +84,11 @@ export async function aiResolve(
     ]);
 
     if (context.conflictedFiles.length === 0) {
-      throw new DubError('No conflicted files detected.');
+      throw new DubError('No conflicted files detected.', [
+        "Run 'git status' to confirm whether any conflicts remain.",
+        "Run 'dub continue' to resume the active rebase or restack.",
+        "Run 'dub abort' to cancel the active operation if you no longer need it.",
+      ]);
     }
 
     if (context.scopeWarning) {
@@ -194,7 +198,10 @@ async function streamResolutions(
     } else if (part.type === 'error') {
       throw part.error instanceof Error
         ? part.error
-        : new DubError('AI stream failed unexpectedly.');
+        : new DubError('AI stream failed unexpectedly.', [
+            "Rerun 'dub continue --ai' to retry the resolution.",
+            "Resolve the conflicts manually and run 'dub continue'.",
+          ]);
     }
   }
 
@@ -227,22 +234,25 @@ function parseResolutions(text: string): FileResolution[] {
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
-    throw new DubError(
-      'Could not parse AI response. Try again or resolve conflicts manually.',
-    );
+    throw new DubError('Could not parse AI response.', [
+      "Rerun 'dub continue --ai' to ask the AI again.",
+      "Resolve the conflicts manually and run 'dub continue'.",
+    ]);
   }
 
   if (!Array.isArray(parsed) || parsed.length === 0) {
-    throw new DubError(
-      'AI returned no resolutions. Resolve conflicts manually.',
-    );
+    throw new DubError('AI returned no resolutions.', [
+      "Resolve the conflicts manually and run 'dub continue'.",
+      "Run 'dub abort' to cancel the active operation.",
+    ]);
   }
 
   return (parsed as unknown[]).map((raw) => {
     if (typeof raw !== 'object' || raw === null) {
-      throw new DubError(
-        'AI returned an invalid resolution format. Resolve conflicts manually.',
-      );
+      throw new DubError('AI returned an invalid resolution format.', [
+        "Rerun 'dub continue --ai' to retry.",
+        "Resolve the conflicts manually and run 'dub continue'.",
+      ]);
     }
     const item = raw as Record<string, unknown>;
     return {

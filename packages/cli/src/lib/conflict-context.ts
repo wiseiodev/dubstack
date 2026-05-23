@@ -39,9 +39,10 @@ export async function gatherConflictContext(
 ): Promise<ConflictContext> {
   const operation = await detectActiveOperation(cwd);
   if (operation === 'none') {
-    throw new DubError(
-      'No active rebase or restack operation. Nothing to resolve.',
-    );
+    throw new DubError('No active rebase or restack operation.', [
+      "Run 'dub restack' to start restacking the current stack if you intended to.",
+      "Run 'git status' to confirm whether a rebase is actually in progress.",
+    ]);
   }
 
   const conflictedFiles = await getConflictedFiles(cwd);

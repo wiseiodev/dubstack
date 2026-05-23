@@ -26,9 +26,10 @@ export async function getUntrackContext(
   const state = await readState(cwd);
   const stack = findStackForBranch(state, branch);
   if (!stack) {
-    throw new DubError(
-      `Branch '${branch}' is not tracked. Run 'dub track ${branch} --parent <branch>' first.`,
-    );
+    throw new DubError(`Branch '${branch}' is not tracked.`, [
+      `Run 'dub track ${branch} --parent <branch>' to track it.`,
+      "Run 'dub log' to see currently tracked branches.",
+    ]);
   }
   return {
     stack,
@@ -49,6 +50,10 @@ export async function untrackBranch(
   if (!stack) {
     throw new DubError(
       `Branch '${options.branch}' is not tracked by DubStack.`,
+      [
+        `Run 'dub track ${options.branch} --parent <branch>' to track it.`,
+        "Run 'dub log' to see currently tracked branches.",
+      ],
     );
   }
 
@@ -56,6 +61,7 @@ export async function untrackBranch(
   if (!entry) {
     throw new DubError(
       `Branch '${options.branch}' is missing from tracked stack.`,
+      ["Run 'dub doctor' to inspect the stack for metadata damage."],
     );
   }
 
@@ -66,7 +72,11 @@ export async function untrackBranch(
 
   if (entry.type === 'root' && !options.downstack && descendants.length > 0) {
     throw new DubError(
-      `Branch '${options.branch}' is a root with descendants. Use --downstack to untrack the whole subtree.`,
+      `Branch '${options.branch}' is a root with descendants.`,
+      [
+        `Rerun 'dub untrack ${options.branch} --downstack' to untrack the whole subtree.`,
+        `Run 'dub track <descendant> --parent <other>' to move descendants off this root first.`,
+      ],
     );
   }
 

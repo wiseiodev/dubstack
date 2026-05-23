@@ -128,7 +128,10 @@ export async function generatePrDescriptionSummary(
 
   const summary = result.text.trim();
   if (summary.length === 0) {
-    throw new DubError('AI assistant generated an empty PR description.');
+    throw new DubError('AI assistant generated an empty PR description.', [
+      "Rerun 'dub submit --ai' to retry generation.",
+      "Rerun 'dub submit --no-ai' to skip AI for this run.",
+    ]);
   }
 
   return stripMarkdownFences(summary);
@@ -178,15 +181,17 @@ function parseAiCreateResponse(text: string): {
   try {
     parsed = JSON.parse(candidate);
   } catch {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
+    throw new DubError('AI assistant returned invalid metadata.', [
+      "Rerun 'dub create --ai' to retry generation.",
+      'Rerun \'dub create <branch> -m "<message>"\' to pass branch and message manually.',
+    ]);
   }
 
   if (!parsed || typeof parsed !== 'object') {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
+    throw new DubError('AI assistant returned invalid metadata.', [
+      "Rerun 'dub create --ai' to retry generation.",
+      'Rerun \'dub create <branch> -m "<message>"\' to pass branch and message manually.',
+    ]);
   }
 
   const rawBranch = getStringValue(parsed, 'branch');
@@ -196,12 +201,19 @@ function parseAiCreateResponse(text: string): {
   const subjectLine = message.split('\n')[0]?.trim() ?? '';
 
   if (branch.length === 0) {
-    throw new DubError('AI assistant generated an empty branch name.');
+    throw new DubError('AI assistant generated an empty branch name.', [
+      "Rerun 'dub create --ai' to retry generation.",
+      "Rerun 'dub create <branch>' to set the branch name manually.",
+    ]);
   }
 
   if (!CONVENTIONAL_COMMIT_RE.test(subjectLine)) {
     throw new DubError(
-      "AI assistant generated a non-conventional commit message. Re-run '--ai' or pass '-m' manually.",
+      'AI assistant generated a non-conventional commit message.',
+      [
+        "Rerun 'dub create --ai' to retry generation.",
+        'Rerun \'dub create <branch> -m "<message>"\' to pass a conventional commit message manually.',
+      ],
     );
   }
 
@@ -211,7 +223,10 @@ function parseAiCreateResponse(text: string): {
 function getStringValue(source: object, key: string): string {
   const value = (source as Record<string, unknown>)[key];
   if (typeof value !== 'string') {
-    throw new DubError(`AI assistant metadata is missing '${key}'.`);
+    throw new DubError(`AI assistant metadata is missing '${key}'.`, [
+      "Rerun 'dub create --ai' to retry generation.",
+      'Rerun \'dub create <branch> -m "<message>"\' to pass branch and message manually.',
+    ]);
   }
   return value;
 }
@@ -248,9 +263,10 @@ function extractJsonObject(text: string): string {
   const start = withoutFences.indexOf('{');
   const end = withoutFences.lastIndexOf('}');
   if (start === -1 || end === -1 || end <= start) {
-    throw new DubError(
-      "AI assistant returned invalid metadata. Re-run with '--ai' or pass branch/message manually.",
-    );
+    throw new DubError('AI assistant returned invalid metadata.', [
+      "Rerun 'dub create --ai' to retry generation.",
+      'Rerun \'dub create <branch> -m "<message>"\' to pass branch and message manually.',
+    ]);
   }
   return withoutFences.slice(start, end + 1);
 }

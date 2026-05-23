@@ -59,6 +59,11 @@ export async function resolveCheckoutTrunk(cwd: string): Promise<string> {
   if (await branchExists('master', cwd)) return 'master';
   throw new DubError(
     `Could not determine trunk branch for '${currentBranch}'.`,
+    [
+      "Run 'dub track <branch> --parent <trunk>' to attach this branch to a known trunk.",
+      "Run 'dub log' to inspect the stack and find the intended trunk.",
+      "Pass the trunk branch name explicitly to 'dub checkout <branch>'.",
+    ],
   );
 }
 
@@ -116,9 +121,11 @@ export async function interactiveCheckout(
   const validBranches = branchCandidates;
 
   if (validBranches.length === 0) {
-    throw new DubError(
-      "No valid tracked branches found. Run 'dub create' first.",
-    );
+    throw new DubError('No valid tracked branches found.', [
+      "Run 'dub create <branch>' to start a stack.",
+      "Run 'dub track <branch>' to track an existing branch.",
+      "Rerun 'dub checkout --show-untracked' to also list untracked branches.",
+    ]);
   }
 
   // Setup AbortController for Esc key support

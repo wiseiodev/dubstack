@@ -59,9 +59,12 @@ export function resolveAiProvider(input: {
     return resolveBedrockProvider(input.deps, providerConfig);
   }
 
-  throw new DubError(
-    "AI assistant requires one of: DUBSTACK_GEMINI_API_KEY, DUBSTACK_AI_GATEWAY_API_KEY, or the Bedrock pair DUBSTACK_BEDROCK_AWS_REGION + DUBSTACK_BEDROCK_MODEL. Run 'dub ai setup' or 'dub ai env' to configure a provider.",
-  );
+  throw new DubError('AI assistant has no configured provider.', [
+    "Run 'dub ai setup' for an interactive guided setup.",
+    "Run 'dub ai env --gemini-key <key>' to configure Gemini.",
+    "Run 'dub ai env --gateway-key <key>' to configure the AI Gateway.",
+    "Run 'dub ai env --bedrock-region <region> --bedrock-model <model>' to configure Bedrock.",
+  ]);
 }
 
 export function buildAiProviderOptions(
@@ -105,7 +108,11 @@ function resolveGoogleProvider(
   const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
   if (!geminiApiKey) {
     throw new DubError(
-      "Gemini is selected but DUBSTACK_GEMINI_API_KEY is not set. Run 'dub ai setup' or 'dub ai env --gemini-key <key>'.",
+      'Gemini is selected but DUBSTACK_GEMINI_API_KEY is not set.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --gemini-key <key>' to write the key to your shell profile.",
+      ],
     );
   }
 
@@ -127,7 +134,11 @@ function resolveGatewayProvider(
   const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
   if (!gatewayApiKey) {
     throw new DubError(
-      "AI Gateway is selected but DUBSTACK_AI_GATEWAY_API_KEY is not set. Run 'dub ai setup' or 'dub ai env --gateway-key <key>'.",
+      'AI Gateway is selected but DUBSTACK_AI_GATEWAY_API_KEY is not set.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --gateway-key <key>' to write the key to your shell profile.",
+      ],
     );
   }
 
@@ -151,20 +162,32 @@ function resolveBedrockProvider(
     !deps.fromIni ||
     !deps.fromNodeProviderChain
   ) {
-    throw new DubError('Bedrock support is unavailable in this build.');
+    throw new DubError('Bedrock support is unavailable in this build.', [
+      "Run 'dub config ai-provider gemini' or 'gateway' to switch providers.",
+      'Reinstall DubStack from a build that includes Bedrock support if you need it.',
+    ]);
   }
 
   const region = process.env.DUBSTACK_BEDROCK_AWS_REGION?.trim();
   if (!region) {
     throw new DubError(
-      "Bedrock is selected but DUBSTACK_BEDROCK_AWS_REGION is not set. Run 'dub ai setup' or 'dub ai env --bedrock-region <region>'.",
+      'Bedrock is selected but DUBSTACK_BEDROCK_AWS_REGION is not set.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --bedrock-region <region>' to write the region to your shell profile.",
+      ],
     );
   }
 
   const modelId = getConfiguredModel('bedrock', providerConfig);
   if (!modelId) {
     throw new DubError(
-      "Bedrock is selected but DUBSTACK_BEDROCK_MODEL is not set and no repo override exists. Run 'dub ai setup' or 'dub ai env --bedrock-model <model>'.",
+      'Bedrock is selected but DUBSTACK_BEDROCK_MODEL is not set and no repo override exists.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --bedrock-model <model>' to write the model to your shell profile.",
+        "Run 'dub config ai-model <model> --provider bedrock' to set a repo-local override.",
+      ],
     );
   }
 
