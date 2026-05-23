@@ -834,20 +834,22 @@ export async function getDiffBetween(
  *
  * Uses `git cherry`, which marks patch-equivalent commits with `-` and unique
  * commits with `+`.
+ *
+ * Guard against the Graphite v1.7.18 range-diff bug class: empty output is
+ * NEVER trusted as "equivalent" on its own. When `git cherry` emits nothing,
+ * confirm equivalence with a positive signal (SHA equality or
+ * `headRef`-reachable-from-`baseRef`) before reporting no unique commits.
+ * Without that confirmation we fail open ("has unique") so a malformed cherry
+ * result cannot silently mask local work and cause sync to discard it.
  */
 export async function hasUniquePatchCommits(
   baseRef: string,
   headRef: string,
   cwd: string,
 ): Promise<boolean> {
+  let stdout: string;
   try {
-    const { stdout } = await execa('git', ['cherry', baseRef, headRef], {
-      cwd,
-    });
-    return stdout
-      .split('\n')
-      .map((line) => line.trim())
-      .some((line) => line.startsWith('+'));
+    ({ stdout } = await execa('git', ['cherry', baseRef, headRef], { cwd }));
   } catch {
     throw new DubError(
       `Failed to compare patch-equivalent commits for '${headRef}' against '${baseRef}'.`,
@@ -856,6 +858,34 @@ export async function hasUniquePatchCommits(
         `Run 'git fetch origin' to fetch missing history, then retry.`,
       ],
     );
+  }
+
+  const lines = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return !(await isPatchEquivalenceConfirmed(baseRef, headRef, cwd));
+  }
+
+  return lines.some((line) => line.startsWith('+'));
+}
+
+async function isPatchEquivalenceConfirmed(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<boolean> {
+  try {
+    const [baseSha, headSha] = await Promise.all([
+      getRefSha(baseRef, cwd),
+      getRefSha(headRef, cwd),
+    ]);
+    if (baseSha === headSha) return true;
+    return await isAncestor(headRef, baseRef, cwd);
+  } catch {
+    return false;
   }
 }
 
