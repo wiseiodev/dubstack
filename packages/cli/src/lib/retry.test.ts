@@ -138,14 +138,58 @@ describe('retry', () => {
     expect(delays).toEqual([112.5, 225, 450]);
   });
 
-  it('rejects an invalid maxAttempts before calling fn', async () => {
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['fractional', 2.5],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['NaN', Number.NaN],
+  ])('rejects %s maxAttempts before calling fn', async (_label, maxAttempts) => {
     const fn = vi.fn();
 
     await expect(
-      retry(fn, { maxAttempts: 0, sleep: noSleep, random: noJitter }),
-    ).rejects.toThrow(/maxAttempts must be >= 1/);
+      retry(fn, { maxAttempts, sleep: noSleep, random: noJitter }),
+    ).rejects.toThrow(/maxAttempts must be a positive integer/);
 
     expect(fn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['baseMs', { baseMs: Number.NaN }, /baseMs must be a finite/],
+    ['baseMs', { baseMs: -1 }, /baseMs must be a finite/],
+    ['baseMs', { baseMs: Number.POSITIVE_INFINITY }, /baseMs must be a finite/],
+    ['maxMs', { maxMs: Number.NaN }, /maxMs must be a finite/],
+    ['maxMs', { maxMs: -1 }, /maxMs must be a finite/],
+    ['maxMs', { maxMs: Number.POSITIVE_INFINITY }, /maxMs must be a finite/],
+  ])('rejects invalid %s before calling fn', async (_label, opts, pattern) => {
+    const fn = vi.fn();
+
+    await expect(
+      retry(fn, { ...opts, sleep: noSleep, random: noJitter }),
+    ).rejects.toThrow(pattern);
+
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it('clamps an out-of-range random() to 0 so delay never exceeds maxMs', async () => {
+    const delays: number[] = [];
+    const sleep = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    const fn = vi.fn().mockRejectedValue(new Error('boom'));
+
+    await expect(
+      retry(fn, {
+        maxAttempts: 3,
+        baseMs: 100,
+        maxMs: 2000,
+        sleep,
+        random: () => Number.NaN,
+      }),
+    ).rejects.toThrow();
+
+    expect(delays).toEqual([100, 200]);
   });
 
   it('runs fn exactly once when maxAttempts is 1', async () => {

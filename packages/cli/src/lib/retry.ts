@@ -40,11 +40,13 @@ const defaultSleep = (ms: number): Promise<void> =>
 /**
  * Retries `fn` with exponential backoff and jitter.
  *
- * Backoff for attempt N (0-indexed) is `min(baseMs * 2^N, maxMs)` plus a small
- * random jitter (up to 25% of that delay). When `isPermanent(err)` returns
- * true, the error is rethrown immediately. After exhausting all attempts, the
- * last error is rethrown wrapped in an Error whose message includes the
- * attempt count and the original message.
+ * The delay before retry K (1-indexed: the wait before the K-th retry, which
+ * runs as attempt K+1) is `min(baseMs * 2^(K-1), maxMs)` plus a small random
+ * jitter (up to 25% of that delay), with the final value re-clamped to
+ * `maxMs`. When `isPermanent(err)` returns true, the error is rethrown
+ * immediately. After exhausting all attempts, the last error is wrapped in a
+ * new Error whose message includes the attempt count, preserving the original
+ * via `cause`.
  */
 export async function retry<T>(
   fn: () => Promise<T>,
@@ -58,8 +60,14 @@ export async function retry<T>(
   const sleep = options.sleep ?? defaultSleep;
   const random = options.random ?? Math.random;
 
-  if (maxAttempts < 1) {
-    throw new Error('retry: maxAttempts must be >= 1');
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error('retry: maxAttempts must be a positive integer');
+  }
+  if (!Number.isFinite(baseMs) || baseMs < 0) {
+    throw new Error('retry: baseMs must be a finite non-negative number');
+  }
+  if (!Number.isFinite(maxMs) || maxMs < 0) {
+    throw new Error('retry: maxMs must be a finite non-negative number');
   }
 
   let lastError: unknown;
@@ -75,7 +83,9 @@ export async function retry<T>(
         break;
       }
       const exp = Math.min(baseMs * 2 ** (attempt - 1), maxMs);
-      const jitter = exp * 0.25 * random();
+      const r = random();
+      const clampedR = Number.isFinite(r) && r >= 0 && r < 1 ? r : 0;
+      const jitter = exp * 0.25 * clampedR;
       const delay = Math.min(exp + jitter, maxMs);
       onRetry?.(attempt + 1, err);
       await sleep(delay);
