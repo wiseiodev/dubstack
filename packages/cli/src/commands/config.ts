@@ -1,4 +1,4 @@
-import type { DubConfig } from '../lib/config';
+import type { DubConfig, McpMode } from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 
@@ -14,6 +14,11 @@ export interface ConfigProviderResult {
 
 export interface ConfigModelResult {
   model: string | null;
+  changed: boolean;
+}
+
+export interface ConfigMcpModeResult {
+  mode: McpMode;
   changed: boolean;
 }
 
@@ -168,6 +173,50 @@ export async function configAiModel(
     model: next,
     changed,
   };
+}
+
+export async function configMcpMode(
+  cwd: string,
+  mode?: string,
+): Promise<ConfigMcpModeResult> {
+  const config = await readConfig(cwd);
+  if (mode == null) {
+    return {
+      mode: config.mcpMode,
+      changed: false,
+    };
+  }
+
+  const parsed = parseMcpMode(mode);
+  const changed = config.mcpMode !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        mcpMode: parsed,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    mode: parsed,
+    changed,
+  };
+}
+
+function parseMcpMode(value: string): McpMode {
+  if (value === 'read-only' || value === 'interactive' || value === 'trusted') {
+    return value;
+  }
+  throw new DubError(
+    "MCP mode must be one of 'read-only', 'interactive', or 'trusted'.",
+    [
+      "Pass 'read-only' to disable mutating MCP tools.",
+      "Pass 'interactive' to require terminal confirmation before mutating tools run (default).",
+      "Pass 'trusted' to let mutating MCP tools run without confirmation.",
+    ],
+  );
 }
 
 function parseAiAssistantState(value: string): boolean {

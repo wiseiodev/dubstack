@@ -1,15 +1,24 @@
+import * as fs from 'node:fs';
+import * as readline from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
+import { type McpMode, readConfig } from '../lib/config';
 import { DubError, formatDubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { getBranchPrSyncInfo } from '../lib/github';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
 import { branchInfo } from './branch';
+import { checkout } from './checkout';
 import { children } from './children';
+import { create } from './create';
+import { deleteCommand } from './delete';
 import { type DoctorIssue, doctor } from './doctor';
 import { history } from './history';
 import { logJson } from './log';
+import { modify } from './modify';
 import { parent } from './parent';
+import { type SubmitPathMode, submit } from './submit';
+import { sync } from './sync';
 import { trunk } from './trunk';
 
 type JsonValue =
@@ -29,16 +38,28 @@ interface JsonRpcRequest {
   params?: unknown;
 }
 
+export interface ConfirmationResult {
+  confirmed: boolean;
+  reason: string;
+}
+
+export type ConfirmMutatingFn = (
+  name: string,
+  args: Record<string, unknown>,
+) => Promise<ConfirmationResult>;
+
 interface McpServerOptions {
   input?: Readable;
   output?: Writable;
   version?: string;
+  confirmMutating?: ConfirmMutatingFn;
 }
 
 interface ToolDefinition {
   name: string;
   description: string;
   inputSchema: JsonValue;
+  mutating?: boolean;
 }
 
 interface ToolCallResult {
@@ -59,6 +80,12 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.children': ['branch'],
   'dubstack.trunk': ['branch'],
   'dubstack.history': ['limit'],
+  'dubstack.create': ['name', 'message', 'ai'],
+  'dubstack.modify': ['message', 'commit', 'all'],
+  'dubstack.submit': ['dryRun', 'path', 'fix'],
+  'dubstack.sync': ['force', 'all'],
+  'dubstack.checkout': ['branch'],
+  'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
 };
 
 const EMPTY_SCHEMA = {
@@ -154,6 +181,147 @@ const TOOLS: ToolDefinition[] = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'dubstack.create',
+    description:
+      'Create a new branch stacked on top of the current branch, optionally with a commit message.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Name of the new branch (omit when using ai).',
+        },
+        message: {
+          type: 'string',
+          description: 'Commit message for staged changes on the new branch.',
+        },
+        ai: {
+          type: 'boolean',
+          description:
+            'AI-generate the branch name and commit from staged changes.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.modify',
+    description:
+      'Amend the current branch tip or create a new commit and restack children.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'New commit message (used for amend or new commit).',
+        },
+        commit: {
+          type: 'boolean',
+          description:
+            'Create a new commit instead of amending the current tip.',
+        },
+        all: {
+          type: 'boolean',
+          description: 'Stage all changes before committing.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.submit',
+    description:
+      'Push branches in the current path or stack and create or update GitHub PRs.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dryRun: {
+          type: 'boolean',
+          description:
+            'Preview what would happen without pushing or mutating PRs.',
+        },
+        path: {
+          type: 'string',
+          enum: ['current', 'stack'],
+          description: "Submit scope: 'current' (default) or 'stack'.",
+        },
+        fix: {
+          type: 'boolean',
+          description: 'Apply safe remediation for common submit blockers.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.sync',
+    description:
+      'Sync tracked branches with the remote, restack, and prune merged branches.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        force: {
+          type: 'boolean',
+          description:
+            'Skip reset/reconcile prompts and accept deterministic defaults.',
+        },
+        all: {
+          type: 'boolean',
+          description: 'Sync all tracked stacks across trunks.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.checkout',
+    description: 'Switch to a tracked branch (stack-aware).',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to checkout.',
+        },
+      },
+      required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.delete',
+    description:
+      'Delete a local branch and update DubStack metadata (stack-aware).',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to delete (defaults to current branch).',
+        },
+        upstack: {
+          type: 'boolean',
+          description: 'Also delete descendants of the target branch.',
+        },
+        downstack: {
+          type: 'boolean',
+          description: 'Also delete ancestors toward trunk.',
+        },
+        force: {
+          type: 'boolean',
+          description: 'Delete branches even when not fully merged.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 export async function mcp(
@@ -163,6 +331,7 @@ export async function mcp(
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const serverVersion = options.version ?? '0.0.0';
+  const confirmMutating = options.confirmMutating ?? confirmMutatingTool;
   let buffer = '';
   let queue: Promise<void> = Promise.resolve();
 
@@ -172,7 +341,9 @@ export async function mcp(
     const enqueue = (line: string) => {
       queue = queue
         .catch(() => undefined)
-        .then(() => handleLineSafely(line, cwd, output, serverVersion));
+        .then(() =>
+          handleLineSafely(line, cwd, output, serverVersion, confirmMutating),
+        );
     };
 
     input.on('data', (chunk: string) => {
@@ -199,9 +370,10 @@ async function handleLineSafely(
   cwd: string,
   output: Writable,
   serverVersion: string,
+  confirmMutating: ConfirmMutatingFn,
 ): Promise<void> {
   try {
-    await handleLine(line, cwd, output, serverVersion);
+    await handleLine(line, cwd, output, serverVersion, confirmMutating);
   } catch (error) {
     const requestId = parseRequestId(line);
     const message = error instanceof Error ? error.message : String(error);
@@ -217,6 +389,7 @@ async function handleLine(
   cwd: string,
   output: Writable,
   serverVersion: string,
+  confirmMutating: ConfirmMutatingFn,
 ): Promise<void> {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -239,7 +412,12 @@ async function handleLine(
     return;
   }
 
-  const response = await handleRequest(message, cwd, serverVersion);
+  const response = await handleRequest(
+    message,
+    cwd,
+    serverVersion,
+    confirmMutating,
+  );
   writeMessage(output, response);
 }
 
@@ -253,6 +431,7 @@ async function handleRequest(
   request: JsonRpcRequest,
   cwd: string,
   serverVersion: string,
+  confirmMutating: ConfirmMutatingFn,
 ): Promise<JsonValue> {
   switch (request.method) {
     case 'initialize':
@@ -265,7 +444,7 @@ async function handleRequest(
     case 'tools/list':
       return jsonRpcResult(request.id ?? null, { tools: TOOLS });
     case 'tools/call':
-      return handleToolCallRequest(request, cwd);
+      return handleToolCallRequest(request, cwd, confirmMutating);
     default:
       return jsonRpcError(
         request.id ?? null,
@@ -278,6 +457,7 @@ async function handleRequest(
 async function handleToolCallRequest(
   request: JsonRpcRequest,
   cwd: string,
+  confirmMutating: ConfirmMutatingFn,
 ): Promise<JsonValue> {
   const params = asRecord(request.params);
   const name = typeof params?.name === 'string' ? params.name : null;
@@ -287,7 +467,8 @@ async function handleToolCallRequest(
     return jsonRpcError(request.id ?? null, -32602, 'Missing tool name.');
   }
 
-  if (!TOOLS.some((tool) => tool.name === name)) {
+  const tool = TOOLS.find((entry) => entry.name === name);
+  if (!tool) {
     await appendMcpHistory(cwd, name, args, Date.now(), 'error', [
       `Unknown MCP tool '${name}'.`,
     ]);
@@ -295,6 +476,33 @@ async function handleToolCallRequest(
   }
 
   const startedAt = Date.now();
+
+  if (tool.mutating) {
+    const mode = await resolveMcpMode(cwd);
+
+    if (mode === 'read-only') {
+      const text = `${name} refused: repo is in read-only MCP mode. Run \`dub config mcp-mode interactive\` to enable mutating tools.`;
+      await appendMcpHistory(cwd, name, args, startedAt, 'error', [text]);
+      return jsonRpcResult(request.id ?? null, {
+        content: [{ type: 'text', text }],
+        isError: true,
+      });
+    }
+
+    if (mode === 'interactive') {
+      const confirmation = await confirmMutating(name, args);
+      if (!confirmation.confirmed) {
+        await appendMcpHistory(cwd, name, args, startedAt, 'error', [
+          confirmation.reason,
+        ]);
+        return jsonRpcResult(request.id ?? null, {
+          content: [{ type: 'text', text: confirmation.reason }],
+          isError: true,
+        });
+      }
+    }
+  }
+
   try {
     const result = await callTool(cwd, name, args);
     await appendMcpHistory(cwd, name, args, startedAt, 'success', [
@@ -314,6 +522,64 @@ async function handleToolCallRequest(
       isError: true,
     });
   }
+}
+
+async function resolveMcpMode(cwd: string): Promise<McpMode> {
+  try {
+    const config = await readConfig(cwd);
+    return config.mcpMode;
+  } catch {
+    return 'interactive';
+  }
+}
+
+async function confirmMutatingTool(
+  name: string,
+  args: Record<string, unknown>,
+): Promise<ConfirmationResult> {
+  let fd: number;
+  try {
+    fd = fs.openSync('/dev/tty', 'r+');
+  } catch {
+    return {
+      confirmed: false,
+      reason: `${name} refused: no controlling terminal available for interactive confirmation. Run \`dub config mcp-mode trusted\` to skip prompts, or \`dub config mcp-mode read-only\` to disable mutating tools.`,
+    };
+  }
+
+  const input = fs.createReadStream('', { fd, autoClose: false });
+  const output = fs.createWriteStream('', { fd, autoClose: false });
+  const rl = readline.createInterface({ input, output });
+
+  try {
+    const summary = formatArgsForPrompt(args);
+    const prompt = summary
+      ? `\n[dub mcp] Allow ${name} ${summary}? [y/N] `
+      : `\n[dub mcp] Allow ${name}? [y/N] `;
+    const answer = await rl.question(prompt);
+    const normalized = answer.trim().toLowerCase();
+    const confirmed = normalized === 'y' || normalized === 'yes';
+    return {
+      confirmed,
+      reason: confirmed
+        ? `${name} confirmed by user.`
+        : `${name} refused: user declined interactive confirmation.`,
+    };
+  } finally {
+    rl.close();
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // Ignore close errors; the descriptor may already be closed by readline.
+    }
+  }
+}
+
+function formatArgsForPrompt(args: Record<string, unknown>): string {
+  const keys = Object.keys(args);
+  if (keys.length === 0) return '';
+  const parts = keys.map((key) => `${key}=${JSON.stringify(args[key])}`);
+  return `(${parts.join(', ')})`;
 }
 
 async function callTool(
@@ -351,9 +617,118 @@ async function callTool(
           limit: optionalPositiveInteger(args.limit) ?? 20,
         }),
       );
+    case 'dubstack.create':
+      return mutatingToolResult(() =>
+        create(optionalString(args.name), cwd, {
+          message: optionalString(args.message),
+          ai: optionalBoolean(args.ai),
+        }),
+      );
+    case 'dubstack.modify':
+      return mutatingToolResult(async () => {
+        await modify(cwd, {
+          message: optionalString(args.message),
+          commit: optionalBoolean(args.commit),
+          all: optionalBoolean(args.all),
+        });
+        return { ok: true };
+      });
+    case 'dubstack.submit':
+      return mutatingToolResult(() =>
+        submit(cwd, optionalBoolean(args.dryRun) ?? false, {
+          path: optionalSubmitPath(args.path) ?? 'current',
+          fix: optionalBoolean(args.fix) ?? false,
+        }),
+      );
+    case 'dubstack.sync':
+      return mutatingToolResult(() =>
+        sync(cwd, {
+          force: optionalBoolean(args.force),
+          all: optionalBoolean(args.all),
+          interactive: false,
+        }),
+      );
+    case 'dubstack.checkout': {
+      const branch = optionalString(args.branch);
+      if (!branch) {
+        throw new DubError("'branch' is required for dubstack.checkout.");
+      }
+      return mutatingToolResult(() => checkout(branch, cwd));
+    }
+    case 'dubstack.delete':
+      return mutatingToolResult(() =>
+        deleteCommand(cwd, optionalString(args.branch), {
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+          force: optionalBoolean(args.force),
+          quiet: true,
+          interactive: false,
+        }),
+      );
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`);
   }
+}
+
+let stdioCaptureActive = false;
+
+async function mutatingToolResult<T>(
+  fn: () => Promise<T>,
+): Promise<ToolCallResult> {
+  if (stdioCaptureActive) {
+    // The server's per-line queue should already serialize tool calls; this
+    // guard is defensive against future callers nesting stdio capture, which
+    // would corrupt the saved originals and permanently leak the monkey-patch.
+    throw new DubError(
+      'Internal error: mutatingToolResult invoked while another capture is active.',
+    );
+  }
+
+  stdioCaptureActive = true;
+  const captured: string[] = [];
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+
+  const collect = (chunk: string | Uint8Array): void => {
+    const text =
+      typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    captured.push(text);
+  };
+
+  process.stdout.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
+    collect(chunk);
+    return true;
+  }) as unknown as typeof process.stdout.write;
+  process.stderr.write = ((chunk: string | Uint8Array, ..._args: unknown[]) => {
+    collect(chunk);
+    return true;
+  }) as unknown as typeof process.stderr.write;
+
+  try {
+    const value = await fn();
+    const structuredContent = toJsonValue({
+      result: value,
+      output: captured.join(''),
+    });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(structuredContent, null, 2),
+        },
+      ],
+      structuredContent,
+    };
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+    process.stderr.write = originalStderrWrite;
+    stdioCaptureActive = false;
+  }
+}
+
+function optionalSubmitPath(value: unknown): SubmitPathMode | undefined {
+  if (value === 'current' || value === 'stack') return value;
+  return undefined;
 }
 
 async function status(cwd: string): Promise<JsonValue> {
@@ -422,7 +797,8 @@ function initializeResult(
       name: 'dubstack',
       title: 'DubStack',
       version: serverVersion,
-      description: 'Read-only DubStack tools for tracked branch stacks.',
+      description:
+        'DubStack tools for tracked branch stacks. Mutating tools are gated by the configured mcp-mode.',
     },
   };
 }
