@@ -6,10 +6,12 @@ import {
   detectActiveOperation,
   hasGitRebaseInProgress,
 } from '../lib/operation-state';
+import { clearCleanupJournal } from '../lib/sync/journal';
 import { abortCommand } from './abort';
 
 vi.mock('../lib/operation-state');
 vi.mock('../lib/git');
+vi.mock('../lib/sync/journal');
 
 describe('abort command', () => {
   const cwd = '/tmp/repo';
@@ -18,6 +20,7 @@ describe('abort command', () => {
     vi.clearAllMocks();
     vi.mocked(rebaseAbort).mockResolvedValue(undefined);
     vi.mocked(clearRestackProgress).mockResolvedValue(undefined);
+    vi.mocked(clearCleanupJournal).mockResolvedValue(undefined);
     vi.mocked(hasGitRebaseInProgress).mockResolvedValue(false);
   });
 
@@ -48,5 +51,17 @@ describe('abort command', () => {
     expect(rebaseAbort).toHaveBeenCalledWith(cwd);
     expect(clearRestackProgress).toHaveBeenCalledWith(cwd);
     expect(result.aborted).toBe('restack');
+  });
+
+  it('aborts a pending cleanup by clearing the journal', async () => {
+    vi.mocked(detectActiveOperation).mockResolvedValue('cleanup');
+    vi.mocked(hasGitRebaseInProgress).mockResolvedValue(false);
+
+    const result = await abortCommand(cwd);
+
+    expect(clearCleanupJournal).toHaveBeenCalledWith(cwd);
+    expect(rebaseAbort).not.toHaveBeenCalled();
+    expect(clearRestackProgress).not.toHaveBeenCalled();
+    expect(result.aborted).toBe('cleanup');
   });
 });

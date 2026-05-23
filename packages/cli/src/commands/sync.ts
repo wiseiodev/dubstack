@@ -13,6 +13,7 @@ import {
   getCurrentBranch,
   getRefSha,
   hardResetBranchToRef,
+  hasUniquePatchCommits,
   isAncestor,
   listWorktreeCheckouts,
   pruneRemote,
@@ -35,8 +36,13 @@ import {
   writeState,
 } from '../lib/state';
 import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
-import { buildCleanupPlan } from '../lib/sync/cleanup';
+import { buildCleanupPlan, type CleanupDeleteOp } from '../lib/sync/cleanup';
 import { partitionFreshBranches } from '../lib/sync/fresh';
+import {
+  appendCleanupOperation,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/sync/journal';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
 import type {
@@ -264,8 +270,16 @@ export async function sync(
       if (prBatch.truncated) return getBranchPrSyncInfo(branch, cwd);
       return { state: 'NONE', baseRefName: null };
     };
+    const parentOf = new Map<string, string | null>();
+    for (const stack of scopeStacks) {
+      for (const node of stack.branches) {
+        parentOf.set(node.name, node.parent);
+      }
+    }
     const cleanupPlan = await buildCleanupPlan({
       branches: localTrackedBranches,
+      parentOf,
+      force: options.force,
       getPrStatus: async (branch) => (await lookupPrSyncInfo(branch)).state,
       isMergedIntoAnyRoot: async (branch) => {
         for (const root of roots) {
@@ -281,6 +295,15 @@ export async function sync(
         }
         return false;
       },
+      isEmpty: async (branch, parent) => {
+        if (parent == null) return false;
+        try {
+          return !(await hasUniquePatchCommits(parent, branch, cwd));
+        } catch {
+          // If we can't tell, err on the side of NOT deleting.
+          return false;
+        }
+      },
     });
     const excludedFromSync = new Set<string>();
     for (const skipped of cleanupPlan.skipped) {
@@ -291,22 +314,60 @@ export async function sync(
         }
       }
     }
-    for (const entry of cleanupPlan.toDelete) {
-      const branch = entry.branch;
+    // Map "branches that got reparented away from X" → used both for the
+    // auto-clean warning ("X had dependent branches: …") and for marking
+    // parent-merged orphans below.
+    const reparentedFromBranch = new Map<string, string[]>();
+    for (const op of cleanupPlan.operations) {
+      if (op.type !== 'reparent' || op.oldParent == null) continue;
+      const arr = reparentedFromBranch.get(op.oldParent) ?? [];
+      arr.push(op.branch);
+      reparentedFromBranch.set(op.oldParent, arr);
+    }
+    const deleteOpByBranch = new Map<string, CleanupDeleteOp>();
+    for (const op of cleanupPlan.operations) {
+      if (op.type === 'delete') deleteOpByBranch.set(op.branch, op);
+    }
+
+    // The journal is intentionally not wrapped in a try/catch: when an
+    // operation throws, we want it left on disk so `dub continue` can replay
+    // the remaining work. Clearing only happens on the success path below.
+    const cleanupJournal = await startCleanupJournal(cwd);
+    for (const op of cleanupPlan.operations) {
+      if (op.type === 'reparent') {
+        if (excludedFromSync.has(op.branch)) continue;
+        await appendCleanupOperation(cwd, cleanupJournal, op);
+        const stateEntry = stateBranchMap.get(op.branch);
+        if (stateEntry) stateEntry.parent = op.newParent;
+        reparentedBranchNames.add(op.branch);
+        if (op.oldParent != null) {
+          const oldParentDelete = deleteOpByBranch.get(op.oldParent);
+          if (
+            oldParentDelete &&
+            (oldParentDelete.reason === 'merged-pr' ||
+              oldParentDelete.reason === 'merged-pr-with-trailing-commits')
+          ) {
+            reparentedDueToMergedParent.add(op.branch);
+          }
+        }
+        console.log(
+          `↪ Reparenting '${op.branch}' from '${op.oldParent ?? 'trunk'}' onto '${op.newParent ?? 'trunk'}'.`,
+        );
+        continue;
+      }
+      // Delete operation.
+      const branch = op.branch;
       if (excludedFromSync.has(branch)) continue;
       if (recordWorktreeSkip(branch)) continue;
-      const descendants = getDescendants(scopeStacks, branch).filter(
-        (name) =>
-          !cleanupPlan.toDelete.some((target) => target.branch === name),
-      );
+      const descendants = reparentedFromBranch.get(branch) ?? [];
       if (descendants.length > 0) {
         console.log(
-          `⚠ Auto-clean deleting '${branch}' (${entry.reason}) with dependent branch(es): ${descendants.join(', ')}. Their parent will be reassigned in local DubStack state.`,
+          `⚠ Auto-clean deleting '${branch}' (${op.reason}) with dependent branch(es): ${descendants.join(', ')}. Their parent will be reassigned in local DubStack state.`,
         );
       } else {
-        console.log(`• Auto-clean deleting '${branch}' (${entry.reason}).`);
+        console.log(`• Auto-clean deleting '${branch}' (${op.reason}).`);
       }
-      if (entry.reason === 'merged-pr-with-trailing-commits') {
+      if (op.reason === 'merged-pr-with-trailing-commits') {
         const trailingOutcome: BranchSyncOutcome = {
           branch,
           status: 'squash-merged-with-trailing-commits',
@@ -318,19 +379,15 @@ export async function sync(
         printBranchOutcome(trailingOutcome);
         recordSource(result.reconcileSources, 'sync-squash-merged-cleanup');
       }
+      await appendCleanupOperation(cwd, cleanupJournal, op);
       await checkoutBranch(roots[0] ?? originalBranch, cwd);
       await deleteBranch(branch, cwd);
-      const parentWasMerged =
-        entry.reason === 'merged-pr' ||
-        entry.reason === 'merged-pr-with-trailing-commits';
-      for (const removed of removeBranchFromState(scopeStacks, branch)) {
-        reparentedBranchNames.add(removed.branch);
-        if (parentWasMerged) {
-          reparentedDueToMergedParent.add(removed.branch);
-        }
-      }
+      // Reparenting was already journaled+applied via explicit reparent ops;
+      // here we just drop the entry from state.
+      dropBranchFromState(scopeStacks, branch);
       result.cleaned.push(branch);
     }
+    await clearCleanupJournal(cwd);
     for (const skipped of cleanupPlan.skipped) {
       console.log(
         `• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
@@ -1108,22 +1165,11 @@ function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {
   return descendants;
 }
 
-function removeBranchFromState(
+function dropBranchFromState(
   stacks: Array<{ branches: Branch[] }>,
   branch: string,
-) {
-  const reparented: Array<{ branch: string; parent: string | null }> = [];
+): void {
   for (const stack of stacks) {
-    const deleted = stack.branches.find((b) => b.name === branch);
-    if (!deleted) continue;
-    const newParent = deleted.parent;
-    for (const child of stack.branches) {
-      if (child.parent === branch) {
-        child.parent = newParent;
-        reparented.push({ branch: child.name, parent: child.parent });
-      }
-    }
     stack.branches = stack.branches.filter((b) => b.name !== branch);
   }
-  return reparented;
 }

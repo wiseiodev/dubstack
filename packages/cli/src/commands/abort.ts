@@ -5,9 +5,10 @@ import {
   detectActiveOperation,
   hasGitRebaseInProgress,
 } from '../lib/operation-state';
+import { clearCleanupJournal } from '../lib/sync/journal';
 
 interface AbortCommandResult {
-  aborted: 'rebase' | 'restack';
+  aborted: 'rebase' | 'restack' | 'cleanup';
 }
 
 export async function abortCommand(cwd: string): Promise<AbortCommandResult> {
@@ -24,6 +25,9 @@ export async function abortCommand(cwd: string): Promise<AbortCommandResult> {
   }
   if (active === 'restack') {
     await clearRestackProgress(cwd);
+  }
+  if (active === 'cleanup') {
+    await clearCleanupJournal(cwd);
   }
 
   return { aborted: active };

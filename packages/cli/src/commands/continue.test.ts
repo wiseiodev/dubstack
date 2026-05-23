@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DubError } from '../lib/errors';
 import { rebaseContinue } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
+import { resumeCleanup } from '../lib/sync/cleanup-resume';
 import { aiResolve } from './ai-resolve';
 import { continueCommand } from './continue';
 import { restackContinue } from './restack';
 
 vi.mock('../lib/operation-state');
 vi.mock('../lib/git');
+vi.mock('../lib/sync/cleanup-resume');
 vi.mock('./restack');
 vi.mock('./ai-resolve');
 vi.mock('execa');
@@ -24,6 +26,10 @@ describe('continue command', () => {
     });
     vi.mocked(rebaseContinue).mockResolvedValue(undefined);
     vi.mocked(aiResolve).mockResolvedValue(undefined);
+    vi.mocked(resumeCleanup).mockResolvedValue({
+      applied: [],
+      alreadyApplied: [],
+    });
   });
 
   it('throws when no operation is active', async () => {
@@ -49,6 +55,20 @@ describe('continue command', () => {
 
     expect(restackContinue).toHaveBeenCalledWith(cwd);
     expect(result.continued).toBe('restack');
+  });
+
+  it('continues a cleanup operation by replaying the journal', async () => {
+    vi.mocked(detectActiveOperation).mockResolvedValue('cleanup');
+    vi.mocked(resumeCleanup).mockResolvedValue({
+      applied: [{ type: 'delete', branch: 'middle', reason: 'merged-pr' }],
+      alreadyApplied: [],
+    });
+
+    const result = await continueCommand(cwd);
+
+    expect(resumeCleanup).toHaveBeenCalledWith(cwd);
+    expect(result.continued).toBe('cleanup');
+    expect(result.cleanupResult?.applied).toHaveLength(1);
   });
 
   it('--ai triggers aiResolve when conflicts exist', async () => {

@@ -16,11 +16,26 @@ vi.mock('../lib/git.js', () => ({
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),
   hardResetBranchToRef: vi.fn(),
+  hasUniquePatchCommits: vi.fn().mockResolvedValue(true),
   isAncestor: vi.fn(),
   listWorktreeCheckouts: vi.fn(),
   pruneRemote: vi.fn(),
   rebaseBranchOntoRef: vi.fn(),
   remoteBranchExists: vi.fn(),
+}));
+
+vi.mock('../lib/sync/journal.js', () => ({
+  startCleanupJournal: vi.fn().mockResolvedValue({
+    version: 1,
+    started_at: 'mock',
+    operations: [],
+  }),
+  appendCleanupOperation: vi.fn().mockResolvedValue(undefined),
+  clearCleanupJournal: vi.fn().mockResolvedValue(undefined),
+  hasCleanupJournal: vi.fn().mockResolvedValue(false),
+  readCleanupJournal: vi.fn().mockResolvedValue(null),
+  getCleanupJournalPath: vi.fn().mockResolvedValue('/tmp/journal.json'),
+  CLEANUP_JOURNAL_FILENAME: 'cleanup-journal.json',
 }));
 
 vi.mock('../lib/git/is-merged-by-patch-id.js', () => ({

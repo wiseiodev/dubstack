@@ -131,4 +131,125 @@ describe('buildCleanupPlan', () => {
       { branch: 'feat/d', reason: 'commits-not-in-trunk' },
     ]);
   });
+
+  describe('DFS-greedy with re-parenting', () => {
+    it('re-parents an open child onto the grandparent when the middle is merged', async () => {
+      // trunk → middle (MERGED) → child (OPEN)
+      const result = await buildCleanupPlan({
+        branches: ['middle', 'child'],
+        parentOf: new Map<string, string | null>([
+          ['middle', null],
+          ['child', 'middle'],
+        ]),
+        getPrStatus: vi.fn(async (b: string) =>
+          b === 'middle' ? 'MERGED' : 'OPEN',
+        ),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+      });
+
+      expect(result.toDelete).toEqual([
+        { branch: 'middle', reason: 'merged-pr' },
+      ]);
+      expect(result.toReparent).toEqual([
+        { branch: 'child', oldParent: 'middle', newParent: null },
+      ]);
+      // Reparent must precede delete so the journal records the orphan
+      // rescue before the parent disappears.
+      expect(result.operations.map((op) => op.type)).toEqual([
+        'reparent',
+        'delete',
+      ]);
+    });
+
+    it('cascades reparenting through several merged ancestors', async () => {
+      // trunk → m1 (MERGED) → m2 (MERGED) → leaf (OPEN)
+      const result = await buildCleanupPlan({
+        branches: ['m1', 'm2', 'leaf'],
+        parentOf: new Map<string, string | null>([
+          ['m1', null],
+          ['m2', 'm1'],
+          ['leaf', 'm2'],
+        ]),
+        getPrStatus: vi.fn(async (b: string) =>
+          b === 'leaf' ? 'OPEN' : 'MERGED',
+        ),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+      });
+
+      const reparent = result.toReparent.find((op) => op.branch === 'leaf');
+      expect(reparent?.newParent).toBeNull();
+      expect(result.toDelete.map((d) => d.branch).sort()).toEqual(['m1', 'm2']);
+    });
+
+    it('does not delete an empty branch with no PR by default', async () => {
+      const result = await buildCleanupPlan({
+        branches: ['feat/placeholder'],
+        parentOf: new Map<string, string | null>([['feat/placeholder', null]]),
+        getPrStatus: vi.fn().mockResolvedValue('NONE'),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+        isEmpty: vi.fn().mockResolvedValue(true),
+      });
+
+      expect(result.toDelete).toEqual([]);
+      expect(result.toReparent).toEqual([]);
+    });
+
+    it('deletes an empty branch with no PR when --force is set', async () => {
+      const result = await buildCleanupPlan({
+        branches: ['feat/placeholder'],
+        parentOf: new Map<string, string | null>([['feat/placeholder', null]]),
+        force: true,
+        getPrStatus: vi.fn().mockResolvedValue('NONE'),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+        isEmpty: vi.fn().mockResolvedValue(true),
+      });
+
+      expect(result.toDelete).toEqual([
+        { branch: 'feat/placeholder', reason: 'empty-branch' },
+      ]);
+    });
+
+    it('deletes an empty branch with an OPEN PR without --force', async () => {
+      const result = await buildCleanupPlan({
+        branches: ['feat/empty-pr'],
+        parentOf: new Map<string, string | null>([['feat/empty-pr', null]]),
+        getPrStatus: vi.fn().mockResolvedValue('OPEN'),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+        isEmpty: vi.fn().mockResolvedValue(true),
+      });
+
+      expect(result.toDelete).toEqual([
+        { branch: 'feat/empty-pr', reason: 'empty-branch' },
+      ]);
+    });
+
+    it('keeps a non-empty open branch alone (no delete, no reparent)', async () => {
+      const result = await buildCleanupPlan({
+        branches: ['feat/a'],
+        parentOf: new Map<string, string | null>([['feat/a', null]]),
+        getPrStatus: vi.fn().mockResolvedValue('OPEN'),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+        isEmpty: vi.fn().mockResolvedValue(false),
+      });
+
+      expect(result.operations).toEqual([]);
+    });
+
+    it('greedy-deletes a chain when both ancestor and child are merged', async () => {
+      // trunk → m1 (MERGED) → m2 (MERGED). No remaining children to block.
+      const result = await buildCleanupPlan({
+        branches: ['m1', 'm2'],
+        parentOf: new Map<string, string | null>([
+          ['m1', null],
+          ['m2', 'm1'],
+        ]),
+        getPrStatus: vi.fn().mockResolvedValue('MERGED'),
+        isMergedIntoAnyRoot: vi.fn().mockResolvedValue(false),
+      });
+
+      // Bottom-up delete: m2 must be removed before m1 so we never delete an
+      // ancestor that still claims a child branch.
+      expect(result.toDelete.map((d) => d.branch)).toEqual(['m2', 'm1']);
+    });
+  });
 });
