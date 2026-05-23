@@ -1,7 +1,7 @@
 # Autonomous Ship Report Template
 
 Use this template for:
-`docs/reports/<date>-<id>-autoship-report.md`
+`docs/reports/<date>-autoship-report.md`
 
 Before writing this report, ensure the directory exists:
 `mkdir -p docs/reports`
@@ -9,8 +9,8 @@ Before writing this report, ensure the directory exists:
 ## 1. Overview
 
 - Date:
-- Bead ID:
-- Bead title:
+- Task:
+- Task source:
 - Assignee:
 - PR link:
 
@@ -60,9 +60,8 @@ Before writing this report, ensure the directory exists:
 - `pnpm evals` (only if AI metadata/prompt outputs changed):
 - Warnings observed: (must be `0`)
 
-## 9. Follow-up Beads
+## 9. Follow-up Work
 
-- Created issues (`discovered-from:<current-id>`):
 - Deferred items:
 
 ## 10. PR Checks Watch Loop
