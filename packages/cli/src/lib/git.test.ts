@@ -468,6 +468,26 @@ describe('lastPushedRef', () => {
   });
 });
 
+describe('readLastPushedSha', () => {
+  it('returns null when the ref does not exist', async () => {
+    expect(await readLastPushedSha('feat/never-pushed', dir)).toBeNull();
+  });
+
+  it('throws DubError when git rev-parse fails for a non-missing-ref reason', async () => {
+    const tmpDir = await fs.promises.mkdtemp('/tmp/dubstack-nongit-');
+    try {
+      await expect(readLastPushedSha('feat/x', tmpDir)).rejects.toThrow(
+        DubError,
+      );
+      await expect(readLastPushedSha('feat/x', tmpDir)).rejects.toThrow(
+        /Failed to read last-pushed ref for 'feat\/x'/,
+      );
+    } finally {
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('commitStagedFromFile', () => {
   it('creates a commit using a file-backed message', async () => {
     const messagePath = path.join(dir, 'commit-message.md');

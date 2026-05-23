@@ -359,6 +359,14 @@ export function lastPushedRef(branch: string): string {
 /**
  * Reads our locally-tracked last-pushed SHA for a branch, or null if we
  * have never recorded one.
+ *
+ * `git rev-parse --verify --quiet` exits 1 when the ref is missing (the
+ * expected "no tracked SHA yet" case). Any other exit code signals a
+ * real failure (not a repo, lock contention, etc.) — we surface those as
+ * `DubError` so we don't silently degrade `pushBranch` to a bare lease.
+ *
+ * @throws {DubError} If git rev-parse fails for any reason other than
+ * the ref being missing.
  */
 export async function readLastPushedSha(
   branch: string,
@@ -372,8 +380,19 @@ export async function readLastPushedSha(
     );
     const sha = stdout.trim();
     return sha || null;
-  } catch {
-    return null;
+  } catch (error) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    if (exitCode === 1) return null;
+    throw new DubError(
+      formatGitFailure(
+        `Failed to read last-pushed ref for '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git rev-parse --verify ${lastPushedRef(branch)}' manually to inspect the underlying error.`,
+        `Run 'git status' to confirm the repository is in a healthy state.`,
+      ],
+    );
   }
 }
 
