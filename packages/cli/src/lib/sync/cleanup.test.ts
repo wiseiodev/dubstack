@@ -79,6 +79,32 @@ describe('buildCleanupPlan', () => {
     expect(result.skipped).toEqual([]);
   });
 
+  it('marks MERGED branches with trailing local commits as merged-pr-with-trailing-commits', async () => {
+    const result = await buildCleanupPlan({
+      branches: ['feat/a'],
+      getPrStatus: vi.fn().mockResolvedValue('MERGED'),
+      isMergedIntoAnyRoot: vi.fn(),
+      isMergedByPatchId: vi.fn().mockResolvedValue(false),
+    });
+
+    expect(result.toDelete).toEqual([
+      { branch: 'feat/a', reason: 'merged-pr-with-trailing-commits' },
+    ]);
+  });
+
+  it('uses plain merged-pr reason when patch-id confirms all commits in trunk', async () => {
+    const result = await buildCleanupPlan({
+      branches: ['feat/a'],
+      getPrStatus: vi.fn().mockResolvedValue('MERGED'),
+      isMergedIntoAnyRoot: vi.fn(),
+      isMergedByPatchId: vi.fn().mockResolvedValue(true),
+    });
+
+    expect(result.toDelete).toEqual([
+      { branch: 'feat/a', reason: 'merged-pr' },
+    ]);
+  });
+
   it('handles mixed lifecycle states across multiple branches', async () => {
     const statuses = new Map<string, 'OPEN' | 'CLOSED' | 'MERGED'>([
       ['feat/a', 'MERGED'],

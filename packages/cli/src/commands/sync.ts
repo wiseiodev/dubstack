@@ -48,6 +48,8 @@ import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
 import type {
   BranchSyncOutcome,
+  ReconcileSource,
+  ReconcileSourceHistogram,
   SyncOptions,
   SyncResult,
 } from '../lib/sync/types';
@@ -186,6 +188,7 @@ export async function sync(
     cleaned: [],
     branches: [],
     restacked: false,
+    reconcileSources: {},
   };
   const rootHasRemote = new Map<string, boolean>();
   let pendingError: Error | null = null;
@@ -194,6 +197,7 @@ export async function sync(
   let restackChanged = false;
   let restackCancelled = false;
   const reparentedBranchNames = new Set<string>();
+  const reparentedDueToMergedParent = new Set<string>();
   const worktreeSkippedBranches = new Set<string>();
   const recordWorktreeSkip = (branch: string): boolean => {
     const worktreePath = worktreeCheckouts.get(branch);
@@ -333,10 +337,28 @@ export async function sync(
       } else {
         console.log(`• Auto-clean deleting '${branch}' (${entry.reason}).`);
       }
+      if (entry.reason === 'merged-pr-with-trailing-commits') {
+        const trailingOutcome: BranchSyncOutcome = {
+          branch,
+          status: 'squash-merged-with-trailing-commits',
+          action: 'deleted',
+          message: `⚠ '${branch}' was squash-merged but had trailing local commits. Recover them via 'git reflog' and re-track with 'dub track <new-branch> --parent <branch>'.`,
+          reconcileSource: 'sync-squash-merged-cleanup',
+        };
+        result.branches.push(trailingOutcome);
+        printBranchOutcome(trailingOutcome);
+        recordSource(result.reconcileSources, 'sync-squash-merged-cleanup');
+      }
       await checkoutBranch(roots[0] ?? originalBranch, cwd);
       await deleteBranch(branch, cwd);
-      for (const entry of removeBranchFromState(scopeStacks, branch)) {
-        reparentedBranchNames.add(entry.branch);
+      const parentWasMerged =
+        entry.reason === 'merged-pr' ||
+        entry.reason === 'merged-pr-with-trailing-commits';
+      for (const removed of removeBranchFromState(scopeStacks, branch)) {
+        reparentedBranchNames.add(removed.branch);
+        if (parentWasMerged) {
+          reparentedDueToMergedParent.add(removed.branch);
+        }
       }
       result.cleaned.push(branch);
     }
@@ -377,6 +399,21 @@ export async function sync(
       }
 
       try {
+        if (reparentedDueToMergedParent.has(branch)) {
+          const newParent = stateBranchMap.get(branch)?.parent ?? null;
+          const orphanOutcome: BranchSyncOutcome = {
+            branch,
+            status: 'parent-merged-orphan',
+            action: 'synced',
+            message: `↪ Reparented '${branch}' onto '${newParent ?? 'trunk'}' (parent PR merged).`,
+            reconcileSource: 'sync-parent-merged-reparent',
+          };
+          result.branches.push(orphanOutcome);
+          printBranchOutcome(orphanOutcome);
+          recordSource(result.reconcileSources, 'sync-parent-merged-reparent');
+          continue;
+        }
+
         const hasRemote = await remoteBranchExists(branch, cwd);
         const hasLocal = await branchExists(branch, cwd);
         let outcome: BranchSyncOutcome;
@@ -392,6 +429,25 @@ export async function sync(
           hasLocal && hasRemote
             ? await isAncestor(remoteRef, branch, cwd)
             : false;
+        const prSyncInfo = hasRemote
+          ? await lookupPrSyncInfo(branch)
+          : { state: 'NONE' as const, baseRefName: null };
+        const localParent = stateBranchMap.get(branch)?.parent ?? null;
+        const remoteParentDiffers =
+          hasRemote &&
+          hasLocal &&
+          prSyncInfo.baseRefName != null &&
+          localParent != null &&
+          prSyncInfo.baseRefName !== localParent;
+        const remoteContainsNewParentHistory =
+          remoteParentDiffers && prSyncInfo.baseRefName
+            ? await isAncestor(
+                `origin/${prSyncInfo.baseRefName}`,
+                remoteRef,
+                cwd,
+              ).catch(() => false)
+            : false;
+
         let status = classifyBranchSyncStatus({
           hasRemote,
           hasLocal,
@@ -401,19 +457,21 @@ export async function sync(
           remoteBehind,
           hasSubmittedBaseline:
             stateBranchMap.get(branch)?.last_submitted_version != null,
+          remoteBaseRefName: prSyncInfo.baseRefName,
+          localParent,
+          remoteContainsNewParentHistory,
         });
-        const prSyncInfo = hasRemote
-          ? await lookupPrSyncInfo(branch)
-          : { state: 'NONE' as const, baseRefName: null };
-        const localParent = stateBranchMap.get(branch)?.parent ?? null;
+        // Refinement: when local is behind remote, prefer the safe FF path even
+        // when the PR's remote base differs — auto-FF + parent adopt handles
+        // both. Only escalate to needs-remote-sync when local has unrelated work.
         if (
+          status !== 'remote-restacked' &&
           hasRemote &&
           hasLocal &&
           localSha !== remoteSha &&
           status !== 'local-ahead' &&
-          prSyncInfo.baseRefName &&
-          localParent &&
-          prSyncInfo.baseRefName !== localParent
+          status !== 'needs-remote-sync-safe' &&
+          remoteParentDiffers
         ) {
           status = 'needs-remote-sync';
         }
@@ -424,9 +482,11 @@ export async function sync(
             status,
             action: 'skipped',
             message: `⚠ Skipped '${branch}' (missing on remote).`,
+            reconcileSource: 'sync-skip',
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
+          recordSource(result.reconcileSources, 'sync-skip');
           continue;
         }
 
@@ -437,14 +497,16 @@ export async function sync(
             status,
             action: 'synced',
             message: `✔ Restored '${branch}' from remote.`,
+            reconcileSource: 'sync-adopt-remote-safe',
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
           const restoredSha = await getRefSha(branch, cwd);
           await markBranchSynced(stateBranchMap, branch, restoredSha, cwd, {
-            source: 'sync-adopt-remote',
+            source: 'sync-adopt-remote-safe',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
+          recordSource(result.reconcileSources, 'sync-adopt-remote-safe');
           continue;
         }
 
@@ -454,6 +516,7 @@ export async function sync(
             status,
             action: 'none',
             message: `• '${branch}' is up to date.`,
+            reconcileSource: 'sync-no-change',
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
@@ -463,10 +526,11 @@ export async function sync(
             localSha ?? remoteSha ?? null,
             cwd,
             {
-              source: 'sync-noop',
+              source: 'sync-no-change',
               baseBranch: stateBranchMap.get(branch)?.parent ?? null,
             },
           );
+          recordSource(result.reconcileSources, 'sync-no-change');
           continue;
         }
 
@@ -476,6 +540,7 @@ export async function sync(
             status,
             action: 'none',
             message: `• '${branch}' is up to date but was previously unmanaged by DubStack sync metadata.`,
+            reconcileSource: 'sync-no-change',
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
@@ -485,27 +550,50 @@ export async function sync(
             localSha ?? remoteSha ?? null,
             cwd,
             {
-              source: 'sync-noop',
+              source: 'sync-no-change',
               baseBranch: stateBranchMap.get(branch)?.parent ?? null,
             },
           );
+          recordSource(result.reconcileSources, 'sync-no-change');
           continue;
         }
 
         if (status === 'needs-remote-sync-safe') {
+          // Refinement: when local is a strict subset of remote and the PR
+          // base also moved, adopt the remote parent silently as part of FF.
+          const adoptingParent =
+            remoteParentDiffers && prSyncInfo.baseRefName != null;
+          if (adoptingParent) {
+            console.log(
+              `↪ Adopting remote parent '${prSyncInfo.baseRefName}' for '${branch}' (PR base differs from local).`,
+            );
+          }
           await hardResetBranchToRef(branch, remoteRef, cwd);
+          if (adoptingParent && prSyncInfo.baseRefName) {
+            const stateBranch = stateBranchMap.get(branch);
+            if (stateBranch) stateBranch.parent = prSyncInfo.baseRefName;
+          }
+          const adoptedSource: ReconcileSource = adoptingParent
+            ? 'sync-adopt-remote-parent'
+            : 'sync-adopt-remote-safe';
           outcome = {
             branch,
             status,
             action: 'synced',
-            message: `✔ Synced '${branch}' to remote head.`,
+            message: adoptingParent
+              ? `✔ Synced '${branch}' to remote head and adopted remote parent '${prSyncInfo.baseRefName ?? 'unknown'}'.`
+              : `✔ Synced '${branch}' to remote head.`,
+            reconcileSource: adoptedSource,
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
           await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-            source: 'sync-adopt-remote',
-            baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+            source: adoptedSource,
+            baseBranch: adoptingParent
+              ? (prSyncInfo.baseRefName ?? localParent)
+              : (stateBranchMap.get(branch)?.parent ?? null),
           });
+          recordSource(result.reconcileSources, adoptedSource);
           continue;
         }
 
@@ -515,13 +603,38 @@ export async function sync(
             status,
             action: 'kept-local',
             message: `• Kept local '${branch}' (local commits ahead of remote).`,
+            reconcileSource: 'sync-keep-local',
           };
           result.branches.push(outcome);
           printBranchOutcome(outcome);
           await markBranchSynced(stateBranchMap, branch, localSha, cwd, {
-            source: 'sync-noop',
+            source: 'sync-no-change',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
+          recordSource(result.reconcileSources, 'sync-keep-local');
+          continue;
+        }
+
+        if (status === 'remote-restacked') {
+          await hardResetBranchToRef(branch, remoteRef, cwd);
+          if (prSyncInfo.baseRefName) {
+            const stateBranch = stateBranchMap.get(branch);
+            if (stateBranch) stateBranch.parent = prSyncInfo.baseRefName;
+          }
+          outcome = {
+            branch,
+            status,
+            action: 'synced',
+            message: `✔ '${branch}' was remote-restacked onto '${prSyncInfo.baseRefName ?? 'new parent'}'; adopted remote.`,
+            reconcileSource: 'sync-remote-restacked',
+          };
+          result.branches.push(outcome);
+          printBranchOutcome(outcome);
+          await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
+            source: 'sync-remote-restacked',
+            baseBranch: prSyncInfo.baseRefName ?? localParent,
+          });
+          recordSource(result.reconcileSources, 'sync-remote-restacked');
           continue;
         }
 
@@ -533,18 +646,22 @@ export async function sync(
               status,
               action: 'synced',
               message: `✔ Synced unsubmitted branch '${branch}' to remote with --force.`,
+              reconcileSource: 'sync-force',
             };
             await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-              source: 'sync-adopt-remote',
+              source: 'sync-force',
               baseBranch: localParent,
             });
+            recordSource(result.reconcileSources, 'sync-force');
           } else if (!options.interactive) {
             outcome = {
               branch,
               status,
               action: 'skipped',
               message: `⚠ Skipped unsubmitted branch '${branch}' (use --force or interactive mode).`,
+              reconcileSource: 'sync-skip',
             };
+            recordSource(result.reconcileSources, 'sync-skip');
           } else {
             const takeRemote = await confirm(
               `Branch '${branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
@@ -556,18 +673,22 @@ export async function sync(
                 status,
                 action: 'synced',
                 message: `✔ Synced unsubmitted branch '${branch}' to remote.`,
+                reconcileSource: 'sync-adopt-remote-safe',
               };
               await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-                source: 'sync-adopt-remote',
+                source: 'sync-adopt-remote-safe',
                 baseBranch: localParent,
               });
+              recordSource(result.reconcileSources, 'sync-adopt-remote-safe');
             } else {
               outcome = {
                 branch,
                 status,
                 action: 'kept-local',
                 message: `• Kept local unsubmitted branch '${branch}'.`,
+                reconcileSource: 'sync-keep-local',
               };
+              recordSource(result.reconcileSources, 'sync-keep-local');
             }
           }
           result.branches.push(outcome);
@@ -590,18 +711,22 @@ export async function sync(
               status,
               action: 'synced',
               message: `✔ Synced '${branch}' to remote and adopted remote parent '${prSyncInfo.baseRefName ?? 'unknown'}'.`,
+              reconcileSource: 'sync-adopt-remote-parent',
             };
             await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-              source: 'sync-adopt-remote',
+              source: 'sync-adopt-remote-parent',
               baseBranch: prSyncInfo.baseRefName ?? localParent,
             });
+            recordSource(result.reconcileSources, 'sync-adopt-remote-parent');
           } else if (!options.interactive) {
             outcome = {
               branch,
               status,
               action: 'skipped',
               message: `⚠ Skipped '${branch}' parent-mismatch sync (run interactively or with --force).`,
+              reconcileSource: 'sync-skip',
             };
+            recordSource(result.reconcileSources, 'sync-skip');
           } else {
             const parentDecision = await choose(
               `Branch '${branch}' parent differs locally ('${localParent}') vs remote ('${prSyncInfo.baseRefName}').`,
@@ -625,29 +750,65 @@ export async function sync(
                 status,
                 action: 'synced',
                 message: `✔ Synced '${branch}' to remote and adopted remote parent.`,
+                reconcileSource: 'sync-adopt-remote-parent',
               };
               await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-                source: 'sync-adopt-remote',
+                source: 'sync-adopt-remote-parent',
                 baseBranch: prSyncInfo.baseRefName ?? localParent,
               });
+              recordSource(result.reconcileSources, 'sync-adopt-remote-parent');
             } else if (parentDecision === 'local') {
               outcome = {
                 branch,
                 status,
                 action: 'kept-local',
                 message: `• Kept local parent and local state for '${branch}'.`,
+                reconcileSource: 'sync-keep-local',
               };
+              recordSource(result.reconcileSources, 'sync-keep-local');
             } else {
               outcome = {
                 branch,
                 status,
                 action: 'skipped',
                 message: `⚠ Skipped '${branch}' parent-mismatch sync by user choice.`,
+                reconcileSource: 'sync-skip',
               };
+              recordSource(result.reconcileSources, 'sync-skip');
             }
           }
           result.branches.push(outcome);
           printBranchOutcome(outcome);
+          continue;
+        }
+
+        // reconcile-needed: attempt a clean rebase first; if that succeeds we
+        // treat the branch as `non-conflicting-divergence` automatically. The
+        // trial is destructive on success — log it so the user sees the change.
+        console.log(
+          `↻ Trying clean rebase of '${branch}' onto '${remoteRef}'…`,
+        );
+        const reconciledClean = await rebaseBranchOntoRef(
+          branch,
+          remoteRef,
+          cwd,
+        );
+        if (reconciledClean) {
+          const newSha = await getRefSha(branch, cwd);
+          outcome = {
+            branch,
+            status: 'non-conflicting-divergence',
+            action: 'synced',
+            message: `✔ Auto-rebased '${branch}' onto remote (non-conflicting divergence).`,
+            reconcileSource: 'sync-rebase-onto-remote',
+          };
+          result.branches.push(outcome);
+          printBranchOutcome(outcome);
+          await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
+            source: 'sync-rebase-onto-remote',
+            baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+          });
+          recordSource(result.reconcileSources, 'sync-rebase-onto-remote');
           continue;
         }
 
@@ -669,12 +830,19 @@ export async function sync(
             status: 'reconcile-needed',
             action: 'synced',
             message: `✔ Synced '${branch}' to remote version.`,
+            reconcileSource: 'sync-adopt-remote-divergent',
           };
           await markBranchSynced(stateBranchMap, branch, remoteSha, cwd, {
-            source: 'sync-adopt-remote',
+            source: 'sync-adopt-remote-divergent',
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
+          recordSource(result.reconcileSources, 'sync-adopt-remote-divergent');
         } else {
+          // decision === 'rebase-onto-remote': the user picked "Rebase your
+          // changes on top of the remote version". The pre-prompt auto-rebase
+          // trial above has already failed cleanly; we retry it explicitly so
+          // the user sees the conflict surface, then fall back to keep-local
+          // when the rebase cannot complete unattended.
           const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
           outcome = {
             branch,
@@ -683,13 +851,19 @@ export async function sync(
             message: reconciled
               ? `✔ Reconciled '${branch}' by rebasing local commits onto remote.`
               : `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
+            reconcileSource: reconciled
+              ? 'sync-rebase-onto-remote'
+              : 'sync-keep-local',
           };
           if (reconciled) {
             const newSha = await getRefSha(branch, cwd);
             await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
-              source: 'sync-restack',
+              source: 'sync-rebase-onto-remote',
               baseBranch: stateBranchMap.get(branch)?.parent ?? null,
             });
+            recordSource(result.reconcileSources, 'sync-rebase-onto-remote');
+          } else {
+            recordSource(result.reconcileSources, 'sync-keep-local');
           }
         }
         result.branches.push(outcome);
@@ -718,6 +892,10 @@ export async function sync(
       }
     }
 
+    state.last_sync = {
+      timestamp: new Date().toISOString(),
+      reconcile_sources: { ...result.reconcileSources },
+    };
     await writeState(state, cwd);
 
     const retargeted = await retargetOpenPrBranches(scopeStacks, cwd, {
@@ -862,13 +1040,37 @@ async function wrapSyncError(error: unknown, cwd: string): Promise<Error> {
   return new DubError(baseError.message, recovery);
 }
 
+const ADOPT_REMOTE_SOURCES: ReadonlySet<ReconcileSource> = new Set([
+  'sync-adopt-remote-safe',
+  'sync-adopt-remote-divergent',
+  'sync-adopt-remote-parent',
+  'sync-remote-restacked',
+  'sync-parent-merged-reparent',
+  'sync-force',
+]);
+
+function isAdoptRemoteSource(source: ReconcileSource): boolean {
+  return ADOPT_REMOTE_SOURCES.has(source);
+}
+
+function isNoChangeSource(source: ReconcileSource): boolean {
+  return source === 'sync-no-change';
+}
+
+function recordSource(
+  histogram: ReconcileSourceHistogram,
+  source: ReconcileSource,
+): void {
+  histogram[source] = (histogram[source] ?? 0) + 1;
+}
+
 async function markBranchSynced(
   branchMap: Map<string, Branch>,
   branchName: string,
   headSha: string | null,
   cwd: string,
   options: {
-    source: 'sync-adopt-remote' | 'sync-noop' | 'sync-restack';
+    source: ReconcileSource;
     baseBranch: string | null;
   },
 ): Promise<void> {
@@ -876,7 +1078,8 @@ async function markBranchSynced(
   const entry = branchMap.get(branchName);
   if (!entry) return;
   const priorBaseline = entry.last_submitted_version;
-  const isAdoptingRemote = options.source === 'sync-adopt-remote';
+  const isAdoptingRemote = isAdoptRemoteSource(options.source);
+  const isNoChange = isNoChangeSource(options.source);
   const resolvedBaseBranch =
     options.baseBranch ?? priorBaseline?.base_branch ?? null;
   const canPreservePriorBaseSha =
@@ -906,14 +1109,14 @@ async function markBranchSynced(
     entry.last_synced_at = new Date().toISOString();
     return;
   }
-  const preservedSource =
+  const preservedSource: ReconcileSource =
     priorBaseline?.source ?? entry.sync_source ?? 'imported';
   entry.last_submitted_version = {
     head_sha: headSha,
     base_sha: resolvedBaseSha,
     base_branch: resolvedBaseBranch,
     version_number: priorBaseline?.version_number ?? null,
-    source: options.source === 'sync-noop' ? preservedSource : 'sync',
+    source: isNoChange ? preservedSource : options.source,
   };
   entry.last_reconciled_version = {
     head_sha: headSha,
@@ -947,7 +1150,7 @@ async function markBranchSynced(
     }
   }
   entry.last_synced_at = new Date().toISOString();
-  entry.sync_source = options.source === 'sync-noop' ? preservedSource : 'sync';
+  entry.sync_source = isNoChange ? preservedSource : options.source;
 }
 
 function getDescendants(stacks: Array<{ branches: Branch[] }>, branch: string) {

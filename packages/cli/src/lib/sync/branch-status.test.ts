@@ -111,4 +111,81 @@ describe('classifyBranchSyncStatus', () => {
       }),
     ).toBe('reconcile-needed');
   });
+
+  it('returns squash-merged-with-trailing-commits when the flag is set', () => {
+    expect(
+      classifyBranchSyncStatus({
+        hasRemote: true,
+        hasLocal: true,
+        localSha: 'a',
+        remoteSha: 'b',
+        localBehind: false,
+        remoteBehind: false,
+        hasSubmittedBaseline: true,
+        squashMergedWithTrailingCommits: true,
+      }),
+    ).toBe('squash-merged-with-trailing-commits');
+  });
+
+  it('returns parent-merged-orphan when tracked parent PR merged', () => {
+    expect(
+      classifyBranchSyncStatus({
+        hasRemote: true,
+        hasLocal: true,
+        localSha: 'a',
+        remoteSha: 'b',
+        localBehind: false,
+        remoteBehind: false,
+        hasSubmittedBaseline: true,
+        parentPrMerged: true,
+      }),
+    ).toBe('parent-merged-orphan');
+  });
+
+  it('returns remote-restacked when remote parent moved and contains new history', () => {
+    expect(
+      classifyBranchSyncStatus({
+        hasRemote: true,
+        hasLocal: true,
+        localSha: 'a',
+        remoteSha: 'b',
+        localBehind: false,
+        remoteBehind: false,
+        hasSubmittedBaseline: true,
+        localParent: 'main',
+        remoteBaseRefName: 'new-parent',
+        remoteContainsNewParentHistory: true,
+      }),
+    ).toBe('remote-restacked');
+  });
+
+  it('returns non-conflicting-divergence when rebase trial is clean', () => {
+    expect(
+      classifyBranchSyncStatus({
+        hasRemote: true,
+        hasLocal: true,
+        localSha: 'a',
+        remoteSha: 'b',
+        localBehind: false,
+        remoteBehind: false,
+        hasSubmittedBaseline: true,
+        rebaseOntoRemoteClean: true,
+      }),
+    ).toBe('non-conflicting-divergence');
+  });
+
+  it('stays on reconcile-needed when rebase trial is null/false', () => {
+    expect(
+      classifyBranchSyncStatus({
+        hasRemote: true,
+        hasLocal: true,
+        localSha: 'a',
+        remoteSha: 'b',
+        localBehind: false,
+        remoteBehind: false,
+        hasSubmittedBaseline: true,
+        rebaseOntoRemoteClean: false,
+      }),
+    ).toBe('reconcile-needed');
+  });
 });
