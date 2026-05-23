@@ -13,10 +13,10 @@
     "prUrl": ""
   },
   "stats": {
-    "fileCount": 3,
-    "additions": 425,
+    "fileCount": 6,
+    "additions": 1394,
     "deletions": 70,
-    "diffStat": "3 files changed, 425 insertions(+), 70 deletions(-)"
+    "diffStat": "6 files changed, 1394 insertions(+), 70 deletions(-) — includes generated report artifacts (PR body, HTML, report data)"
   },
   "prompt": "Wrap every `gh` call in `lib/github.ts` with the DUB-2 retry helper. Add an idempotency guard before retrying `createPr` so a successful first attempt followed by a transient 502 doesn't create a duplicate PR.",
   "tldr": "`gh` API calls now retry transient failures via the DUB-2 helper with permanent-error short-circuiting. `createPr` checks for a phantom-duplicate PR (matching title) before each retry attempt.",
@@ -62,6 +62,16 @@
       "additions": 70,
       "deletions": 0,
       "explanation": "Self-QA fallback. No `.tsx` files changed and the work is pure CLI library logic, so a Playwright video has no useful surface. The report enumerates the wrapped call sites, the permanent-error classifier coverage, the createPr idempotency contract, and the quality-gate evidence.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-10-{pr-body.md,report-data.json,.html}",
+      "changeType": "new",
+      "additions": 969,
+      "deletions": 0,
+      "explanation": "Generated artifacts from the do-issue report renderer. `dub-10-report-data.json` is the schema-validated source of truth; `dub-10.html` is the rendered review page; `dub-10-pr-body.md` is what populated the PR description. They follow the same convention as prior issues' reports under .reports/.",
       "snippet": "",
       "snippetLanguage": "",
       "open": false

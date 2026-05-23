@@ -74,6 +74,12 @@ new +70 / -0
 
 Self-QA fallback. No `.tsx` files changed and the work is pure CLI library logic, so a Playwright video has no useful surface. The report enumerates the wrapped call sites, the permanent-error classifier coverage, the createPr idempotency contract, and the quality-gate evidence.
 
+### .reports/dub-10-{pr-body.md,report-data.json,.html}
+
+new +969 / -0
+
+Generated artifacts from the do-issue report renderer. `dub-10-report-data.json` is the schema-validated source of truth; `dub-10.html` is the rendered review page; `dub-10-pr-body.md` is what populated the PR description. They follow the same convention as prior issues' reports under .reports/.
+
 ## Where to focus review
 
 1. **Permanent-error classifier scope** - `packages/cli/src/lib/github.ts:isPermanentGhError`: The classifier governs whether a `gh` failure short-circuits or retries. It intentionally drops the bare `not found` substring (kept in `isPrNotFoundError`) to avoid false positives from OS/DNS messages like `host not found`. Worth a second pair of eyes on the regex/string set.

@@ -16,11 +16,17 @@ is exercised end-to-end by Vitest unit tests mocking `execa`.
   `getPrStateByNumber`, `getPrMergeStatusByNumber`, `updatePrBody`,
   `retargetPrBase`, `mergePr`, plus the `ensureGhInstalled` /
   `checkGhAuth` probes) now flows through the shared `runGh` retry wrapper.
-- Permanent errors short-circuit: HTTP `401`/`403`/`404`, "could not resolve
-  to a pull request" (and `pullrequest` GraphQL variant), "no pull requests
-  found", and bare "not found" all classified by `isPermanentGhError` —
-  retry rethrows immediately, so existing `isPrNotFoundError` callers still
-  see the original error and convert to `null` as before.
+- Permanent errors short-circuit: HTTP `401`/`403`/`404` (matched only in
+  explicit HTTP/status context — `HTTP 4xx`, `401 Unauthorized`,
+  `403 Forbidden`/`insufficient`, `404 Not Found` — so bare digits in
+  branch names or echoed args don't false-positive), "could not resolve to
+  a pull request" (and `pullrequest` GraphQL variant), "no pull requests
+  found", and `ENOENT` (gh binary missing) all classified by
+  `isPermanentGhError`. The bare `not found` substring is intentionally
+  *not* matched here (it stays in `isPrNotFoundError` for `null`-on-404
+  callers) so OS/DNS errors like `host not found` still retry. Retry
+  rethrows permanent errors immediately, so existing `isPrNotFoundError`
+  callers still see the original error and convert to `null` as before.
 - Transient errors (e.g. `502 Bad Gateway`, network timeout) retry up to
   4 attempts with exponential backoff via the DUB-2 `retry` helper.
 - `createPr` keeps its own retry loop with an idempotency guard: before

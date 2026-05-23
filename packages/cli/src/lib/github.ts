@@ -52,19 +52,30 @@ export function __setGhRetryOptionsForTesting(
 
 /**
  * Classifies a `gh`-call error as permanent (do not retry). Covers HTTP
- * 401/403/404, the GraphQL "could not resolve to a pull request" variants,
+ * 401/403/404 (only when the digits appear in an explicit HTTP/status
+ * context), the GraphQL "could not resolve to a pull request" variants,
  * `no pull requests found`, and `ENOENT` (gh binary missing).
  *
  * The bare `not found` substring is intentionally *not* matched here even
  * though `isPrNotFoundError` accepts it — OS-level and DNS errors can
  * include `not found` (e.g. `host not found`) and we want those to retry.
- * GitHub's actual 404 responses carry an explicit `HTTP 404` which the
- * regex above already catches.
+ * The HTTP-status regex below is similarly scoped: bare `401`/`403`/`404`
+ * digits in branch names or command args echoed inside error stderr would
+ * otherwise spuriously short-circuit retries.
  */
 function isPermanentGhError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   const normalized = message.toLowerCase();
-  if (/\b(401|403|404)\b/.test(message)) return true;
+  // Require an explicit HTTP/status prefix or status-phrase suffix so we
+  // don't false-positive on the digits appearing in branch names or args.
+  if (
+    /\b(?:HTTP|status(?:\s+code)?)\s*:?\s*(?:401|403|404)\b/i.test(message) ||
+    /\b401\s+unauthorized\b/i.test(message) ||
+    /\b403\s+(?:forbidden|insufficient)\b/i.test(message) ||
+    /\b404\s+not\s+found\b/i.test(message)
+  ) {
+    return true;
+  }
   if (normalized.includes('could not resolve to a pull request')) return true;
   if (normalized.includes('could not resolve to a pullrequest')) return true;
   if (normalized.includes('no pull requests found')) return true;

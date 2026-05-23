@@ -597,6 +597,21 @@ describe('gh retry behavior', () => {
     await expect(mergePr(99, '/repo')).resolves.toBeUndefined();
     expect(mockExeca).toHaveBeenCalledTimes(2);
   });
+
+  it('does not classify bare HTTP-status digits in args as permanent', async () => {
+    // Transient gh error whose stderr happens to echo a branch named "feat/404"
+    // — the bare 404 must not short-circuit retries.
+    mockExeca
+      .mockRejectedValueOnce(
+        new Error(
+          'Command failed: gh pr list --head feat/404\n502 Bad Gateway',
+        ),
+      )
+      .mockResolvedValueOnce({ stdout: 'null' });
+
+    await expect(getPr('feat/404', '/repo')).resolves.toBeNull();
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('createPr idempotency guard', () => {

@@ -290,8 +290,8 @@
       <header class="page-head">
         <div class="eyebrow">Linear - DUB-10</div>
         <h1>DUB-10 - Apply retry to all gh calls + idempotency guard on createPr</h1>
-        <div class="meta"><span><strong>3</strong> files</span>
-<span><span class="add">+425</span> / <span class="del">-70</span></span>
+        <div class="meta"><span><strong>6</strong> files</span>
+<span><span class="add">+1394</span> / <span class="del">-70</span></span>
 <span>branch <strong>feature/dub-10-apply-retry-to-all-gh-calls-idempotency-guard-on-createpr</strong> &rarr; <strong>main</strong></span>
 <span>author <strong>Daniel Wise</strong></span></div>
         <div class="prompt"><span class="label">Prompt</span>Wrap every `gh` call in `lib/github.ts` with the DUB-2 retry helper. Add an idempotency guard before retrying `createPr` so a successful first attempt followed by a transient 502 doesn&#39;t create a duplicate PR.</div>
@@ -386,6 +386,18 @@
   </summary>
   <div class="file-body">
     <p>Self-QA fallback. No `.tsx` files changed and the work is pure CLI library logic, so a Playwright video has no useful surface. The report enumerates the wrapped call sites, the permanent-error classifier coverage, the createPr idempotency contract, and the quality-gate evidence.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-10-{pr-body.md,report-data.json,.html}</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+969</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Generated artifacts from the do-issue report renderer. `dub-10-report-data.json` is the schema-validated source of truth; `dub-10.html` is the rendered review page; `dub-10-pr-body.md` is what populated the PR description. They follow the same convention as prior issues&#39; reports under .reports/.</p>
     
   </div>
 </details></div>
@@ -602,6 +614,7 @@
           <a href="#tour" class="sub">github.ts</a>
 <a href="#tour" class="sub">github.test.ts</a>
 <a href="#tour" class="sub">dub-10-qa.md</a>
+<a href="#tour" class="sub">dub-10-{pr-body.md,report-data.json,.html}</a>
           <a href="#focus">Where to focus</a>
           <a href="#tests">Test plan</a>
           <a href="#gates">Quality gates</a>
