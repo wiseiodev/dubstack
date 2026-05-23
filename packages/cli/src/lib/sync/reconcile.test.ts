@@ -2,45 +2,62 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveReconcileDecision } from './reconcile';
 
 describe('resolveReconcileDecision', () => {
-  it('takes remote when force is enabled', async () => {
-    const decision = await resolveReconcileDecision({
-      branch: 'feat/a',
-      force: true,
-      interactive: false,
-      promptChoice: vi.fn(),
-    });
-    expect(decision).toBe('take-remote');
-  });
-
-  it('skips in non-interactive mode without force', async () => {
+  it('aborts in non-interactive mode without force (safest default)', async () => {
+    const promptChoice = vi.fn();
     const decision = await resolveReconcileDecision({
       branch: 'feat/a',
       force: false,
       interactive: false,
-      promptChoice: vi.fn(),
+      promptChoice,
     });
-    expect(decision).toBe('skip');
+    expect(decision).toBe('abort');
+    expect(promptChoice).not.toHaveBeenCalled();
   });
 
-  it('uses prompt response in interactive mode', async () => {
-    const promptChoice = vi.fn().mockResolvedValue('keep-local');
+  it('takes remote with --force AND --no-interactive', async () => {
+    const promptChoice = vi.fn();
+    const decision = await resolveReconcileDecision({
+      branch: 'feat/a',
+      force: true,
+      interactive: false,
+      promptChoice,
+    });
+    expect(decision).toBe('take-remote');
+    expect(promptChoice).not.toHaveBeenCalled();
+  });
+
+  it('still prompts when --force alone (interactive shell)', async () => {
+    const promptChoice = vi.fn().mockResolvedValue('rebase-onto-remote');
+    const decision = await resolveReconcileDecision({
+      branch: 'feat/a',
+      force: true,
+      interactive: true,
+      promptChoice,
+    });
+    expect(promptChoice).toHaveBeenCalledOnce();
+    expect(decision).toBe('rebase-onto-remote');
+  });
+
+  it('prompts in interactive mode without force and returns user choice', async () => {
+    const promptChoice = vi.fn().mockResolvedValue('take-remote');
     const decision = await resolveReconcileDecision({
       branch: 'feat/a',
       force: false,
       interactive: true,
       promptChoice,
     });
-    expect(promptChoice).toHaveBeenCalled();
-    expect(decision).toBe('keep-local');
+    expect(promptChoice).toHaveBeenCalledOnce();
+    expect(decision).toBe('take-remote');
   });
 
-  it('falls back to skip for unknown prompt answer', async () => {
+  it('returns abort when user selects abort', async () => {
+    const promptChoice = vi.fn().mockResolvedValue('abort');
     const decision = await resolveReconcileDecision({
       branch: 'feat/a',
       force: false,
       interactive: true,
-      promptChoice: vi.fn().mockResolvedValue('unknown'),
+      promptChoice,
     });
-    expect(decision).toBe('skip');
+    expect(decision).toBe('abort');
   });
 });

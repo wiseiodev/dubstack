@@ -1,5 +1,6 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
+import chalk from 'chalk';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -29,6 +30,11 @@ import {
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
 import {
+  resolveRestackConflictDecision,
+  restackConflictPrompt,
+} from '../lib/restack-conflict-prompt';
+import { rollbackRestack } from '../lib/restack-rollback';
+import {
   type Branch,
   findStackForBranch,
   readState,
@@ -38,6 +44,7 @@ import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
 import { buildCleanupPlan } from '../lib/sync/cleanup';
 import { partitionFreshBranches } from '../lib/sync/fresh';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
+import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
 import type {
   BranchSyncOutcome,
@@ -53,6 +60,29 @@ import {
   retargetOpenPrBranches,
   submitRefreshedStacks,
 } from './stack-maintenance';
+
+/**
+ * Marker DubError for the `abort` reconcile decision. Used to bypass DUB-13's
+ * per-branch failure-isolation catch so an abort halts the entire sync.
+ *
+ * The decision can be reached two ways and the message reflects which:
+ * - User picks "Abort this command" in the interactive three-way prompt.
+ * - `--no-interactive` without `--force` falls back to ABORT as the
+ *   safest non-interactive default.
+ */
+class SyncAbortError extends DubError {
+  constructor(branch: string, interactive: boolean) {
+    const message = interactive
+      ? `Sync aborted by user while reconciling '${branch}'.`
+      : `Sync aborted while reconciling '${branch}': prompting is disabled (--no-interactive) and no --force was given, so the safe default is to abort.`;
+    super(message, [
+      "Run 'dub sync' again interactively to choose between rebase/take-remote/abort.",
+      "Pass '--force --no-interactive' to take the remote version without prompting.",
+      "Pass '--force' alone if you want the prompt but a fallback take-remote on --no-interactive shells.",
+    ]);
+    this.name = 'SyncAbortError';
+  }
+}
 
 function isInteractiveShell(): boolean {
   return Boolean(process.stdout.isTTY && process.stdin.isTTY);
@@ -165,6 +195,7 @@ export async function sync(
   let restoreTarget = originalBranch;
   let needsSubmitRefresh = false;
   let restackChanged = false;
+  let restackCancelled = false;
   const reparentedBranchNames = new Set<string>();
   const reparentedDueToMergedParent = new Set<string>();
   const worktreeSkippedBranches = new Set<string>();
@@ -785,19 +816,12 @@ export async function sync(
           branch,
           force: options.force,
           interactive: options.interactive,
-          promptChoice: () =>
-            choose(
-              `Branch '${branch}' diverged from remote and an auto-rebase trial had conflicts. How should sync proceed?`,
-              [
-                {
-                  label: 'Take remote version (discard local divergence)',
-                  value: 'take-remote',
-                },
-                { label: 'Keep local version', value: 'keep-local' },
-                { label: 'Skip this branch', value: 'skip' },
-              ],
-            ),
+          promptChoice: () => reconcilePrompt({ branch }),
         });
+
+        if (decision === 'abort') {
+          throw new SyncAbortError(branch, options.interactive);
+        }
 
         if (decision === 'take-remote') {
           await hardResetBranchToRef(branch, remoteRef, cwd);
@@ -813,30 +837,41 @@ export async function sync(
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
           recordSource(result.reconcileSources, 'sync-adopt-remote-divergent');
-        } else if (decision === 'keep-local') {
-          outcome = {
-            branch,
-            status: 'reconcile-needed',
-            action: 'kept-local',
-            message: `• Kept local '${branch}' (remote divergence ignored).`,
-            reconcileSource: 'sync-keep-local',
-          };
-          recordSource(result.reconcileSources, 'sync-keep-local');
         } else {
+          // decision === 'rebase-onto-remote': the user picked "Rebase your
+          // changes on top of the remote version". The pre-prompt auto-rebase
+          // trial above has already failed cleanly; we retry it explicitly so
+          // the user sees the conflict surface, then fall back to keep-local
+          // when the rebase cannot complete unattended.
+          const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
           outcome = {
             branch,
             status: 'reconcile-needed',
-            action: 'skipped',
-            message: options.interactive
-              ? `⚠ Skipped '${branch}' by user choice.`
-              : `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
-            reconcileSource: 'sync-skip',
+            action: reconciled ? 'synced' : 'kept-local',
+            message: reconciled
+              ? `✔ Reconciled '${branch}' by rebasing local commits onto remote.`
+              : `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
+            reconcileSource: reconciled
+              ? 'sync-rebase-onto-remote'
+              : 'sync-keep-local',
           };
-          recordSource(result.reconcileSources, 'sync-skip');
+          if (reconciled) {
+            const newSha = await getRefSha(branch, cwd);
+            await markBranchSynced(stateBranchMap, branch, newSha, cwd, {
+              source: 'sync-rebase-onto-remote',
+              baseBranch: stateBranchMap.get(branch)?.parent ?? null,
+            });
+            recordSource(result.reconcileSources, 'sync-rebase-onto-remote');
+          } else {
+            recordSource(result.reconcileSources, 'sync-keep-local');
+          }
         }
         result.branches.push(outcome);
         printBranchOutcome(outcome);
       } catch (branchError) {
+        // A user-requested abort must halt the entire sync, not be isolated
+        // as a per-branch error per DUB-13's failure-isolation contract.
+        if (branchError instanceof SyncAbortError) throw branchError;
         const dubErr =
           branchError instanceof DubError
             ? branchError
@@ -878,8 +913,36 @@ export async function sync(
         await checkoutBranch(root, cwd);
         const restackResult = await restack(cwd);
         if (restackResult.status === 'conflict') {
+          const conflictBranch = restackResult.conflictBranch ?? 'unknown';
+          const conflictDecision = await resolveRestackConflictDecision({
+            branch: conflictBranch,
+            interactive: options.interactive,
+            promptChoice: (branchName) =>
+              restackConflictPrompt({ branch: branchName }),
+          });
+          if (conflictDecision === 'cancel') {
+            const rollback = await rollbackRestack(cwd);
+            console.log(
+              chalk.green(
+                `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+              ),
+            );
+            restoreTarget = rollback.previousBranch;
+            restackCancelled = true;
+            break;
+          }
+          if (conflictDecision === 'exit') {
+            throw new DubError(
+              `Sync exited mid-conflict on '${conflictBranch}'. The restack is paused in its current state.`,
+              [
+                "Run 'dub continue' once you have resolved the conflict to finish the restack.",
+                "Run 'dub continue --ai' to let DubStack attempt the resolution.",
+                "Run 'dub abort' to cancel and roll back to the pre-restack state.",
+              ],
+            );
+          }
           throw new DubError(
-            `Sync paused: conflict while restacking '${restackResult.conflictBranch ?? 'unknown'}'.`,
+            `Sync paused: conflict while restacking '${conflictBranch}'.`,
             [
               'Resolve conflicts and stage the resolved files.',
               "Run 'dub continue --ai' to let DubStack try the resolution.",
@@ -892,10 +955,13 @@ export async function sync(
           restackChanged = true;
         }
       }
-      result.restacked = true;
+      result.restacked = !restackCancelled;
     }
 
-    if (result.cleaned.length > 0 || needsSubmitRefresh || restackChanged) {
+    if (
+      !restackCancelled &&
+      (result.cleaned.length > 0 || needsSubmitRefresh || restackChanged)
+    ) {
       const preferredBranch = resolvePreferredBranch(
         scopeStacks,
         originalBranch,
