@@ -29,6 +29,7 @@ import {
   getBranchPrSyncInfo,
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
+import { createProgress, getActiveProgress } from '../lib/progress';
 import {
   resolveRestackConflictDecision,
   restackConflictPrompt,
@@ -89,6 +90,8 @@ function isInteractiveShell(): boolean {
 }
 
 async function confirm(question: string): Promise<boolean> {
+  const progress = getActiveProgress();
+  if (progress) progress.pause();
   const rl = readline.createInterface({ input, output });
   try {
     const answer = await rl.question(`${question} [Y/n] `);
@@ -96,6 +99,7 @@ async function confirm(question: string): Promise<boolean> {
     return normalized === '' || normalized === 'y' || normalized === 'yes';
   } finally {
     rl.close();
+    if (progress) progress.resume();
   }
 }
 
@@ -103,6 +107,8 @@ async function choose(
   question: string,
   choices: Array<{ label: string; value: string }>,
 ): Promise<string> {
+  const progress = getActiveProgress();
+  if (progress) progress.pause();
   const rl = readline.createInterface({ input, output });
   try {
     console.log(question);
@@ -117,6 +123,7 @@ async function choose(
     return choices[idx].value;
   } finally {
     rl.close();
+    if (progress) progress.resume();
   }
 }
 
@@ -144,6 +151,7 @@ export async function sync(
   const state = await readState(cwd);
   const originalBranch = await getCurrentBranch(cwd);
   const worktreeCheckouts = await listWorktreeCheckouts(cwd);
+  const progress = createProgress();
 
   const scopeStacks = options.all
     ? state.stacks
@@ -233,7 +241,13 @@ export async function sync(
     console.log('🌲 Fetching branches from remote...');
     const toFetch = [...new Set([...roots, ...partition.mustFetch])];
     if (toFetch.length > 0) {
-      await fetchBranches(toFetch, cwd);
+      progress.start('🌲 Fetching branches', toFetch.length);
+      await fetchBranches(toFetch, cwd, 'origin', {
+        onBranchStart: (index, branch) => {
+          progress.update('🌲 Fetching branches', index, branch);
+        },
+      });
+      progress.complete('🌲 Fetching branches');
       result.fetched = toFetch;
     }
     if (freshSkipped.size > 0) {
@@ -322,14 +336,21 @@ export async function sync(
         }
       }
     }
+    if (cleanupPlan.toDelete.length > 0) {
+      progress.start('🧹 Cleaning merged', cleanupPlan.toDelete.length);
+    }
+    let cleanupIndex = 0;
     for (const entry of cleanupPlan.toDelete) {
       const branch = entry.branch;
+      cleanupIndex += 1;
+      progress.update('🧹 Cleaning merged', cleanupIndex, branch);
       if (excludedFromSync.has(branch)) continue;
       if (recordWorktreeSkip(branch)) continue;
       const descendants = getDescendants(scopeStacks, branch).filter(
         (name) =>
           !cleanupPlan.toDelete.some((target) => target.branch === name),
       );
+      progress.pause();
       if (descendants.length > 0) {
         console.log(
           `⚠ Auto-clean deleting '${branch}' (${entry.reason}) with dependent branch(es): ${descendants.join(', ')}. Their parent will be reassigned in local DubStack state.`,
@@ -349,6 +370,7 @@ export async function sync(
         printBranchOutcome(trailingOutcome);
         recordSource(result.reconcileSources, 'sync-squash-merged-cleanup');
       }
+      progress.resume();
       await checkoutBranch(roots[0] ?? originalBranch, cwd);
       await deleteBranch(branch, cwd);
       const parentWasMerged =
@@ -362,6 +384,9 @@ export async function sync(
       }
       result.cleaned.push(branch);
     }
+    if (cleanupPlan.toDelete.length > 0) {
+      progress.complete('🧹 Cleaning merged');
+    }
     for (const skipped of cleanupPlan.skipped) {
       console.log(
         `• Skipped cleanup for '${skipped.branch}' (${skipped.reason}).`,
@@ -374,7 +399,13 @@ export async function sync(
     }
 
     console.log('🔄 Syncing branches...');
+    if (stackBranches.length > 0) {
+      progress.start('🔄 Reconciling', stackBranches.length);
+    }
+    let reconcileIndex = 0;
     for (const branch of stackBranches) {
+      reconcileIndex += 1;
+      progress.update('🔄 Reconciling', reconcileIndex, branch);
       if (result.cleaned.includes(branch) || excludedFromSync.has(branch))
         continue;
       if (recordWorktreeSkip(branch)) continue;
@@ -891,6 +922,9 @@ export async function sync(
         printBranchOutcome(errorOutcome);
       }
     }
+    if (stackBranches.length > 0) {
+      progress.complete('🔄 Reconciling');
+    }
 
     state.last_sync = {
       timestamp: new Date().toISOString(),
@@ -979,6 +1013,8 @@ export async function sync(
     }
   } catch (error) {
     pendingError = await wrapSyncError(error, cwd);
+  } finally {
+    progress.stop();
   }
 
   const activeOperation = await detectActiveOperation(cwd).catch(() => 'none');

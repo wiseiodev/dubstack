@@ -8,6 +8,12 @@ export interface Progress {
   complete(label: string): void;
   pause(): void;
   resume(): void;
+  /**
+   * Stops the underlying bar without forcing it to 100%. Safe to call on an
+   * idle progress. Used by error/recovery paths so a thrown exception does
+   * not leave the terminal cursor hidden.
+   */
+  stop(): void;
 }
 
 export interface ProgressOptions {
@@ -62,6 +68,7 @@ function createNoopProgress(): Progress {
     complete: () => {},
     pause: () => {},
     resume: () => {},
+    stop: () => {},
   };
   return noop;
 }
@@ -137,6 +144,15 @@ function createTTYProgress(stream: NodeJS.WriteStream): Progress {
       if (!paused || !state) return;
       paused = false;
       startBarFromState(state);
+    },
+    stop() {
+      if (bar) bar.stop();
+      bar = null;
+      state = null;
+      paused = false;
+      if (activeProgress === progress) {
+        activeProgress = null;
+      }
     },
   };
 

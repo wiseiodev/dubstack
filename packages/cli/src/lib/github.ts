@@ -1,6 +1,6 @@
-import { execa, type Options } from 'execa';
 import { openUrl } from './browser';
 import { DubError } from './errors';
+import { execa, type Options } from './exec';
 import { type RetryOptions, retry } from './retry';
 
 /** Details of a GitHub Pull Request. */

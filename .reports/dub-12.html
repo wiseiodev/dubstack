@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-12 - Progress reporting in sync / submit / restack</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-12</div>
+        <h1>DUB-12 - Progress reporting in sync / submit / restack</h1>
+        <div class="meta"><span><strong>13</strong> files</span>
+<span><span class="add">+423</span> / <span class="del">-121</span></span>
+<span>branch <strong>feature/dub-12-progress-reporting-in-sync-submit-restack</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span>
+<span><a href="https://github.com/wiseiodev/dubstack/pull/50">Pull request</a></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Consume the DUB-3 progress wrapper from sync, submit, and restack so the long-running commands show a TTY-aware bar with per-phase labels, pause for any console writes or interactive prompts that would collide with bar repaints, and emit each git/gh subprocess line under --verbose. CI/non-TTY callers go through the same no-op path so existing summary lines remain the only output.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>sync, submit, and restack each create one Progress instance, start/update/complete per phase, and wrap their body in try { ... } finally { progress.stop() } so an exception cannot leave the terminal cursor hidden. printBranchOutcome and the sync confirm()/choose() helpers pause+resume the active bar through getActiveProgress(). git/gh subprocesses now route through lib/exec.ts, a thin execa wrapper that calls logVerboseCommand before each invocation (sanitized via sanitizeRemoteUrl). Adds Progress.stop() (halts the bar without forcing 100%) plus 5 new tests for the new wrapper, the sync/report pause/resume contract, and verbose subprocess logging.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Tier 0 sync magic needs visible progress for the slow git/gh phases or users assume the CLI is hung.</p>
+<p class="lede">Per-branch outcomes still need to land as readable summary lines, so the bar has to coexist with console writes instead of replacing them.</p>
+<p class="lede">Operators must be able to tail git/gh subprocess invocations under --verbose without leaking secrets — the foundation is DUB-3&#39;s logVerboseCommand + sanitizeRemoteUrl.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>sync / submit / restack only printed phase headers and per-branch outcome lines; long fetches looked frozen.</li>
+<li>No way to trace which git or gh call a command was on without re-running under DEBUG.</li>
+<li>Interactive prompts and per-branch logs would have torn the bar if a bar had existed.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>Each command instantiates Progress once and drives one bar per phase; CI/non-TTY callers get a no-op that preserves the existing summary-only output.</li>
+<li>Errors call progress.stop() in a finally, so a thrown exception cannot leave hideCursor stuck on.</li>
+<li>--verbose prints `$ git ...` / `$ gh ...` for every subprocess, sanitized of basic-auth and token query params, and pauses+resumes the bar around each printed line.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/exec.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+28</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Thin wrapper around execa preserving its overloaded call signatures. Before invoking the subprocess it calls logVerboseCommand(file, args, { progress: getActiveProgress() }) so --verbose prints the sanitized command and pauses any active bar around the print. When verbose is off the wrapper is functionally equivalent to execa itself.</p>
+    <div class="code"><pre>export const execa: RawExeca = ((file: string, args?: readonly string[], options?: unknown) =&gt; {
+  logVerboseCommand(file, args ?? [], { progress: getActiveProgress() });
+  return (rawExeca as unknown as (...a: unknown[]) =&gt; unknown)(file, args, options);
+}) as unknown as RawExeca;</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+10</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Re-routes the execa import to ./exec so all 50+ git subprocess calls flow through the verbose wrapper. Adds an onBranchStart callback to FetchBranchesOptions and fires it before each per-branch fetch so the sync caller can update the progress bar with the current branch name as detail.</p>
+    <div class="code"><pre>options.onBranchStart?.(index, branch);
+const refspec = `${branch}:${namespacedFetchRef(branch)}`;</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+1</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Re-routes the execa import to ./exec. The central runGh() wrapper means every gh call (gh pr list, gh pr view, gh pr create, gh pr edit, etc.) now logs under --verbose without further changes.</p>
+    <div class="code"><pre>import { execa, type Options } from &#39;./exec&#39;;</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git/is-merged-by-patch-id.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+1</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Same one-line import switch so the per-commit cherry-check git calls during sync cleanup also log under --verbose.</p>
+    <div class="code"><pre>import { execa } from &#39;../exec&#39;;</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/progress.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+16</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds Progress.stop(): halts the underlying SingleBar without forcing it to total (unlike complete() which prints a deceptive 100% on error paths). Clears bar/state/activeProgress so subsequent start()s start fresh. Noop implementation is a function-shaped no-op so CI/non-TTY callers don&#39;t branch on TTY-ness.</p>
+    <div class="code"><pre>stop() {
+  if (bar) bar.stop();
+  bar = null;
+  state = null;
+  paused = false;
+  if (activeProgress === progress) activeProgress = null;
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+32</span> <span class="del">-6</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Creates one Progress instance and drives three phases: &#39;🌲 Fetching branches&#39; (uses the new fetchBranches onBranchStart to update per-branch), &#39;🧹 Cleaning merged&#39; (per-deletion update), &#39;🔄 Reconciling&#39; (per-branch update). Wraps the existing try/catch in a finally that calls progress.stop() so an exception can&#39;t orphan the bar. Wraps the auto-clean console.log inside the cleanup loop with pause/resume. confirm() and choose() now pause+resume the active bar via getActiveProgress(), which covers the trunk-sync path too (no bar active = pause/resume are no-ops on null).</p>
+    <div class="code"><pre>} catch (error) {
+  pendingError = await wrapSyncError(error, cwd);
+} finally {
+  progress.stop();
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/submit.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+161</span> <span class="del">-88</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Splits the body into two progress phases: &#39;🚀 Pushing branches&#39; (start before the push loop, complete after) and &#39;📬 Syncing PRs&#39; (start before the getPr/createPr loop, complete after). Wraps the entire body in try/finally with progress.stop() so the bar is always cleaned up even if pushBranch, getPr, or createPr throws. Dry-run callers still bypass the bar — phase start/complete is gated on !dryRun. updateAllPrBodies runs after both bars complete so its own console output (none currently) stays clean.</p>
+    <div class="code"><pre>const progress = createProgress();
+try {
+  if (!dryRun &amp;&amp; plan.branches.length &gt; 0) {
+    progress.start(&#39;🚀 Pushing branches&#39;, plan.branches.length);
+  }
+  // ...
+  return result;
+} finally {
+  progress.stop();
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/restack.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+92</span> <span class="del">-12</span></span>
+  </summary>
+  <div class="file-body">
+    <p>executeRestackSteps detects whether it owns the bar (no active progress -&gt; create one) vs runs under a parent like sync (active progress -&gt; stay silent). When owning, starts &#39;🥞 Restacking&#39; with pendingSteps.length as total and updates per branch. Wraps the entire loop in try/finally with bar?.stop() so conflict paths, success paths, and unexpected throws all clean up the bar without forcing 100%. The conflict early-return now relies on the finally instead of inlined complete() calls.</p>
+    <div class="code"><pre>const ownsBar = getActiveProgress() == null;
+const bar = ownsBar ? createProgress() : null;
+if (bar &amp;&amp; pendingSteps.length &gt; 0) bar.start(&#39;🥞 Restacking&#39;, pendingSteps.length);
+// ...
+try {
+  // for-loop, conflict early-return, success
+} finally {
+  bar?.stop();
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/report.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+4</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>printBranchOutcome now consults getActiveProgress() and pauses+resumes the bar around the console.log. Keeps the public signature unchanged so every existing call site (cleanup loop, reconcile loop, recordWorktreeSkip) participates automatically.</p>
+    <div class="code"><pre>const progress = getActiveProgress();
+if (progress) progress.pause();
+console.log(outcome.message);
+if (progress) progress.resume();</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/report.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+98</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Three tests pin the pause/resume contract: (1) bare console pass-through when no progress is active, (2) TTY-mode bar writes increase across the pause/resume cycle (proves the bar was stopped and restarted around the log), (3) non-TTY progress is a no-op so stream writes stay empty even when printBranchOutcome fires.</p>
+    <div class="code"><pre>it(&#39;pauses and resumes the active TTY progress around the print&#39;, () =&gt; {
+  const stream = createFakeStream(true);
+  const progress = createProgress({ stream: stream as unknown as NodeJS.WriteStream, isTTY: true, ci: false });
+  progress.start(&#39;🔄 Reconciling&#39;, 3);
+  const writesBefore = stream.writes.length;
+  printBranchOutcome(outcome);
+  expect(stream.writes.length).toBeGreaterThan(writesBefore);
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/exec.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+44</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Two tests for the new execa wrapper: it runs the subprocess unchanged when verbose is off (no `$ node` lines on stderr), and it prints a sanitized command line with verbose on (https://user:secret@... rewritten to https://[REDACTED]@...). Uses a real child process (`node -e &#39;process.stdout.write(&quot;ok&quot;)&#39;`) so we exercise the actual execa code path.</p>
+    <div class="code"><pre>setVerbose(true);
+await execa(&#39;node&#39;, [&#39;-e&#39;, &#39;process.stdout.write(&quot;ok&quot;)&#39;, &#39;https://user:secret@example.com/repo.git&#39;]);
+expect(combined).toContain(&#39;[REDACTED]@example.com&#39;);
+expect(combined).not.toContain(&#39;secret&#39;);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/progress.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+21</span> <span class="del">-5</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a stop() test (bar halts, activeProgress cleared, second stop() is a no-op). Updates the existing pause/resume mock progress fixture to satisfy the now-required stop() method on the Progress interface.</p>
+    <div class="code"><pre>progress.start(&#39;working&#39;, 10);
+progress.update(&#39;working&#39;, 3, &#39;feat/a&#39;);
+expect(getActiveProgress()).toBe(progress);
+progress.stop();
+expect(getActiveProgress()).toBeNull();</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+6</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Updates the fetchBranches assertion to match the new four-arg call shape (branches, cwd, &#39;origin&#39;, { onBranchStart }). expect.objectContaining keeps the test resilient to additional opts later.</p>
+    <div class="code"><pre>expect(mockFetchBranches).toHaveBeenCalledWith([&#39;main&#39;, &#39;feat/a&#39;], &#39;/repo&#39;, &#39;origin&#39;, expect.objectContaining({ onBranchStart: expect.any(Function) }));</pre></div>
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Cleanup-on-error contract via Progress.stop()</div>
+    <div class="note"><code>packages/cli/src/lib/progress.ts:99-150, sync.ts:181-735, submit.ts:150-252, restack.ts:185-250</code> cli-progress sets hideCursor: true. If a phase throws and the bar is never stopped, the user&#39;s shell prompt loses its cursor. The pattern here is: every command that creates progress wraps its body in try { ... } finally { progress.stop(); } (or bar?.stop()) so even an unexpected throw cleans up. stop() differs from complete() by not forcing the bar to 100% — important when the cause of the exit is an error, not success.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Pause/resume around every print or readline that runs during a bar</div>
+    <div class="note"><code>packages/cli/src/lib/sync/report.ts:5-9, sync.ts:59-90 (confirm/choose), sync.ts:296-303 (cleanup auto-clean log)</code> Three classes of writes coexist with the bar: per-branch outcome lines (printBranchOutcome), auto-clean info lines inside the cleanup loop, and interactive prompts (confirm/choose). All three now pause+resume the bar — the helpers delegate to getActiveProgress() so they&#39;re correct whether a bar is active or not, and whether the caller is sync, restack, or future callers.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">lib/exec.ts as the single seam for git/gh subprocess tracing</div>
+    <div class="note"><code>packages/cli/src/lib/exec.ts, git.ts:1-5, github.ts:1-4, git/is-merged-by-patch-id.ts:1</code> Rather than touching all 50+ execa call sites, the import for execa was switched to a thin wrapper that calls logVerboseCommand before invoking the real execa. The cast preserves execa&#39;s overloaded type signatures so stdout/stderr typing keeps working unchanged at the call sites. The wrapper is opt-in: support-bundle.ts, conflict-ui.ts, etc. still import from &#39;execa&#39; directly because they are not the git/gh subprocesses the AC calls out.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lib/sync/report.test.ts — 3 tests for printBranchOutcome pause/resume</div>
+      <div class="note">all green; covers no-active-progress, TTY active progress (writes grow across pause/resume), non-TTY noop progress</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lib/exec.test.ts — 2 tests for the verbose execa wrapper</div>
+      <div class="note">all green; uses real `node -e ...` subprocess to verify off=silent / on=sanitized print</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lib/progress.test.ts — adds stop() coverage; pre-existing 15 tests still green</div>
+      <div class="note">16 tests, all green; verifies stop() clears activeProgress and is idempotent</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">whole-repo vitest</div>
+      <div class="note">76 files, 609 tests passed in 6.4s</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">dub --verbose log smoke test outside an initialized repo</div>
+      <div class="note">prints `$ git rev-parse --abbrev-ref HEAD` / `$ git rev-parse --show-toplevel` before each subprocess, confirming the exec wrapper is on the path for git.ts subprocess calls</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">biome (lint + format)</div>
+      <div class="note">Command: pnpm checks. Checked 218 files, no fixes applied</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">typecheck</div>
+      <div class="note">Command: pnpm typecheck. turbo: dubstack:typecheck OK, docs:typecheck cache hit</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">unit tests</div>
+      <div class="note">Command: pnpm test. 76 test files, 609 tests passed in 6.45s</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">build</div>
+      <div class="note">Command: pnpm build. tsup ESM build success</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">evals</div>
+      <div class="note">Command: pnpm evals. Pre-existing better-sqlite3 NODE_MODULE_VERSION mismatch (127 vs 137) blocks local runs (same as DUB-3). AGENTS.md only requires evals when AI metadata/prompts change; this PR touches neither.</div>
+    </div>
+    <span class="status not-available">not_available</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Two-pass adversarial review (both critical findings + one major from pass 2 all fixed), 609 unit tests green, manual --verbose smoke test confirming subprocess tracing reaches git.ts. Cleanup-on-error contract via Progress.stop() in try/finally for all three commands. All interactive prompts and console.log paths that run while a bar is active now pause+resume via getActiveProgress().</div>
+      <div class="note">No .tsx files changed. The work is CLI-only — terminal progress bars rendered via cli-progress to stderr — and the deterministic proof below covers the semantics (pause/resume, no-op in non-TTY, stop-on-error, verbose subprocess logging) without relying on a frame-accurate video diff.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-12-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>sync creates one bar per phase (fetch / cleanup / reconcile) and stops it in a finally so a thrown exception cannot leave hideCursor on</li>
+<li>submit creates two bars (push / PR sync) and stops them in a finally; dry-run bypasses both bars</li>
+<li>restack detects whether it owns the bar via getActiveProgress(); when called from sync after reconcile has completed, it creates its own bar and stops it in a finally regardless of conflict/success/unexpected throw</li>
+<li>printBranchOutcome pauses+resumes the active bar around its console.log so per-branch outcome lines do not tear the bar</li>
+<li>sync&#39;s auto-clean console.log inside the cleanup loop is wrapped in pause/resume</li>
+<li>sync&#39;s confirm() and choose() helpers pause+resume the active bar via getActiveProgress(); works correctly whether a bar is active (reconcile loop) or not (roots loop)</li>
+<li>fetchBranches gained an onBranchStart callback fired before each per-branch fetch so sync can update the bar with the current branch name as detail</li>
+<li>every git and gh subprocess routes through lib/exec.ts, which calls logVerboseCommand before invoking execa — visible as `$ git ...` / `$ gh ...` lines under --verbose, sanitized of basic-auth and token query params</li>
+<li>non-TTY / CI callers go through the no-op Progress, so existing summary-only output is preserved</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">dub sync shows progress bars for fetch / cleanup / reconcile / restack phases</div>
+      <div class="note">sync.ts starts/updates/completes a bar in each of the three local phases. The restack phase calls restack(cwd) which manages its own bar via executeRestackSteps (ownsBar branch). All four phases visible in TTY.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">dub submit shows progress for push and PR create/update phases</div>
+      <div class="note">submit.ts L150-203 — &#39;🚀 Pushing branches&#39; and &#39;📬 Syncing PRs&#39; bars, each updated per branch and completed before the next phase.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">dub restack shows progress per step</div>
+      <div class="note">restack.ts executeRestackSteps — &#39;🥞 Restacking&#39; bar with total = pendingSteps.length and one update per branch. Owns/borrows the bar based on getActiveProgress().</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Per-branch outcome lines do not collide with the progress bar (use progress.pause() around prints)</div>
+      <div class="note">lib/sync/report.ts printBranchOutcome pauses+resumes via getActiveProgress(); sync cleanup loop wraps its auto-clean console.log similarly; sync confirm()/choose() helpers pause+resume around their readline interaction.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">In non-TTY mode no progress UI, just summary lines</div>
+      <div class="note">createProgress() returns a no-op when !isTTY || ci (progress.ts createNoopProgress); every consumer goes through this factory; pause/resume/start/update/complete/stop are all silent no-ops; existing console.log summary lines are unaffected. Covered by lib/sync/report.test.ts &#39;is a no-op for progress writes in non-TTY mode&#39; and the existing lib/progress.test.ts non-TTY tests.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">--verbose prints every subprocess command, pausing the progress bar</div>
+      <div class="note">lib/exec.ts wraps execa; calls logVerboseCommand(file, args, { progress: getActiveProgress() }) before invoking the subprocess; sanitizes URLs via sanitizeRemoteUrl. git.ts, github.ts, and git/is-merged-by-patch-id.ts all import from lib/exec. Verified via the `node packages/cli/dist/index.js --verbose log` smoke test which prints `$ git rev-parse ...` for each call.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: verify TTY-mode renders one bar at a time, non-TTY mode renders summary lines only</div>
+      <div class="note">lib/sync/report.test.ts (3 tests) + lib/progress.test.ts existing TTY / non-TTY tests cover both modes; lib/exec.test.ts (2 tests) covers verbose on/off.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">2</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Pass 1 critical (fixed): orphaned progress bars on error paths in sync.ts — any exception thrown inside fetch/cleanup/reconcile lands in the catch without stopping the active bar, leaving the cursor hidden. Fix: added Progress.stop() and wrapped all three command bodies in try/finally that calls progress.stop() / bar?.stop().</li>
+<li>Pass 1 critical (fixed): raw console.log calls during active cleanup bar in sync.ts (L297-L302). Fix: wrapped in progress.pause() / progress.resume().</li>
+<li>Pass 2 major (fixed): confirm() and choose() inside the reconcile loop wrote to the terminal while the &#39;🔄 Reconciling&#39; bar was active. Fix: both helpers now call getActiveProgress()?.pause() at the top and ?.resume() in their finally — mirrors how printBranchOutcome handles it and works equally well for the trunk-sync loop where no bar is active.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-3 progress wrapper</div>
+  <div class="note">consumed (createProgress, logVerboseCommand, setVerbose, getActiveProgress all already shipped on main)</div>
+</div>
+<div class="dep">
+  <div class="item-title">Progress.stop()</div>
+  <div class="note">added in this PR (extension of the DUB-3 interface) — needed for safe error cleanup</div>
+</div>
+<div class="dep">
+  <div class="item-title">fetchBranches onBranchStart callback</div>
+  <div class="note">added in this PR — optional, backward-compatible</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Behavior change only in TTY sessions and under --verbose. CI / non-TTY usage goes through the same no-op Progress and produces identical output to before. Safe to merge.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge to main</div>
+  <div class="label">TTY users see progress bars on sync/submit/restack</div>
+  <div class="note">Existing per-branch outcome lines still appear; the bar is added on top in TTY only.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">On merge to main</div>
+  <div class="label">--verbose now prints git/gh subprocess lines</div>
+  <div class="note">Sanitized via sanitizeRemoteUrl. No behavior change when --verbose is not passed.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Future slice</div>
+  <div class="label">Wire progress into other long-running commands</div>
+  <div class="note">post-merge, prune, doctor --all could also adopt Progress; left out of scope per the DUB-12 spec.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>8642fdc</strong> <code>8642fdc0c0f4a7b6136c11e2632da7d3959b1eb6</code></div>
+  <pre>feat(cli): wire progress bars into sync/submit/restack [DUB-12]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">exec.ts</a>
+<a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">github.ts</a>
+<a href="#tour" class="sub">is-merged-by-patch-id.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

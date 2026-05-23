@@ -14,6 +14,7 @@ import {
   listWorktreeCheckouts,
   rebaseOnto,
 } from '../lib/git';
+import { createProgress, getActiveProgress } from '../lib/progress';
 import {
   getDubDir,
   readState,
@@ -181,60 +182,73 @@ async function executeRestackSteps(
 ): Promise<RestackResult> {
   const rebased: string[] = [];
   const state = await readState(cwd);
-
-  for (const step of progress.steps) {
-    if (step.status !== 'pending') {
-      if (step.status === 'done') rebased.push(step.branch);
-      continue;
-    }
-
-    const parentNewTip = await getBranchTip(step.parent, cwd);
-    if (parentNewTip === step.parentOldTip) {
-      step.status = 'skipped';
-      updateParentRevision(state, step.branch, parentNewTip);
-      await writeProgress(progress, cwd);
-      continue;
-    }
-
-    const hasUniquePatches = await hasUniquePatchCommits(
-      parentNewTip,
-      step.branch,
-      cwd,
-    );
-    if (!hasUniquePatches) {
-      step.status = 'skipped';
-      await writeProgress(progress, cwd);
-      continue;
-    }
-
-    try {
-      await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
-      step.status = 'done';
-      rebased.push(step.branch);
-      updateParentRevision(state, step.branch, parentNewTip);
-      await writeProgress(progress, cwd);
-    } catch (error) {
-      if (error instanceof DubError && error.message.includes('Conflict')) {
-        step.status = 'conflicted';
-        step.parentNewTip = parentNewTip;
-        await writeProgress(progress, cwd);
-        return { status: 'conflict', rebased, conflictBranch: step.branch };
-      }
-      throw error;
-    }
+  const pendingSteps = progress.steps.filter((s) => s.status === 'pending');
+  const ownsBar = getActiveProgress() == null;
+  const bar = ownsBar ? createProgress() : null;
+  if (bar && pendingSteps.length > 0) {
+    bar.start('🥞 Restacking', pendingSteps.length);
   }
+  let stepIndex = 0;
 
-  await writeState(state, cwd);
-  await clearProgress(cwd);
-  await checkoutBranch(progress.originalBranch, cwd);
+  try {
+    for (const step of progress.steps) {
+      if (step.status !== 'pending') {
+        if (step.status === 'done') rebased.push(step.branch);
+        continue;
+      }
+      stepIndex += 1;
+      bar?.update('🥞 Restacking', stepIndex, step.branch);
 
-  const allSkipped = progress.steps.every(
-    (s) => s.status === 'skipped' || s.status === 'done',
-  );
-  return {
-    status: rebased.length === 0 && allSkipped ? 'up-to-date' : 'success',
-    rebased,
-  };
+      const parentNewTip = await getBranchTip(step.parent, cwd);
+      if (parentNewTip === step.parentOldTip) {
+        step.status = 'skipped';
+        updateParentRevision(state, step.branch, parentNewTip);
+        await writeProgress(progress, cwd);
+        continue;
+      }
+
+      const hasUniquePatches = await hasUniquePatchCommits(
+        parentNewTip,
+        step.branch,
+        cwd,
+      );
+      if (!hasUniquePatches) {
+        step.status = 'skipped';
+        await writeProgress(progress, cwd);
+        continue;
+      }
+
+      try {
+        await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
+        step.status = 'done';
+        rebased.push(step.branch);
+        updateParentRevision(state, step.branch, parentNewTip);
+        await writeProgress(progress, cwd);
+      } catch (error) {
+        if (error instanceof DubError && error.message.includes('Conflict')) {
+          step.status = 'conflicted';
+          step.parentNewTip = parentNewTip;
+          await writeProgress(progress, cwd);
+          return { status: 'conflict', rebased, conflictBranch: step.branch };
+        }
+        throw error;
+      }
+    }
+
+    await writeState(state, cwd);
+    await clearProgress(cwd);
+    await checkoutBranch(progress.originalBranch, cwd);
+
+    const allSkipped = progress.steps.every(
+      (s) => s.status === 'skipped' || s.status === 'done',
+    );
+    return {
+      status: rebased.length === 0 && allSkipped ? 'up-to-date' : 'success',
+      rebased,
+    };
+  } finally {
+    bar?.stop();
+  }
 }
 
 function updateParentRevision(

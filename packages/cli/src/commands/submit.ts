@@ -29,6 +29,7 @@ import {
   buildStackTable,
   composePrBody,
 } from '../lib/pr-body';
+import { createProgress } from '../lib/progress';
 import {
   type Branch,
   type DubState,
@@ -146,87 +147,112 @@ export async function submit(
     fallbackApplied: plan.fallbackApplied,
   };
   const prMap = new Map<string, PrInfo>();
+  const progress = createProgress();
 
-  for (const branch of plan.branches) {
-    if (dryRun) {
-      console.log(`[dry-run] would push ${branch.name}`);
-    } else {
-      await pushBranch(branch.name, cwd);
+  try {
+    if (!dryRun && plan.branches.length > 0) {
+      progress.start('🚀 Pushing branches', plan.branches.length);
     }
-    result.pushed.push(branch.name);
-  }
-
-  for (const branch of plan.branches) {
-    const base = branch.parent as string;
-
-    if (dryRun) {
-      console.log(`[dry-run] would check/create PR: ${branch.name} → ${base}`);
-      continue;
-    }
-
-    const existing = await getPr(branch.name, cwd);
-    if (existing) {
-      prMap.set(branch.name, existing);
-      result.updated.push(branch.name);
-    } else {
-      const title = await getLastCommitMessage(branch.name, cwd);
-      const created = await withTempMarkdownFile(
-        'pr-body',
-        '',
-        async (tmpFile) => {
-          return createPr(branch.name, base, title, tmpFile, cwd);
-        },
-      );
-      prMap.set(branch.name, created);
-      result.created.push(branch.name);
-    }
-  }
-
-  if (!dryRun) {
-    await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd, {
-      useAi,
-      deps,
-      summaryOverrides: options.summaryOverrides,
-      prTemplate: templates?.prTemplate ?? null,
-      providerConfig: config.ai.provider,
-    });
-
+    let pushIndex = 0;
     for (const branch of plan.branches) {
-      const pr = prMap.get(branch.name);
-      if (pr) {
-        const stateBranch = plan.stack.branches.find(
-          (b) => b.name === branch.name,
+      if (dryRun) {
+        console.log(`[dry-run] would push ${branch.name}`);
+      } else {
+        pushIndex += 1;
+        progress.update('🚀 Pushing branches', pushIndex, branch.name);
+        await pushBranch(branch.name, cwd);
+      }
+      result.pushed.push(branch.name);
+    }
+    if (!dryRun && plan.branches.length > 0) {
+      progress.complete('🚀 Pushing branches');
+    }
+
+    if (!dryRun && plan.branches.length > 0) {
+      progress.start('📬 Syncing PRs', plan.branches.length);
+    }
+    let prIndex = 0;
+    for (const branch of plan.branches) {
+      const base = branch.parent as string;
+
+      if (dryRun) {
+        console.log(
+          `[dry-run] would check/create PR: ${branch.name} → ${base}`,
         );
-        if (stateBranch) {
-          stateBranch.pr_number = pr.number;
-          stateBranch.pr_link = pr.url;
-          const headSha = await getBranchTip(branch.name, cwd);
-          const baseSha = await getBranchTip(branch.parent as string, cwd);
-          stateBranch.last_submitted_version = {
-            head_sha: headSha,
-            base_sha: baseSha,
-            base_branch: branch.parent as string,
-            version_number: null,
-            source: 'submit',
-          };
-          stateBranch.last_reconciled_version = {
-            head_sha: headSha,
-            base_sha: baseSha,
-            base_branch: branch.parent as string,
-            source: 'submit',
-          };
-          if (stateBranch.parent_revision == null) {
-            stateBranch.parent_revision = baseSha;
-          }
-          stateBranch.last_synced_at = new Date().toISOString();
-          stateBranch.sync_source = 'submit';
-        }
+        continue;
+      }
+      prIndex += 1;
+      progress.update('📬 Syncing PRs', prIndex, branch.name);
+
+      const existing = await getPr(branch.name, cwd);
+      if (existing) {
+        prMap.set(branch.name, existing);
+        result.updated.push(branch.name);
+      } else {
+        const title = await getLastCommitMessage(branch.name, cwd);
+        const created = await withTempMarkdownFile(
+          'pr-body',
+          '',
+          async (tmpFile) => {
+            return createPr(branch.name, base, title, tmpFile, cwd);
+          },
+        );
+        prMap.set(branch.name, created);
+        result.created.push(branch.name);
       }
     }
-    await writeState(plan.state, cwd);
-  }
+    if (!dryRun && plan.branches.length > 0) {
+      progress.complete('📬 Syncing PRs');
+    }
 
-  return result;
+    if (!dryRun) {
+      await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd, {
+        useAi,
+        deps,
+        summaryOverrides: options.summaryOverrides,
+        prTemplate: templates?.prTemplate ?? null,
+        providerConfig: config.ai.provider,
+      });
+
+      for (const branch of plan.branches) {
+        const pr = prMap.get(branch.name);
+        if (pr) {
+          const stateBranch = plan.stack.branches.find(
+            (b) => b.name === branch.name,
+          );
+          if (stateBranch) {
+            stateBranch.pr_number = pr.number;
+            stateBranch.pr_link = pr.url;
+            const headSha = await getBranchTip(branch.name, cwd);
+            const baseSha = await getBranchTip(branch.parent as string, cwd);
+            stateBranch.last_submitted_version = {
+              head_sha: headSha,
+              base_sha: baseSha,
+              base_branch: branch.parent as string,
+              version_number: null,
+              source: 'submit',
+            };
+            stateBranch.last_reconciled_version = {
+              head_sha: headSha,
+              base_sha: baseSha,
+              base_branch: branch.parent as string,
+              source: 'submit',
+            };
+            if (stateBranch.parent_revision == null) {
+              stateBranch.parent_revision = baseSha;
+            }
+            stateBranch.last_synced_at = new Date().toISOString();
+            stateBranch.sync_source = 'submit';
+          }
+        }
+      }
+      await writeState(plan.state, cwd);
+    }
+
+    return result;
+  } finally {
+    progress.stop();
+  }
 }
 
 export async function getSubmitPlan(
