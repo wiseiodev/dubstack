@@ -1,6 +1,6 @@
 ---
 name: autoship
-description: Use when the user wants fully autonomous delivery in this repo from the next ready bd issue through implementation, verification, review, and PR follow-through.
+description: Use when the user wants fully autonomous delivery in this repo from a clear task through implementation, verification, review, and PR follow-through.
 ---
 
 # Autoship
@@ -10,8 +10,7 @@ Run an end-to-end autonomous ship cycle for `dubstack`. Do not pause for confirm
 ## Non-Negotiables
 
 - Operate autonomously and avoid routine follow-up questions; make reasonable assumptions and record them.
-- Keep issue tracking in `bd` only.
-- Start with `bd ready --json`, pick work deterministically, and claim it.
+- Start from the explicit user request and the current repository state.
 - Run two `review-council` passes:
   - Plan pass: `Architect` persona, prefer `claude`.
   - Code pass: `Staff Engineer` persona, prefer `claude` + `codex` + `gemini`.
@@ -29,15 +28,14 @@ Run an end-to-end autonomous ship cycle for `dubstack`. Do not pause for confirm
 
 ## Workflow
 
-1. Select and claim work:
-   - Run `bd ready --json`.
-   - Pick the highest-priority unblocked issue (tie-breaker: oldest issue).
-   - Run `bd update <id> --claim --json`.
-   - Run `bd show <id> --json` and capture acceptance criteria.
+1. Confirm task scope:
+   - Read the user's request and relevant repository files.
+   - Capture acceptance criteria from the prompt and codebase context.
+   - If the task is underspecified in a risky way, ask one concise question before making changes.
 
 2. Build an implementation plan:
    - Ensure plan directory exists: `mkdir -p .dispatch`.
-   - Write a plan file at `.dispatch/<id>-implementation-plan.md`.
+   - Write a plan file at `.dispatch/autoship-implementation-plan.md`.
    - Include: scope, assumptions, risks, step-by-step tasks, test strategy, and rollback notes.
 
 3. Plan review council (round 1):
@@ -50,8 +48,7 @@ Run an end-to-end autonomous ship cycle for `dubstack`. Do not pause for confirm
    - Execute plan steps in order.
    - Maintain existing repo patterns and code standards.
    - Add/update tests for changed behavior near the edited code.
-   - If new follow-up work is discovered, create linked bead issues using
-     `--deps discovered-from:<current-id>`.
+   - If new follow-up work is discovered, record it clearly in the final report.
 
 5. Quality gates (pass 1):
    - Run checks strictly one at a time. Start the next check only after the
@@ -81,7 +78,7 @@ Run an end-to-end autonomous ship cycle for `dubstack`. Do not pause for confirm
 
 8. Create stacked PR:
    - Use a non-interactive autonomous `dub-flow` path for branch + commit + submit (for example: `dub flow --ai -a -y`).
-   - Ensure PR description includes scope, test evidence, and bead reference(s).
+   - Ensure PR description includes scope and test evidence.
    - If `dub-flow` is unavailable, fall back to direct non-interactive commands (`dub create ...` + `dub ss`) and record why.
 
 9. Post-PR CI watch and fix loop:
@@ -106,12 +103,12 @@ Run an end-to-end autonomous ship cycle for `dubstack`. Do not pause for confirm
 
 11. Produce final report:
    - Ensure report directory exists: `mkdir -p docs/reports`.
-   - Create `docs/reports/<date>-<id>-autoship-report.md` using
+   - Create `docs/reports/<date>-autoship-report.md` using
      [report-template.md](references/report-template.md).
-   - Include: selected bead, plan changes from council, implementation summary,
+   - Include: selected task, plan changes from council, implementation summary,
    quality gate evidence (both passes), review-council findings + resolutions,
      CI watch cycles, Copilot review comment resolutions, PR link, and any
-     follow-up beads.
+     follow-up work.
    - Share a concise handoff summary with the user.
 
 ## Failure Handling

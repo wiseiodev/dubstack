@@ -45,14 +45,14 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
   };
 }
 
-const LARGE_MIXED_MONOREPO_DIFF = `diff --git a/.agents/skills/beads/SKILL.md b/.agents/skills/beads/SKILL.md
+const LARGE_MIXED_MONOREPO_DIFF = `diff --git a/.agents/skills/release-notes/SKILL.md b/.agents/skills/release-notes/SKILL.md
 new file mode 100644
 index 0000000..1111111
 --- /dev/null
-+++ b/.agents/skills/beads/SKILL.md
++++ b/.agents/skills/release-notes/SKILL.md
 @@ -0,0 +1,40 @@
-+# Beads skill
-+Use bd ready --json
++# Release notes skill
++Summarize notable user-facing changes
 diff --git a/.agents/skills/dub-flow-evals/SKILL.md b/.agents/skills/dub-flow-evals/SKILL.md
 new file mode 100644
 index 0000000..1111111
@@ -337,7 +337,7 @@ index 0000000..3333333
       branchPrefix: 'feat/',
       requiredKeywords: ['flow', 'context'],
       headlineKeywords: ['flow', 'context'],
-      headlineForbiddenKeywords: ['beads', 'skill', 'readme'],
+      headlineForbiddenKeywords: ['release', 'skill', 'readme'],
     },
   },
 ];
