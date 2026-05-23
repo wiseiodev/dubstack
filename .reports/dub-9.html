@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-9 - dub mcp server with read-only tools</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-9</div>
+        <h1>DUB-9 - dub mcp server with read-only tools</h1>
+        <div class="meta"><span><strong>9</strong> files</span>
+<span><span class="add">+998</span> / <span class="del">-29</span></span>
+<span>branch <strong>feature/dub-9-dub-mcp-server-with-read-only-tools</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Build a stdio JSON-RPC MCP server for DubStack with read-only tools: log, doctor, status, parent, children, trunk, and history. Expose schemas via tools/list, return structured JSON, audit each tool call in dub history, add an integration test that spawns the server, and document installation with `claude mcp add dubstack dub mcp`.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Adds `dub mcp`, a dependency-free stdio MCP server exposing read-only DubStack tools, plus `dub log --json`, audit history for MCP tool calls, a spawned integration test, and docs for installing the server.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">MCP lets Claude Code and other MCP-aware agents inspect a tracked DubStack repository through typed tool calls instead of free-form shell commands.</p>
+<p class="lede">Keeping the first slice read-only provides useful agent context while leaving mutation confirmation policy to the next slice.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>DubStack had CLI commands for stack inspection, but no MCP server or tool schema surface.</li>
+<li>`dub log` only rendered an ASCII tree, so agents had no canonical structured stack-tree shape to consume.</li>
+<li>There was no per-tool audit trail for agent-driven DubStack inspection.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`dub mcp` speaks newline-delimited stdio JSON-RPC with `initialize`, `tools/list`, `tools/call`, `ping`, and `notifications/initialized` support.</li>
+<li>Seven read-only tools return JSON through MCP `content` and `structuredContent`, reusing existing command helpers where possible.</li>
+<li>`dub log --json` and `dubstack.log` share the same structured stack-tree helper.</li>
+<li>Every MCP `tools/call` appends a dedicated entry to `dub history`.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/mcp.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+494</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Implements the stdio JSON-RPC MCP server, tool registry, tool dispatch, structured JSON responses, status aggregation, and per-tool history audit. Request handling is queued so responses are deterministic and buffered requests flush before EOF exit.</p>
+    <div class="code"><pre>const TOOLS: ToolDefinition[] = [
+  { name: &#39;dubstack.log&#39;, description: &#39;Return the tracked DubStack stack tree as structured JSON.&#39;, inputSchema: { /* ... */ } },
+  { name: &#39;dubstack.doctor&#39;, description: &#39;Return DubStack health issues and remediation steps.&#39;, inputSchema: { /* ... */ } },
+  { name: &#39;dubstack.status&#39;, description: &#39;Return current branch, tracking, PR state, and drift issues.&#39;, inputSchema: EMPTY_SCHEMA },
+];</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+34</span> <span class="del">-4</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Wires the new top-level `dub mcp` command and adds `--json` support to both `dub log` and `dub ls`, printing the same JSON helper consumed by the MCP log tool.</p>
+    <div class="code"><pre>program
+  .command(&#39;mcp&#39;)
+  .description(&#39;Start the DubStack read-only MCP server over stdio&#39;)
+  .action(async () =&gt; {
+    await mcp(process.cwd(), { version });
+  });</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/log.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+126</span> <span class="del">-24</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `logJson` and JSON branch/tree types while preserving existing ASCII rendering behavior. Shared stack selection keeps `--stack`, `--all`, and `--reverse` semantics consistent between text and JSON output.</p>
+    <div class="code"><pre>export interface LogJsonBranch {
+  name: string;
+  type: &#39;root&#39; | &#39;branch&#39;;
+  parent: string | null;
+  current: boolean;
+  exists: boolean;
+  prNumber: number | null;
+  prLink: string | null;
+  children: LogJsonBranch[];
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/mcp.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+201</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Integration test spawns the MCP server with `tsx`, sends `initialize`, `tools/list`, and `tools/call dubstack.log`, asserts the structured response shape, and confirms the call appears in `dub history`.</p>
+    <div class="code"><pre>server.send({ jsonrpc: &#39;2.0&#39;, id: 3, method: &#39;tools/call&#39;, params: { name: &#39;dubstack.log&#39;, arguments: {} } });
+const logResponse = await server.nextJson();
+expect(logResult.structuredContent).toMatchObject({ currentBranch: &#39;feat/a&#39; });</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/log.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+54</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds coverage for the JSON tree helper so `dub log --json` and `dubstack.log` have a locked response shape with current branch, branch existence, PR number, parent, and children metadata.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/guides/mcp.mdx</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+58</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>New guide documents the Claude install command, available read-only tools, audit history behavior, and supported MCP JSON-RPC methods.</p>
+    <div class="code"><pre>claude mcp add dubstack dub mcp</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/guides/meta.json</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+1</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds the MCP guide to the docs navigation.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/commands/log.mdx</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+4</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Documents the new `dub log --json` flag alongside existing stack/all/reverse options.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-9-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+26</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback artifact because no `.tsx` files changed and the feature is proven through protocol-level subprocess tests and repo gates rather than a browser recording.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">MCP stdout safety</div>
+    <div class="note"><code>packages/cli/src/commands/mcp.ts</code> Stdio MCP requires stdout to contain only JSON-RPC messages. The server writes protocol messages directly and does not use console logging in the MCP command path.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Audit semantics</div>
+    <div class="note"><code>packages/cli/src/commands/mcp.ts:365</code> Every `tools/call` appends a `dub mcp tools/call &lt;name&gt;` history entry independently of the long-running `dub mcp` process lifecycle.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Shared log JSON shape</div>
+    <div class="note"><code>packages/cli/src/commands/log.ts:67</code> `dubstack.log` delegates to `logJson`, the same helper used by `dub log --json`, so the MCP and CLI JSON shapes cannot drift separately.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Spawn MCP server and call `dubstack.log`</div>
+      <div class="note">`packages/cli/src/commands/mcp.test.ts` starts `tsx src/index.ts mcp`, sends `initialize`, `tools/list`, and `tools/call dubstack.log`, then asserts response shape and history audit.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">JSON log helper shape</div>
+      <div class="note">`packages/cli/src/commands/log.test.ts` asserts current branch, root/child nesting, branch existence, and PR number in `logJson`.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">MCP docs install path</div>
+      <div class="note">`apps/docs/content/docs/guides/mcp.mdx` documents `claude mcp add dubstack dub mcp` and the exposed tools.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 201 files in 37ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Type check (turbo: docs + dubstack)</div>
+      <div class="note">Command: pnpm typecheck. 2 successful, 2 total. docs cache hit; dubstack ran `tsc --noEmit`.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Full test suite</div>
+      <div class="note">Command: pnpm test. Test Files 72 passed (72); Tests 552 passed (552); docs tests passed 2/2.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback covering MCP subprocess behavior, audit history, shared JSON log shape, and required repo gates.</div>
+      <div class="note">No `.tsx` files changed and there is no browser-demoable surface. The feature is a CLI stdio protocol server plus MDX docs.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-9-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>MCP server initializes and advertises the read-only tool list.</li>
+<li>`dubstack.log` returns the structured stack tree for a tracked branch.</li>
+<li>MCP tool invocation is appended to `dub history`.</li>
+<li>`dub log --json` uses the same `logJson` shape as `dubstack.log`.</li>
+<li>Required repo gates pass after the implementation and adversarial hardening.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">New `packages/cli/src/commands/mcp.ts` implementing stdio JSON-RPC per the MCP spec</div>
+      <div class="note">`mcp.ts` reads newline-delimited JSON-RPC from stdin, writes responses to stdout, and supports initialize/ping/tools/list/tools/call/initialized notification.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tool schemas defined and exposed via `tools/list` MCP method</div>
+      <div class="note">`TOOLS` registry defines JSON schemas; `tools/list` returns that registry. Verified in `mcp.test.ts`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">All read-only tools listed above return structured JSON</div>
+      <div class="note">`callTool` implements `dubstack.log`, `dubstack.doctor`, `dubstack.status`, `dubstack.parent`, `dubstack.children`, `dubstack.trunk`, and `dubstack.history`; results include `structuredContent` and JSON text content.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`dubstack.log` returns the same shape as `dub log --json`</div>
+      <div class="note">`dubstack.log` calls `logJson`; `dub log --json` prints `logJson`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Every MCP tool invocation appears in `dub history` for audit</div>
+      <div class="note">`appendMcpHistory` writes one history entry per `tools/call`; `mcp.test.ts` asserts `dub mcp tools/call dubstack.log` appears in history.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Integration test: spawn the MCP server, send `tools/list`, send a `tools/call dubstack.log`, assert response shape</div>
+      <div class="note">`packages/cli/src/commands/mcp.test.ts` covers the spawned server protocol flow.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Docs page added at `apps/docs/content/docs/guides/mcp.mdx`</div>
+      <div class="note">Guide added and linked from `apps/docs/content/docs/guides/meta.json`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer flagged that request handling used fire-and-forget `handleLine` calls. Fixed by queueing request processing and waiting for the final buffered request before resolving on stdin EOF, preserving response order and one-shot piped request behavior.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">No external dependencies</div>
+  <div class="note">No external dependencies detected — Linear says blocked by none.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">New read-only MCP surface behind an explicit `dub mcp` command. No migration and no mutating tools in this slice.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">Install</div>
+  <div class="label">Register MCP server</div>
+  <div class="note">Run `claude mcp add dubstack dub mcp` from a shell where `dub` is available.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Use</div>
+  <div class="label">Ask for stack context</div>
+  <div class="note">MCP clients can call `dubstack.log`, `dubstack.status`, or the branch query tools from any initialized DubStack repo.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Follow-up</div>
+  <div class="label">Add mutating tools with confirmation policy</div>
+  <div class="note">This slice intentionally excludes mutations. The next slice should settle the HITL default before exposing create/restack/submit operations.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>e404905</strong> <code>e404905f72729d51369f5390c2e46bb064bbfcb8</code></div>
+  <pre>feat: add read-only MCP server</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">mcp.ts</a>
+<a href="#tour" class="sub">index.ts</a>
+<a href="#tour" class="sub">log.ts</a>
+<a href="#tour" class="sub">mcp.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

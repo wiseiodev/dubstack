@@ -1,0 +1,58 @@
+---
+title: MCP Server
+description: Connect MCP-aware agents to read-only DubStack stack tools.
+---
+
+DubStack includes a stdio Model Context Protocol server so agents can inspect a tracked repository without shelling out to free-form commands.
+
+## Install
+
+From any shell where `dub` is available:
+
+```bash
+claude mcp add dubstack dub mcp
+```
+
+Then ask your MCP-aware agent about the current repository:
+
+```text
+Show me the current DubStack stack.
+```
+
+The agent can call `dubstack.log` and receive structured JSON for the tracked stack tree.
+
+## Tools
+
+| Tool | Description |
+|---|---|
+| `dubstack.log` | Returns the tracked stack tree as JSON |
+| `dubstack.doctor` | Returns health issues and remediation steps |
+| `dubstack.status` | Returns current branch, tracking info, PR state, and drift |
+| `dubstack.parent` | Returns the direct parent for a branch |
+| `dubstack.children` | Returns direct children for a branch |
+| `dubstack.trunk` | Returns the trunk/root branch for a branch |
+| `dubstack.history` | Returns recent Dub command history |
+
+All tools in this first MCP surface are read-only. Mutating tools are intentionally excluded.
+
+## Audit History
+
+Every MCP tool call is appended to `dub history`, for example:
+
+```bash
+dub history
+```
+
+This gives teams a local audit trail for agent-driven stack inspection.
+
+## Protocol
+
+`dub mcp` uses MCP stdio transport. Clients write newline-delimited JSON-RPC messages to stdin, and DubStack writes JSON-RPC responses to stdout.
+
+The server supports:
+
+- `initialize`
+- `tools/list`
+- `tools/call`
+- `ping`
+- `notifications/initialized`
