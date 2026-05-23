@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { DubError } from './errors';
+import { retry } from './retry';
 
 export interface DiffStatEntry {
   path: string;
@@ -347,15 +348,54 @@ export async function getLastCommitMessage(
 }
 
 /**
- * Pushes a branch to origin with `--force-with-lease`.
- * @throws {DubError} If the push fails.
+ * Options accepted by {@link pushBranch}.
  */
-export async function pushBranch(branch: string, cwd: string): Promise<void> {
+export interface PushBranchOptions {
+  /**
+   * Invoked before each retry attempt with the upcoming attempt number
+   * (1-indexed) and the last error. Wired by callers to emit verbose
+   * log lines (e.g. under `--verbose`).
+   */
+  onRetry?: (attempt: number, err: unknown) => void;
+}
+
+/**
+ * Pushes a branch to origin with `--force-with-lease`. Retries transient
+ * failures via {@link retry} (up to 4 attempts) and short-circuits on
+ * permanent errors: authentication failure, missing repository, refusal to
+ * delete the current branch, and `--force-with-lease` rejection (stale info).
+ * Lease rejection surfaces as a `DubError` whose recovery hint points at
+ * `dub sync` so callers can refresh remote tracking before retrying.
+ *
+ * @throws {DubError} If the push fails (either permanently or after exhausting retries).
+ */
+export async function pushBranch(
+  branch: string,
+  cwd: string,
+  options: PushBranchOptions = {},
+): Promise<void> {
   try {
-    await execa('git', ['push', '--force-with-lease', 'origin', branch], {
-      cwd,
-    });
-  } catch {
+    await retry(
+      () =>
+        execa('git', ['push', '--force-with-lease', 'origin', branch], {
+          cwd,
+        }),
+      {
+        isPermanent: isPushPermanentError,
+        onRetry: options.onRetry,
+      },
+    );
+  } catch (error) {
+    const output = readGitErrorOutput(error);
+    if (isLeaseRejectionOutput(output)) {
+      throw new DubError(
+        `Failed to push '${branch}': remote moved (force-with-lease rejected).`,
+        [
+          `Run 'dub sync' to refresh remote tracking, then retry the push.`,
+          `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
+        ],
+      );
+    }
     throw new DubError(`Failed to push '${branch}'.`, [
       `Run 'dub sync' to reconcile remote updates, then retry the push.`,
       `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
@@ -704,35 +744,57 @@ export function namespacedFetchRef(branch: string): string {
 }
 
 /**
+ * Options accepted by {@link fetchBranches}.
+ */
+export interface FetchBranchesOptions {
+  /**
+   * Invoked before each retry attempt with the upcoming attempt number
+   * (1-indexed) and the last error. Wired by callers to emit verbose
+   * log lines (e.g. under `--verbose`).
+   */
+  onRetry?: (attempt: number, err: unknown) => void;
+}
+
+/**
  * Fetches the provided branches from the remote into a namespaced ref
  * (`refs/dubstack/fetch-head/<branch>`) so that the user's own `FETCH_HEAD`
  * is left untouched. Also passes `--no-tags` to cut network cost on repos
- * with many release tags.
+ * with many release tags. Each per-branch fetch is wrapped in {@link retry}
+ * (up to 4 attempts) so transient network blips during long sync runs no
+ * longer abort the whole operation. Authentication failures and missing
+ * repositories short-circuit without retrying.
  */
 export async function fetchBranches(
   branches: string[],
   cwd: string,
   remote = 'origin',
+  options: FetchBranchesOptions = {},
 ): Promise<void> {
   if (branches.length === 0) return;
   for (const branch of branches) {
     const refspec = `${branch}:${namespacedFetchRef(branch)}`;
     try {
-      await execa(
-        'git',
-        ['fetch', '--no-write-fetch-head', '--no-tags', '-f', remote, refspec],
-        { cwd },
+      await retry(
+        () =>
+          execa(
+            'git',
+            [
+              'fetch',
+              '--no-write-fetch-head',
+              '--no-tags',
+              '-f',
+              remote,
+              refspec,
+            ],
+            { cwd },
+          ),
+        {
+          isPermanent: isFetchPermanentError,
+          onRetry: options.onRetry,
+        },
       );
     } catch (error: unknown) {
-      const stderr =
-        typeof (error as { stderr?: unknown })?.stderr === 'string'
-          ? (error as { stderr: string }).stderr
-          : '';
-      const stdout =
-        typeof (error as { stdout?: unknown })?.stdout === 'string'
-          ? (error as { stdout: string }).stdout
-          : '';
-      const output = `${stderr}\n${stdout}`;
+      const output = readGitErrorOutput(error);
       if (output.includes("couldn't find remote ref")) {
         continue;
       }
@@ -974,6 +1036,41 @@ export async function rebaseBranchOntoRef(
     }
     return false;
   }
+}
+
+const AUTH_FAILURE_PATTERN = /fatal:\s*authentication failed/i;
+const REPO_NOT_FOUND_PATTERN = /repository not found/i;
+const REFUSE_DELETE_CURRENT_PATTERN = /refusing to delete the current branch/i;
+const LEASE_REJECTION_PATTERN = /stale info/i;
+
+function readGitErrorOutput(error: unknown): string {
+  const direct = readGitCommandOutput(error);
+  if (direct) return direct;
+  const cause = (error as { cause?: unknown })?.cause;
+  return cause ? readGitCommandOutput(cause) : '';
+}
+
+function isLeaseRejectionOutput(output: string): boolean {
+  return LEASE_REJECTION_PATTERN.test(output);
+}
+
+function isFetchPermanentError(error: unknown): boolean {
+  const output = readGitCommandOutput(error);
+  return (
+    AUTH_FAILURE_PATTERN.test(output) ||
+    REPO_NOT_FOUND_PATTERN.test(output) ||
+    output.includes("couldn't find remote ref")
+  );
+}
+
+function isPushPermanentError(error: unknown): boolean {
+  const output = readGitCommandOutput(error);
+  return (
+    AUTH_FAILURE_PATTERN.test(output) ||
+    REPO_NOT_FOUND_PATTERN.test(output) ||
+    REFUSE_DELETE_CURRENT_PATTERN.test(output) ||
+    LEASE_REJECTION_PATTERN.test(output)
+  );
 }
 
 function readGitCommandOutput(error: unknown): string {
