@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-8 - Worktree-aware operations (skip branches checked out elsewhere)</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-8</div>
+        <h1>DUB-8 - Worktree-aware operations (skip branches checked out elsewhere)</h1>
+        <div class="meta"><span><strong>13</strong> files</span>
+<span><span class="add">+308</span> / <span class="del">-3</span></span>
+<span>branch <strong>feature/dub-8-worktree-aware-operations-skip-branches-checked-out</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Detect branches checked out in other git worktrees and skip them during mutating sync, restack, and post-merge cleanup paths.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>DubStack now discovers branch checkouts in other worktrees and reports a distinct skip instead of trying to reset, rebase, or clean up those branches from the wrong worktree.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Git rejects several branch mutations when the target branch is checked out in another worktree.</p>
+<p class="lede">Stack operations should protect collaborators and parallel workspaces by leaving those branch refs alone.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`sync` could try to reset, rebase, or auto-clean a branch that Git had locked in another worktree.</li>
+<li>`restack` could attempt `git rebase --onto ... &lt;branch&gt;` for a branch checked out elsewhere.</li>
+<li>`post-merge` cleanup removed merged branches from local stack state even when the branch was active in another worktree.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`listWorktreeCheckouts(cwd)` parses `git worktree list --porcelain` and returns a branch-to-path map excluding the current worktree.</li>
+<li>`sync` records `checked-out-elsewhere` branch outcomes, prints the required hint, skips auto-clean deletion, and avoids reconciliation mutations for those branches.</li>
+<li>`restack` marks matching steps skipped before rebase execution, and `post-merge` leaves checked-out merged branches in stack state.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+48</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `listWorktreeCheckouts(cwd)` plus a shared formatter for the user-facing skip hint. The helper parses porcelain worktree output and compares real paths so macOS `/var` versus `/private/var` aliases do not cause the current worktree to be misclassified.</p>
+    <div class="code"><pre>export async function listWorktreeCheckouts(
+  cwd: string,
+): Promise&lt;Map&lt;string, string&gt;&gt; {
+  const repoRoot = await realpathOrResolve(await getRepoRoot(cwd));
+  const { stdout } = await execa(&#39;git&#39;, [&#39;worktree&#39;, &#39;list&#39;, &#39;--porcelain&#39;], {
+    cwd,
+  });
+  // parse worktree/branch lines and exclude repoRoot
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+25</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Loads the worktree checkout map once per sync, records a distinct `checked-out-elsewhere` outcome, skips root fast-forward/restack attempts where applicable, skips auto-clean deletion, and short-circuits per-branch reconciliation before reset/rebase paths.</p>
+    <div class="code"><pre>const outcome: BranchSyncOutcome = {
+  branch,
+  status: &#39;checked-out-elsewhere&#39;,
+  action: &#39;skipped&#39;,
+  message: formatWorktreeCheckoutSkipMessage(branch, worktreePath),
+};</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/restack.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+20</span> <span class="del">-2</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Builds restack steps with worktree awareness so branches checked out elsewhere are printed and marked skipped before `rebaseOnto` can run.</p>
+    <div class="code"><pre>status: worktreeCheckouts.has(branch.name) ? &#39;skipped&#39; : &#39;pending&#39;</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/post-merge.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+15</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `skipped` post-merge results and leaves checked-out merged branches in the stack instead of cleaning/reparenting them from another worktree.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/report.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+6</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Extends the sync summary with a checked-out-elsewhere count when those skips occur.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/**/*.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+163</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds coverage for single-worktree and two-worktree detection, sync reconciliation skip, sync auto-clean deletion skip, restack rebase skip, and post-merge cleanup skip. Updates the merge-next mock for the new post-merge result shape.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Current worktree exclusion</div>
+    <div class="note"><code>packages/cli/src/lib/git.ts:50</code> The helper must not report the branch checked out in the current worktree. It compares real paths to avoid macOS path alias false positives.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Sync skip ordering</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts:163</code> The skip is checked before cleanup deletion and before branch reconciliation so reset/rebase/delete paths never see other-worktree branches.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Restack skip semantics</div>
+    <div class="note"><code>packages/cli/src/commands/restack.ts:104</code> Skipped worktree steps intentionally do not update parent revisions, because this worktree did not move the protected branch.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Worktree checkout discovery</div>
+      <div class="note">packages/cli/src/lib/git.test.ts covers single worktree and a real second worktree.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Sync checked-out-elsewhere skip</div>
+      <div class="note">packages/cli/src/commands/sync.test.ts covers reconciliation skip and auto-clean deletion skip.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Restack checked-out-elsewhere skip</div>
+      <div class="note">packages/cli/src/commands/restack.test.ts verifies a real worktree branch tip is not rebased.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Post-merge checked-out-elsewhere skip</div>
+      <div class="note">packages/cli/src/commands/post-merge.test.ts verifies merged branch cleanup is skipped.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 199 files in 31ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Type check</div>
+      <div class="note">Command: pnpm typecheck. 2 successful, 2 total. dubstack ran tsc --noEmit; docs cache hit.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Full test suite</div>
+      <div class="note">Command: pnpm test. Test Files 71 passed (71); Tests 556 passed (556).</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback covering helper behavior, command skips, and required gates.</div>
+      <div class="note">No `.tsx` files changed and this is CLI-only behavior with no browser-demoable surface.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-8-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Single worktree returns no other-worktree checkouts.</li>
+<li>Two real worktrees produce the expected branch-to-path map.</li>
+<li>Sync emits the required skip message and records `checked-out-elsewhere`.</li>
+<li>Restack leaves a protected branch tip unchanged.</li>
+<li>Post-merge leaves a checked-out merged branch in stack state.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`listWorktreeCheckouts` returns a map of branch to worktree path for branches checked out elsewhere</div>
+      <div class="note">packages/cli/src/lib/git.ts plus real-worktree tests in packages/cli/src/lib/git.test.ts.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Sync skips other-worktree branches with the hint</div>
+      <div class="note">packages/cli/src/commands/sync.ts records and prints `formatWorktreeCheckoutSkipMessage`; asserted in sync.test.ts.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Restack skips other-worktree branches</div>
+      <div class="note">packages/cli/src/commands/restack.ts marks protected steps skipped; restack.test.ts verifies no rebase changes the branch tip.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">The branch outcome in the sync summary reflects the skip with a distinct status</div>
+      <div class="note">Branch outcome status is `checked-out-elsewhere`; summary includes `(N checked-out-elsewhere)`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: single worktree and two worktrees</div>
+      <div class="note">packages/cli/src/lib/git.test.ts covers both cases; command tests cover behavior consumers.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Review identified one missing regression for sync auto-clean deletion; added `skips auto-clean deletion for branches checked out in another worktree` and reran targeted plus full gates.</li>
+<li>No remaining critical or major findings.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">External dependencies</div>
+  <div class="note">No external dependencies detected</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">CLI-only behavior guarded by unit and integration-style git worktree tests.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">Before implementation</div>
+  <div class="label">Issue and branch verified</div>
+  <div class="note">Linear DUB-8 was unblocked and this checkout was already on the canonical branch.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Implementation</div>
+  <div class="label">Worktree-aware skips added</div>
+  <div class="note">Added detection in git helpers and integrated it into sync, restack, and post-merge.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Validation</div>
+  <div class="label">Required gates passed</div>
+  <div class="note">`pnpm checks`, `pnpm typecheck`, and `pnpm test` all passed after the final staged change.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>pending</strong> <code>pending</code></div>
+  <pre>fix: skip branches checked out in other worktrees</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">sync.ts</a>
+<a href="#tour" class="sub">restack.ts</a>
+<a href="#tour" class="sub">post-merge.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

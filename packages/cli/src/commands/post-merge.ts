@@ -3,7 +3,9 @@ import {
   checkoutBranch,
   fastForwardBranchToRef,
   fetchBranches,
+  formatWorktreeCheckoutSkipMessage,
   getCurrentBranch,
+  listWorktreeCheckouts,
   remoteBranchExists,
 } from '../lib/git';
 import {
@@ -27,6 +29,7 @@ import {
 
 export interface PostMergeResult {
   cleaned: string[];
+  skipped: string[];
   reparented: Array<{ branch: string; parent: string | null }>;
   retargeted: string[];
   restacked: boolean;
@@ -53,6 +56,7 @@ export async function postMerge(
 
   const state = await readState(cwd);
   const originalBranch = await getCurrentBranch(cwd);
+  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
   const scopeStacks = options.all
     ? state.stacks
     : (() => {
@@ -73,6 +77,7 @@ export async function postMerge(
 
   const result: PostMergeResult = {
     cleaned: [],
+    skipped: [],
     reparented: [],
     retargeted: [],
     restacked: false,
@@ -86,6 +91,19 @@ export async function postMerge(
   for (const stack of workingStacks) {
     const mergedBottom = await getMergedBottomBranches(stack, cwd);
     for (const branchName of mergedBottom) {
+      const worktreePath = worktreeCheckouts.get(branchName);
+      if (worktreePath) {
+        console.log(
+          formatWorktreeCheckoutSkipMessage(
+            branchName,
+            worktreePath,
+            'dub post-merge',
+          ),
+        );
+        result.skipped.push(branchName);
+        continue;
+      }
+
       result.cleaned.push(branchName);
       const reparented = removeBranchFromStack(stack, branchName);
       result.reparented.push(...reparented);
@@ -175,6 +193,7 @@ export async function postMerge(
   }
 
   result.cleaned.sort();
+  result.skipped.sort();
   result.retargeted.sort();
   return result;
 }

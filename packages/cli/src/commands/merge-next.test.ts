@@ -89,6 +89,7 @@ beforeEach(() => {
   mockRetargetPrBase.mockResolvedValue(undefined);
   mockPostMerge.mockResolvedValue({
     cleaned: ['feat/a'],
+    skipped: [],
     reparented: [{ branch: 'feat/b', parent: 'main' }],
     retargeted: ['feat/b'],
     restacked: true,

@@ -4,6 +4,7 @@ export type BranchSyncStatus =
   | 'up-to-date'
   | 'updated-outside-dubstack-but-up-to-date'
   | 'unsubmitted'
+  | 'checked-out-elsewhere'
   | 'needs-remote-sync-safe'
   | 'needs-remote-sync'
   | 'reconcile-needed'
