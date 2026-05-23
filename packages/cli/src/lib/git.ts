@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import { DubError } from './errors';
+import { retry } from './retry';
 
 export interface DiffStatEntry {
   path: string;
@@ -423,6 +424,18 @@ export async function writeLastPushedSha(
 }
 
 /**
+ * Options accepted by {@link pushBranch}.
+ */
+export interface PushBranchOptions {
+  /**
+   * Invoked before each retry attempt with the upcoming attempt number
+   * (1-indexed) and the last error. Wired by callers to emit verbose
+   * log lines (e.g. under `--verbose`).
+   */
+  onRetry?: (attempt: number, err: unknown) => void;
+}
+
+/**
  * Pushes a branch to origin with `--force-with-lease`, scoped to our
  * locally-tracked last-pushed SHA (`refs/dubstack/last-pushed/<branch>`).
  *
@@ -431,25 +444,40 @@ export async function writeLastPushedSha(
  * and silently makes the lease succeed against stale-on-disk state, which
  * would let us overwrite work pushed by a teammate.
  *
+ * The push itself is wrapped in {@link retry} (up to 4 attempts) so
+ * transient network blips don't abort long sync runs. Authentication
+ * failures, missing repositories, refusal to delete the current branch,
+ * and lease rejection short-circuit immediately. Lease rejection surfaces
+ * as a `DubError` whose recovery hint points at `dub sync`.
+ *
  * On success, updates the tracked ref to the freshly-pushed SHA.
  *
  * On a first push (no tracked SHA recorded yet), falls back to bare
  * `--force-with-lease`. Race protection kicks in for all subsequent pushes
  * once the tracking ref is established.
  *
- * @throws {DubError} If the push fails. Lease rejection gets a specific
- * recovery hint to run `dub sync` and retry.
+ * @throws {DubError} If the push fails (permanently or after exhausting retries).
  */
-export async function pushBranch(branch: string, cwd: string): Promise<void> {
+export async function pushBranch(
+  branch: string,
+  cwd: string,
+  options: PushBranchOptions = {},
+): Promise<void> {
   const trackedSha = await readLastPushedSha(branch, cwd);
   const leaseArg = trackedSha
     ? `--force-with-lease=refs/heads/${branch}:${trackedSha}`
     : '--force-with-lease';
 
   try {
-    await execa('git', ['push', leaseArg, 'origin', branch], { cwd });
+    await retry(
+      () => execa('git', ['push', leaseArg, 'origin', branch], { cwd }),
+      {
+        isPermanent: isPushPermanentError,
+        onRetry: options.onRetry,
+      },
+    );
   } catch (error) {
-    const details = readGitCommandOutput(error);
+    const details = readGitErrorOutput(error);
     if (isLeaseRejectionError(details)) {
       throw new DubError(
         formatGitFailure(
@@ -820,35 +848,57 @@ export function namespacedFetchRef(branch: string): string {
 }
 
 /**
+ * Options accepted by {@link fetchBranches}.
+ */
+export interface FetchBranchesOptions {
+  /**
+   * Invoked before each retry attempt with the upcoming attempt number
+   * (1-indexed) and the last error. Wired by callers to emit verbose
+   * log lines (e.g. under `--verbose`).
+   */
+  onRetry?: (attempt: number, err: unknown) => void;
+}
+
+/**
  * Fetches the provided branches from the remote into a namespaced ref
  * (`refs/dubstack/fetch-head/<branch>`) so that the user's own `FETCH_HEAD`
  * is left untouched. Also passes `--no-tags` to cut network cost on repos
- * with many release tags.
+ * with many release tags. Each per-branch fetch is wrapped in {@link retry}
+ * (up to 4 attempts) so transient network blips during long sync runs no
+ * longer abort the whole operation. Authentication failures and missing
+ * repositories short-circuit without retrying.
  */
 export async function fetchBranches(
   branches: string[],
   cwd: string,
   remote = 'origin',
+  options: FetchBranchesOptions = {},
 ): Promise<void> {
   if (branches.length === 0) return;
   for (const branch of branches) {
     const refspec = `${branch}:${namespacedFetchRef(branch)}`;
     try {
-      await execa(
-        'git',
-        ['fetch', '--no-write-fetch-head', '--no-tags', '-f', remote, refspec],
-        { cwd },
+      await retry(
+        () =>
+          execa(
+            'git',
+            [
+              'fetch',
+              '--no-write-fetch-head',
+              '--no-tags',
+              '-f',
+              remote,
+              refspec,
+            ],
+            { cwd },
+          ),
+        {
+          isPermanent: isFetchPermanentError,
+          onRetry: options.onRetry,
+        },
       );
     } catch (error: unknown) {
-      const stderr =
-        typeof (error as { stderr?: unknown })?.stderr === 'string'
-          ? (error as { stderr: string }).stderr
-          : '';
-      const stdout =
-        typeof (error as { stdout?: unknown })?.stdout === 'string'
-          ? (error as { stdout: string }).stdout
-          : '';
-      const output = `${stderr}\n${stdout}`;
+      const output = readGitErrorOutput(error);
       if (output.includes("couldn't find remote ref")) {
         continue;
       }
@@ -1090,6 +1140,39 @@ export async function rebaseBranchOntoRef(
     }
     return false;
   }
+}
+
+const AUTH_FAILURE_PATTERN = /fatal:\s*authentication failed/i;
+const REPO_NOT_FOUND_PATTERN = /repository not found/i;
+const REFUSE_DELETE_CURRENT_PATTERN = /refusing to delete the current branch/i;
+
+function readGitErrorOutput(error: unknown): string {
+  const direct = readGitCommandOutput(error);
+  const cause = (error as { cause?: unknown })?.cause;
+  if (!cause) return direct;
+  const causeOutput = readGitCommandOutput(cause);
+  if (!causeOutput) return direct;
+  if (!direct) return causeOutput;
+  return `${direct}\n${causeOutput}`;
+}
+
+function isFetchPermanentError(error: unknown): boolean {
+  const output = readGitCommandOutput(error);
+  return (
+    AUTH_FAILURE_PATTERN.test(output) ||
+    REPO_NOT_FOUND_PATTERN.test(output) ||
+    output.includes("couldn't find remote ref")
+  );
+}
+
+function isPushPermanentError(error: unknown): boolean {
+  const output = readGitCommandOutput(error);
+  return (
+    AUTH_FAILURE_PATTERN.test(output) ||
+    REPO_NOT_FOUND_PATTERN.test(output) ||
+    REFUSE_DELETE_CURRENT_PATTERN.test(output) ||
+    isLeaseRejectionError(output)
+  );
 }
 
 function readGitCommandOutput(error: unknown): string {
