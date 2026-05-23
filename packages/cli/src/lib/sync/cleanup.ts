@@ -2,6 +2,7 @@ import type { BranchPrLifecycleState } from '../github';
 
 export type CleanupReason =
   | 'merged-pr'
+  | 'merged-pr-with-trailing-commits'
   | 'closed-pr-merged-into-trunk'
   | 'merged-by-patch-id';
 
@@ -27,7 +28,14 @@ export async function buildCleanupPlan(input: {
     if (prState === 'MERGED') {
       // Squash/rebase merge strategies may not preserve branch commit ancestry,
       // but a merged PR still means the change is integrated and branch is cleanable.
-      toDelete.push({ branch, reason: 'merged-pr' });
+      // If the patch-id walk reports trailing local commits beyond the squash
+      // boundary, surface them so the user can rescue / re-track them.
+      let reason: CleanupReason = 'merged-pr';
+      if (input.isMergedByPatchId) {
+        const allInTrunk = await input.isMergedByPatchId(branch);
+        if (!allInTrunk) reason = 'merged-pr-with-trailing-commits';
+      }
+      toDelete.push({ branch, reason });
       continue;
     }
 

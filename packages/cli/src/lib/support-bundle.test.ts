@@ -61,6 +61,10 @@ function makeBundle(overrides: Partial<SupportBundle> = {}): SupportBundle {
         gitVersion: 'git version 2.49.0',
         ghVersion: 'gh version 2.74.0',
       },
+      sync: {
+        lastSyncAt: null,
+        reconcileSources: {},
+      },
     },
     ...overrides,
   };
@@ -171,6 +175,28 @@ describe('support-bundle', () => {
     expect(markdown).toContain('- repo: unavailable');
     expect(markdown).toContain('- doctor: healthy');
     expect(markdown).toContain('Recent Dub commands');
+  });
+
+  it('includes reconcile-source histogram in markdown when last sync exists', () => {
+    const markdown = formatSupportBundleSummaryMarkdown(
+      makeBundle({
+        sources: {
+          ...makeBundle().sources,
+          sync: {
+            lastSyncAt: '2026-05-23T12:00:00.000Z',
+            reconcileSources: {
+              'sync-no-change': 3,
+              'sync-rebase-onto-remote': 1,
+            },
+          },
+        },
+      }),
+    );
+
+    expect(markdown).toContain('Last Sync Reconcile Sources');
+    expect(markdown).toContain('- sync-no-change: 3');
+    expect(markdown).toContain('- sync-rebase-onto-remote: 1');
+    expect(markdown).toContain('last 2026-05-23T12:00:00.000Z');
   });
 });
 

@@ -6,6 +6,7 @@ import { getCurrentBranch, getRepoRoot } from './git';
 import { readHistory } from './history';
 import { sanitizeRemoteUrl } from './sanitize';
 import { type DubState, findStackForBranch, readState } from './state';
+import type { ReconcileSourceHistogram } from './sync/types';
 
 export { sanitizeRemoteUrl };
 
@@ -15,7 +16,8 @@ export type SupportBundleSourceName =
   | 'doctor'
   | 'git'
   | 'history'
-  | 'tooling';
+  | 'tooling'
+  | 'sync';
 
 export interface SupportBundleCollectionError {
   source: SupportBundleSourceName;
@@ -74,6 +76,13 @@ export interface SupportToolingContext {
   ghVersion: string | null;
 }
 
+export interface SupportSyncContext {
+  /** ISO timestamp of the most recent sync run, or null when none recorded. */
+  lastSyncAt: string | null;
+  /** Count of each reconcile source attributed to a branch in the last sync. */
+  reconcileSources: ReconcileSourceHistogram;
+}
+
 export interface SupportBundle {
   schemaVersion: '1';
   generatedAt: string;
@@ -89,6 +98,7 @@ export interface SupportBundle {
     git: SupportGitContext | null;
     history: SupportHistoryContext | null;
     tooling: SupportToolingContext | null;
+    sync: SupportSyncContext | null;
   };
 }
 
@@ -100,6 +110,7 @@ export interface SupportBundleCollectorOverrides {
   collectGit?: (cwd: string) => Promise<SupportGitContext>;
   collectHistory?: (cwd: string) => Promise<SupportHistoryContext>;
   collectTooling?: (cwd: string) => Promise<SupportToolingContext>;
+  collectSync?: (cwd: string) => Promise<SupportSyncContext>;
 }
 
 export interface CollectSupportBundleOptions {
@@ -153,6 +164,12 @@ export async function collectSupportBundle(
     collectors.collectTooling ?? defaultCollectTooling,
     cwd,
   );
+  const syncContext = await collectSource(
+    'sync',
+    errors,
+    collectors.collectSync ?? defaultCollectSync,
+    cwd,
+  );
 
   return {
     schemaVersion: '1',
@@ -169,6 +186,7 @@ export async function collectSupportBundle(
       git,
       history,
       tooling,
+      sync: syncContext,
     },
   };
 }
@@ -203,7 +221,10 @@ export function formatSupportBundleSummaryMarkdown(
         ? 'available'
         : 'unavailable'
     }`,
+    `- sync: ${describeSyncStatus(bundle.sources.sync, hasSourceError('sync'))}`,
   ];
+
+  const syncHistogramLines = describeSyncHistogram(bundle.sources.sync);
 
   const historyLines =
     bundle.sources.history?.recentEntries.length === 0 ||
@@ -232,12 +253,34 @@ export function formatSupportBundleSummaryMarkdown(
     '## Included Sources',
     ...sectionLines,
     '',
+    '## Last Sync Reconcile Sources',
+    ...syncHistogramLines,
+    '',
     '## Collection Errors',
     ...errorLines,
     '',
     '## Recent Dub commands',
     ...historyLines,
   ].join('\n');
+}
+
+function describeSyncStatus(
+  sync: SupportSyncContext | null,
+  hasError: boolean,
+): string {
+  if (hasError) return 'unavailable';
+  if (!sync) return 'unavailable';
+  if (!sync.lastSyncAt) return 'no recorded sync';
+  return `last ${sync.lastSyncAt}`;
+}
+
+function describeSyncHistogram(sync: SupportSyncContext | null): string[] {
+  if (!sync) return ['- unavailable'];
+  const entries = Object.entries(sync.reconcileSources).sort(
+    (a, b) => (b[1] ?? 0) - (a[1] ?? 0),
+  );
+  if (entries.length === 0) return ['- none'];
+  return entries.map(([source, count]) => `- ${source}: ${count}`);
 }
 
 async function collectSource<T>(
@@ -407,6 +450,22 @@ async function defaultCollectHistory(
       status: entry.status,
       durationMs: entry.durationMs,
     })),
+  };
+}
+
+async function defaultCollectSync(cwd: string): Promise<SupportSyncContext> {
+  let state: DubState;
+  try {
+    state = await readState(cwd);
+  } catch {
+    // Missing/corrupt state behaves the same as "no sync recorded" from a
+    // diagnostics perspective — don't propagate the error and partial-fail.
+    return { lastSyncAt: null, reconcileSources: {} };
+  }
+  const lastSync = state.last_sync ?? null;
+  return {
+    lastSyncAt: lastSync?.timestamp ?? null,
+    reconcileSources: lastSync?.reconcile_sources ?? {},
   };
 }
 

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
+import type { ReconcileSource, ReconcileSourceHistogram } from './sync/types';
 
 /** A branch within a stack. */
 export interface Branch {
@@ -24,19 +25,19 @@ export interface Branch {
     base_sha: string;
     base_branch: string;
     version_number: number | null;
-    source: 'submit' | 'sync' | 'imported';
+    source: ReconcileSource;
   } | null;
   /** Last known effective branch/base relationship after sync maintenance. */
   last_reconciled_version?: {
     head_sha: string;
     base_sha: string;
     base_branch: string;
-    source: 'submit' | 'sync-adopt-remote' | 'sync-noop' | 'sync-restack';
+    source: ReconcileSource;
   } | null;
   /** ISO timestamp of the most recent successful sync for this branch. */
   last_synced_at?: string | null;
   /** Source of the branch's current sync baseline metadata. */
-  sync_source?: 'submit' | 'sync' | 'imported' | null;
+  sync_source?: ReconcileSource | null;
 }
 
 /** A stack of dependent branches. */
@@ -47,10 +48,20 @@ export interface Stack {
   branches: Branch[];
 }
 
+/** Summary of the most recent `dub sync` run. */
+export interface LastSyncSummary {
+  /** ISO timestamp the sync completed. */
+  timestamp: string;
+  /** Count of each `ReconcileSource` attributed to a branch this sync. */
+  reconcile_sources: ReconcileSourceHistogram;
+}
+
 /** Root state persisted to `.git/dubstack/state.json`. */
 export interface DubState {
   /** All tracked stacks in this repository. */
   stacks: Stack[];
+  /** Summary of the most recent `dub sync` invocation. */
+  last_sync?: LastSyncSummary | null;
 }
 
 /**
@@ -237,21 +248,55 @@ export function addBranchToStack(
 }
 
 function normalizeState(state: DubState): DubState {
-  return {
+  const normalized: DubState = {
     stacks: state.stacks.map((stack) => ({
       ...stack,
       branches: stack.branches.map((branch) => normalizeBranch(branch)),
     })),
   };
+  if (state.last_sync) {
+    normalized.last_sync = state.last_sync;
+  }
+  return normalized;
+}
+
+const LEGACY_RECONCILE_SOURCE_MAP: Record<string, ReconcileSource> = {
+  sync: 'sync-adopt-remote-safe',
+  'sync-adopt-remote': 'sync-adopt-remote-safe',
+  'sync-noop': 'sync-no-change',
+  'sync-restack': 'sync-rebase-onto-remote',
+};
+
+function migrateReconcileSource(
+  source: string | null | undefined,
+): ReconcileSource | null {
+  if (!source) return null;
+  return LEGACY_RECONCILE_SOURCE_MAP[source] ?? (source as ReconcileSource);
 }
 
 function normalizeBranch(branch: Branch): Branch {
+  const lastSubmitted = branch.last_submitted_version
+    ? {
+        ...branch.last_submitted_version,
+        source:
+          migrateReconcileSource(branch.last_submitted_version.source) ??
+          'imported',
+      }
+    : null;
+  const lastReconciled = branch.last_reconciled_version
+    ? {
+        ...branch.last_reconciled_version,
+        source:
+          migrateReconcileSource(branch.last_reconciled_version.source) ??
+          'imported',
+      }
+    : null;
   return {
     ...branch,
-    last_submitted_version: branch.last_submitted_version ?? null,
-    last_reconciled_version: branch.last_reconciled_version ?? null,
+    last_submitted_version: lastSubmitted,
+    last_reconciled_version: lastReconciled,
     last_synced_at: branch.last_synced_at ?? null,
-    sync_source: branch.sync_source ?? null,
+    sync_source: migrateReconcileSource(branch.sync_source),
   };
 }
 

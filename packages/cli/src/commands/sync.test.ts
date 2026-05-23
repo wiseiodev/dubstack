@@ -14,7 +14,12 @@ vi.mock('../lib/git.js', () => ({
   hardResetBranchToRef: vi.fn(),
   isAncestor: vi.fn(),
   pruneRemote: vi.fn(),
+  rebaseBranchOntoRef: vi.fn(),
   remoteBranchExists: vi.fn(),
+}));
+
+vi.mock('../lib/git/is-merged-by-patch-id.js', () => ({
+  isMergedByPatchId: vi.fn(),
 }));
 
 vi.mock('../lib/state.js', async (importOriginal) => {
@@ -56,8 +61,10 @@ import {
   hardResetBranchToRef,
   isAncestor,
   pruneRemote,
+  rebaseBranchOntoRef,
   remoteBranchExists,
 } from '../lib/git';
+import { isMergedByPatchId } from '../lib/git/is-merged-by-patch-id';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -98,6 +105,8 @@ const mockHardResetBranchToRef = hardResetBranchToRef as ReturnType<
 >;
 const mockIsAncestor = isAncestor as ReturnType<typeof vi.fn>;
 const mockRemoteBranchExists = remoteBranchExists as ReturnType<typeof vi.fn>;
+const mockRebaseBranchOntoRef = rebaseBranchOntoRef as ReturnType<typeof vi.fn>;
+const mockIsMergedByPatchId = isMergedByPatchId as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockRestack = restack as ReturnType<typeof vi.fn>;
@@ -157,6 +166,8 @@ beforeEach(() => {
   mockGetRefSha.mockImplementation(async (ref: string) => `${ref}-sha`);
   mockIsAncestor.mockResolvedValue(false);
   mockHardResetBranchToRef.mockResolvedValue(undefined);
+  mockRebaseBranchOntoRef.mockResolvedValue(false);
+  mockIsMergedByPatchId.mockResolvedValue(true);
   mockCheckoutRemoteBranch.mockResolvedValue(undefined);
   mockCheckoutBranch.mockResolvedValue(undefined);
   mockDeleteBranch.mockResolvedValue(undefined);
@@ -491,7 +502,7 @@ describe('sync', () => {
     );
     expect(featA?.last_submitted_version?.source).toBe('submit');
     expect(featA?.sync_source).toBe('submit');
-    expect(featA?.last_reconciled_version?.source).toBe('sync-noop');
+    expect(featA?.last_reconciled_version?.source).toBe('sync-no-change');
   });
 
   it('cleans merged branch automatically without force', async () => {
@@ -700,7 +711,7 @@ describe('sync', () => {
       head_sha: 'same-sha',
       base_sha: 'same-sha',
       base_branch: 'main',
-      source: 'sync-noop',
+      source: 'sync-no-change',
     });
   });
 
@@ -759,7 +770,7 @@ describe('sync', () => {
                 head_sha: 'child-local-sha',
                 base_sha: 'parent-new-sha',
                 base_branch: 'feat/a',
-                source: 'sync-restack',
+                source: 'sync-rebase-onto-remote',
               },
               last_synced_at: null,
               sync_source: 'submit',
@@ -855,7 +866,7 @@ describe('sync', () => {
                 head_sha: 'child-local-sha',
                 base_sha: 'stale-parent-sha',
                 base_branch: 'local-parent',
-                source: 'sync-restack',
+                source: 'sync-rebase-onto-remote',
               },
               last_synced_at: null,
               sync_source: 'submit',
@@ -960,7 +971,7 @@ describe('sync', () => {
                 head_sha: 'child-local-sha',
                 base_sha: 'parent-new-sha',
                 base_branch: 'feat/a',
-                source: 'sync-restack',
+                source: 'sync-rebase-onto-remote',
               },
               last_synced_at: null,
               sync_source: 'submit',
@@ -1139,6 +1150,256 @@ describe('sync', () => {
         expect.stringContaining('dub abort'),
       ]),
     );
+  });
+
+  describe('expanded status taxonomy (DUB-14)', () => {
+    it('auto-rebases on non-conflicting-divergence', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha
+        .mockResolvedValueOnce('local-a')
+        .mockResolvedValueOnce('remote-a')
+        .mockResolvedValue('rebased-a');
+      mockIsAncestor.mockResolvedValue(false);
+      mockRebaseBranchOntoRef.mockResolvedValue(true);
+
+      const result = await sync('/repo', {
+        interactive: false,
+        force: false,
+        restack: false,
+      });
+
+      expect(mockRebaseBranchOntoRef).toHaveBeenCalledWith(
+        'feat/a',
+        'origin/feat/a',
+        '/repo',
+      );
+      expect(result.branches[0].status).toBe('non-conflicting-divergence');
+      expect(result.branches[0].action).toBe('synced');
+      expect(result.branches[0].reconcileSource).toBe(
+        'sync-rebase-onto-remote',
+      );
+      expect(result.reconcileSources['sync-rebase-onto-remote']).toBe(1);
+    });
+
+    it('detects remote-restacked when remote PR base differs and remote contains new parent history', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha
+        .mockResolvedValueOnce('local-a')
+        .mockResolvedValueOnce('remote-a');
+      mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+        // diverged from remote
+        if (left === 'feat/a' && right === 'origin/feat/a') return false;
+        if (left === 'origin/feat/a' && right === 'feat/a') return false;
+        // origin/new-parent IS ancestor of origin/feat/a (remote moved onto it)
+        if (left === 'origin/new-parent' && right === 'origin/feat/a')
+          return true;
+        return false;
+      });
+      mockGetBranchPrSyncInfo.mockResolvedValue({
+        state: 'OPEN',
+        baseRefName: 'new-parent',
+      });
+
+      const result = await sync('/repo', {
+        interactive: false,
+        force: false,
+        restack: false,
+      });
+
+      expect(result.branches[0].status).toBe('remote-restacked');
+      expect(result.branches[0].action).toBe('synced');
+      expect(result.branches[0].reconcileSource).toBe('sync-remote-restacked');
+      expect(mockHardResetBranchToRef).toHaveBeenCalledWith(
+        'feat/a',
+        'origin/feat/a',
+        '/repo',
+      );
+      const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(
+        writtenState.stacks[0].branches.find((b) => b.name === 'feat/a')
+          ?.parent,
+      ).toBe('new-parent');
+      expect(
+        writtenState.last_sync?.reconcile_sources['sync-remote-restacked'],
+      ).toBe(1);
+    });
+
+    it('emits parent-merged-orphan outcome when parent PR was merged and child reparented', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'feat/a' },
+        ]),
+      );
+      mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => ({
+        state: branch === 'feat/a' ? 'MERGED' : 'OPEN',
+        baseRefName: branch === 'feat/a' ? 'main' : 'feat/a',
+      }));
+      mockGetAllPrSyncInfoBatch.mockResolvedValue({
+        byBranch: new Map([
+          ['feat/a', { state: 'MERGED', baseRefName: 'main' }],
+          ['feat/b', { state: 'OPEN', baseRefName: 'feat/a' }],
+        ]),
+        truncated: false,
+      });
+
+      const result = await sync('/repo', {
+        interactive: false,
+        force: false,
+        restack: false,
+      });
+
+      const orphan = result.branches.find((b) => b.branch === 'feat/b');
+      expect(orphan?.status).toBe('parent-merged-orphan');
+      expect(orphan?.action).toBe('synced');
+      expect(orphan?.reconcileSource).toBe('sync-parent-merged-reparent');
+      expect(result.reconcileSources['sync-parent-merged-reparent']).toBe(1);
+    });
+
+    it('records squash-merged-with-trailing-commits outcome when patch-id reports trailing commits', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetBranchPrSyncInfo.mockResolvedValue({
+        state: 'MERGED',
+        baseRefName: 'main',
+      });
+      // not all branch commits are in trunk → trailing commits remain
+      mockIsMergedByPatchId.mockResolvedValue(false);
+
+      const result = await sync('/repo', {
+        interactive: false,
+        force: false,
+        restack: false,
+      });
+
+      const outcome = result.branches.find((b) => b.branch === 'feat/a');
+      expect(outcome?.status).toBe('squash-merged-with-trailing-commits');
+      expect(outcome?.action).toBe('deleted');
+      expect(outcome?.reconcileSource).toBe('sync-squash-merged-cleanup');
+      expect(result.cleaned).toContain('feat/a');
+      expect(result.reconcileSources['sync-squash-merged-cleanup']).toBe(1);
+    });
+
+    it('refinement: needs-remote-sync auto-FFs and adopts remote parent when local is strict subset', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'local-parent' },
+        ]),
+      );
+      mockGetRefSha
+        .mockResolvedValueOnce('local-a')
+        .mockResolvedValueOnce('remote-a');
+      mockIsAncestor.mockImplementation(async (left: string, right: string) => {
+        if (left === 'feat/a' && right === 'origin/feat/a') return true;
+        return false;
+      });
+      mockGetBranchPrSyncInfo.mockResolvedValue({
+        state: 'OPEN',
+        baseRefName: 'remote-parent',
+      });
+
+      const result = await sync('/repo', {
+        interactive: false,
+        force: false,
+        restack: false,
+      });
+
+      expect(result.branches[0].status).toBe('needs-remote-sync-safe');
+      expect(result.branches[0].action).toBe('synced');
+      expect(result.branches[0].reconcileSource).toBe(
+        'sync-adopt-remote-parent',
+      );
+      expect(mockHardResetBranchToRef).toHaveBeenCalledWith(
+        'feat/a',
+        'origin/feat/a',
+        '/repo',
+      );
+      const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(
+        writtenState.stacks[0].branches.find((b) => b.name === 'feat/a')
+          ?.parent,
+      ).toBe('remote-parent');
+    });
+
+    it('refinement: unsubmitted in non-interactive adopts silently when SHAs already equal', async () => {
+      // No baseline + SHAs equal → updated-outside-dubstack-but-up-to-date
+      // which adopts silently (no prompt). Verified by 'imported' source +
+      // synced state with no skip.
+      mockReadState.mockResolvedValue({
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                parent: null,
+                type: 'root',
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(result.branches[0].status).toBe(
+        'updated-outside-dubstack-but-up-to-date',
+      );
+      expect(result.branches[0].action).toBe('none');
+      expect(result.branches[0].reconcileSource).toBe('sync-no-change');
+    });
+
+    it('persists last_sync histogram in state after sync', async () => {
+      mockReadState.mockResolvedValue(
+        makeState([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+        ]),
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', { interactive: false, restack: false });
+
+      const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+      expect(writtenState.last_sync?.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(writtenState.last_sync?.reconcile_sources['sync-no-change']).toBe(
+        1,
+      );
+    });
   });
 
   describe('batched PR sync info', () => {
