@@ -1,0 +1,189 @@
+{
+  "meta": {
+    "workId": "DUB-2",
+    "title": "lib/retry.ts helper with exponential backoff",
+    "artifactId": "dub-2",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-2-libretryts-helper-with-exponential-backoff",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-2",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 2,
+    "additions": 258,
+    "deletions": 0,
+    "diffStat": "packages/cli/src/lib/retry.ts | 91 ++++++++\npackages/cli/src/lib/retry.test.ts | 167 +++++++++++++++"
+  },
+  "prompt": "Standalone async retry helper with exponential backoff + jitter. Foundation for retrying transient git/gh failures in later slices. No consumers wired up yet — review is for the helper's API surface, backoff math, and test coverage.",
+  "tldr": "Adds `retry<T>(fn, options)` in `packages/cli/src/lib/retry.ts` with exponential backoff (`min(baseMs*2^n, maxMs)`), small jitter, `isPermanent` short-circuit, and an `onRetry` hook. Ten unit tests cover the success path, transient retries, permanent short-circuit, exhaustion, backoff/jitter math, and input validation.",
+  "why": {
+    "motivation": [
+      "Provides the retry primitive used by upcoming slices that wrap git and gh calls so transient failures don't break stack operations.",
+      "Lands as a pure utility so reviewers can scrutinize the backoff math and contract before consumers depend on it."
+    ],
+    "before": [
+      "No shared retry helper — any retry logic would have to be reinvented at each call site.",
+      "Transient git/gh failures (rate limits, flaky networks) surface immediately as user-facing errors."
+    ],
+    "after": [
+      "`retry()` is available as the single source of truth for retry behavior in `src/lib/`.",
+      "Consumers can hook into `onRetry` for verbose progress reporting and `isPermanent` to skip retrying known-permanent errors."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/retry.ts",
+      "changeType": "new",
+      "additions": 91,
+      "deletions": 0,
+      "explanation": "Exports `retry<T>(fn, options)`. Defaults: 4 attempts, baseMs 100, maxMs 2000. Computes `min(baseMs * 2^(attempt-1), maxMs)` plus up to 25% jitter, capped at maxMs. `isPermanent(err)` short-circuits by rethrowing the original error. `onRetry(attempt, err)` fires before each retry (attempt > 1). After exhaustion throws `new Error(..., { cause: lastError })` with the attempt count in the message. `sleep` and `random` are injectable for deterministic tests.",
+      "snippet": "export async function retry<T>(\n  fn: () => Promise<T>,\n  options: RetryOptions = {},\n): Promise<T> {\n  const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;\n  // ...\n  for (let attempt = 1; attempt <= maxAttempts; attempt++) {\n    try {\n      return await fn();\n    } catch (err) {\n      lastError = err;\n      if (isPermanent?.(err)) throw err;\n      if (attempt >= maxAttempts) break;\n      const exp = Math.min(baseMs * 2 ** (attempt - 1), maxMs);\n      const jitter = exp * 0.25 * random();\n      const delay = Math.min(exp + jitter, maxMs);\n      onRetry?.(attempt + 1, err);\n      await sleep(delay);\n    }\n  }\n  // throw wrapped Error with cause\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/retry.test.ts",
+      "changeType": "new",
+      "additions": 167,
+      "deletions": 0,
+      "explanation": "Ten vitest cases. Uses injected `sleep`/`random` to make timing deterministic. Verifies: first-attempt success, transient-then-success, no `onRetry` on attempt 1, `isPermanent` short-circuit (preserving the original error identity), exhaustion throws with `giving up after N attempts` and preserves `cause`, exponential backoff capped at maxMs, jitter math at `random=0.5`, `maxAttempts=0` rejected before calling fn, and `maxAttempts=1` runs fn exactly once.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Backoff math + jitter cap",
+      "location": "packages/cli/src/lib/retry.ts:73-79",
+      "rationale": "The exponent uses `attempt - 1` so the first retry waits `baseMs`, not `baseMs*2`. Jitter is added on top and the final delay is re-capped at `maxMs` so the jitter can never push past the ceiling. Tests at retry.test.ts:103 and :125 lock both behaviors."
+    },
+    {
+      "title": "Error-cause preservation on exhaustion",
+      "location": "packages/cli/src/lib/retry.ts:84-89",
+      "rationale": "Uses the standard `new Error(msg, { cause })` form so consumers can introspect the underlying failure. retry.test.ts:79 asserts `.cause` identity."
+    },
+    {
+      "title": "isPermanent short-circuit semantics",
+      "location": "packages/cli/src/lib/retry.ts:67-70",
+      "rationale": "Rethrows the original error (not a wrapped one) and does not call `onRetry` — confirm this matches the contract expected by consumers."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "retry.test.ts (10 cases) — success, retry-to-success, permanent short-circuit, exhaustion + cause, backoff cap, jitter math, validation, single-attempt path",
+      "status": "done",
+      "evidence": "pnpm test -- retry → 10 passed"
+    },
+    {
+      "kind": "build",
+      "label": "tsup build of packages/cli",
+      "status": "done",
+      "evidence": "Triggered by `pnpm test` turbo pipeline — ESM build succeeded."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "lint+format (biome)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 190 files. No fixes applied."
+    },
+    {
+      "name": "typecheck (tsc)",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 packages typechecked, no errors."
+    },
+    {
+      "name": "unit tests (vitest)",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "69 test files, 518 tests passed (10 new in retry.test.ts)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Pure async utility with no UI, CLI, or browser surface; no consumers wired up yet per the issue scope.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-2-qa.md",
+    "caption": "Self-QA captured deterministically via the new unit suite and the three quality gates.",
+    "scenarios": [
+      "Transient failure recovers and returns the value.",
+      "Permanent error short-circuits without further retries.",
+      "All attempts fail → wrapped Error with `cause` and attempt count.",
+      "Backoff respects `maxMs` and adds jitter without exceeding it."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`packages/cli/src/lib/retry.ts` exports `retry<T>(fn, options)`",
+      "status": "satisfied",
+      "evidence": "retry.ts:48 exports the function."
+    },
+    {
+      "criterion": "Default 4 attempts, 100–2000ms backoff with jitter",
+      "status": "satisfied",
+      "evidence": "Constants at retry.ts:33-35; jitter test at retry.test.ts:125."
+    },
+    {
+      "criterion": "`isPermanent` predicate skips retry",
+      "status": "satisfied",
+      "evidence": "retry.ts:67-70; test at retry.test.ts:47."
+    },
+    {
+      "criterion": "`onRetry` callback fires before each attempt > 1",
+      "status": "satisfied",
+      "evidence": "retry.ts:78; tests at retry.test.ts:18 and :38."
+    },
+    {
+      "criterion": "Throws last error after exhaustion with attempt count in message",
+      "status": "satisfied",
+      "evidence": "retry.ts:85-88; test at retry.test.ts:67."
+    },
+    {
+      "criterion": "Unit tests: transient succeeds, permanent short-circuits, all-fail throws",
+      "status": "satisfied",
+      "evidence": "retry.test.ts:18, :47, :67."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged manual `.cause` assignment — switched to `new Error(msg, { cause })`.",
+      "Reviewer flagged missing test for `maxAttempts < 1` guard — added `rejects an invalid maxAttempts before calling fn`."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies detected",
+      "status": "n/a"
+    }
+  ],
+  "rollout": {
+    "summary": "Pure addition. No behavior change for existing CLI commands; consumers land in later slices.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship as-is",
+        "details": "No flags, no migrations, no consumers. Future slices will import `retry` from `./lib/retry`."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "b91699e5c1fffa9e525525f1f2baede229515d07",
+    "shortSha": "b91699e",
+    "message": "feat(cli): add retry helper with exponential backoff"
+  }
+}
