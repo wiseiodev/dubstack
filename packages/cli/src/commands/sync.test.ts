@@ -1717,7 +1717,12 @@ describe('sync', () => {
       });
 
       expect(mockFetchBranches).toHaveBeenCalledTimes(1);
-      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main'],
+        '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
+      );
       const featA = result.branches.find((b) => b.branch === 'feat/a');
       const featB = result.branches.find((b) => b.branch === 'feat/b');
       expect(featA?.status).toBe('fresh');
@@ -1740,6 +1745,8 @@ describe('sync', () => {
       expect(mockFetchBranches).toHaveBeenCalledWith(
         ['main', 'feat/a'],
         '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
       );
     });
 
@@ -1763,6 +1770,8 @@ describe('sync', () => {
       expect(mockFetchBranches).toHaveBeenCalledWith(
         ['main', 'feat/a', 'feat/b'],
         '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
       );
       expect(result.branches.find((b) => b.status === 'fresh')).toBeUndefined();
     });
@@ -1826,6 +1835,8 @@ describe('sync', () => {
       expect(mockFetchBranches).toHaveBeenCalledWith(
         ['main', 'feat/a'],
         '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
       );
     });
 
@@ -1884,7 +1895,12 @@ describe('sync', () => {
 
       mockFetchBranches.mockClear();
       await sync('/repo', { interactive: false, restack: false });
-      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main'],
+        '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
+      );
     });
 
     it('second consecutive sync only fetches trunk (idempotency)', async () => {
@@ -1908,6 +1924,8 @@ describe('sync', () => {
       expect(mockFetchBranches).toHaveBeenLastCalledWith(
         ['main', 'feat/a', 'feat/b'],
         '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
       );
       const writtenAfterFirst = currentState.stacks[0].branches.find(
         (b) => b.name === 'feat/a',
@@ -1923,7 +1941,12 @@ describe('sync', () => {
       });
 
       expect(mockFetchBranches).toHaveBeenCalledTimes(1);
-      expect(mockFetchBranches).toHaveBeenCalledWith(['main'], '/repo');
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main'],
+        '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
+      );
       const cached = result.branches.filter((b) => b.status === 'fresh');
       expect(cached.map((b) => b.branch).sort()).toEqual(['feat/a', 'feat/b']);
     });
