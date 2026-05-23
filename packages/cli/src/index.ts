@@ -72,6 +72,11 @@ import {
 } from './lib/history';
 import { detectActiveOperation } from './lib/operation-state';
 import { setVerbose } from './lib/progress';
+import {
+  resolveRestackConflictDecision,
+  restackConflictPrompt,
+} from './lib/restack-conflict-prompt';
+import { rollbackRestack } from './lib/restack-rollback';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -588,8 +593,38 @@ Examples:
     if (result.status === 'up-to-date') {
       console.log(chalk.green('✔ Stack is already up to date'));
     } else if (result.status === 'conflict') {
+      const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+      const conflictBranch = result.conflictBranch ?? 'unknown';
+      const decision = await resolveRestackConflictDecision({
+        branch: conflictBranch,
+        interactive,
+        promptChoice: (branchName) =>
+          restackConflictPrompt({ branch: branchName }),
+      });
+      if (decision === 'cancel') {
+        const rollback = await rollbackRestack(process.cwd());
+        console.log(
+          chalk.green(
+            `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+          ),
+        );
+        return;
+      }
+      if (decision === 'exit') {
+        console.log(
+          chalk.yellow(
+            `⚠ Restack left in its current state on '${conflictBranch}'.`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
+          ),
+        );
+        return;
+      }
       console.log(
-        chalk.yellow(`⚠ Conflict while restacking '${result.conflictBranch}'`),
+        chalk.yellow(`⚠ Conflict while restacking '${conflictBranch}'`),
       );
       console.log(
         chalk.dim(

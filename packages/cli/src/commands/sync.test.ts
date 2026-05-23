@@ -35,6 +35,19 @@ vi.mock('./restack.js', () => ({
   restack: vi.fn(),
 }));
 
+vi.mock('../lib/restack-conflict-prompt.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../lib/restack-conflict-prompt.js')>();
+  return {
+    ...actual,
+    restackConflictPrompt: vi.fn(),
+  };
+});
+
+vi.mock('../lib/restack-rollback.js', () => ({
+  rollbackRestack: vi.fn(),
+}));
+
 vi.mock('../lib/operation-state.js', () => ({
   detectActiveOperation: vi.fn(),
 }));
@@ -73,6 +86,8 @@ import {
   retargetPrBase,
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
+import { restackConflictPrompt } from '../lib/restack-conflict-prompt';
+import { rollbackRestack } from '../lib/restack-rollback';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
 import { doctor } from './doctor';
@@ -124,6 +139,10 @@ const mockRetargetPrBase = retargetPrBase as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockSubmit = submit as ReturnType<typeof vi.fn>;
+const mockRestackConflictPrompt = restackConflictPrompt as ReturnType<
+  typeof vi.fn
+>;
+const mockRollbackRestack = rollbackRestack as ReturnType<typeof vi.fn>;
 
 function makeState(
   branches: { name: string; parent: string | null; type?: 'root' }[],
@@ -425,7 +444,7 @@ describe('sync', () => {
     );
   });
 
-  it('skips diverged branch in non-interactive mode without force', async () => {
+  it('aborts on diverged branch in non-interactive mode without force (DUB-15)', async () => {
     mockReadState.mockResolvedValue(
       makeState([
         { name: 'main', parent: null, type: 'root' },
@@ -437,10 +456,18 @@ describe('sync', () => {
       .mockResolvedValueOnce('remote-a');
     mockIsAncestor.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
 
-    const result = await sync('/repo', { interactive: false, restack: false });
+    let captured: DubError | null = null;
+    try {
+      await sync('/repo', { interactive: false, restack: false });
+    } catch (error) {
+      captured = error as DubError;
+    }
 
-    expect(result.branches[0].status).toBe('reconcile-needed');
-    expect(result.branches[0].action).toBe('skipped');
+    expect(captured).toBeInstanceOf(DubError);
+    expect(captured?.message).toContain(
+      "Sync aborted by user while reconciling 'feat/a'",
+    );
+    expect(captured?.recovery.length).toBeGreaterThan(0);
     expect(mockHardResetBranchToRef).not.toHaveBeenCalled();
   });
 
@@ -634,6 +661,10 @@ describe('sync', () => {
         { name: 'feat/b', parent: 'feat/a' },
         { name: 'feat/c', parent: 'feat/b' },
       ]),
+    );
+    // feat/c is up-to-date so it never enters the reconcile path
+    mockGetRefSha.mockImplementation(async (ref: string) =>
+      ref === 'feat/c' || ref === 'origin/feat/c' ? 'feat-c-sha' : `${ref}-sha`,
     );
     mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
       if (branch === 'feat/a') {
@@ -1203,6 +1234,77 @@ describe('sync', () => {
     expect(captured?.recovery).toEqual(
       expect.arrayContaining([
         expect.stringContaining('dub continue --ai'),
+        expect.stringContaining('dub continue'),
+        expect.stringContaining('dub abort'),
+      ]),
+    );
+  });
+
+  it('cancel-and-rollback during restack conflict restores to pre-restack branch even when prior cleanup ran (DUB-15)', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/c');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+        { name: 'feat/c', parent: 'feat/b' },
+      ]),
+    );
+    // Up-to-date branches so the reconcile prompt is never invoked.
+    mockGetRefSha.mockResolvedValue('same-sha');
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') {
+        return { state: 'MERGED', baseRefName: 'main' };
+      }
+      return { state: 'OPEN', baseRefName: 'main' };
+    });
+    mockRestack.mockResolvedValue({
+      status: 'conflict',
+      rebased: [],
+      conflictBranch: 'feat/c',
+    });
+    mockRestackConflictPrompt.mockResolvedValue('cancel');
+    mockRollbackRestack.mockResolvedValue({
+      branchesRestored: 3,
+      previousBranch: 'feat/c',
+    });
+    mockDetectActiveOperation.mockResolvedValue('none');
+
+    const result = await sync('/repo', { interactive: true, restack: true });
+
+    expect(mockRollbackRestack).toHaveBeenCalledWith('/repo');
+    expect(result.restacked).toBe(false);
+    // The final checkout must be the rollback target, NOT the
+    // resolvePreferredBranch result triggered by the merged-branch cleanup.
+    expect(mockCheckoutBranch).toHaveBeenLastCalledWith('feat/c', '/repo');
+  });
+
+  it('throws exit DubError when user picks "Exit and leave" (DUB-15)', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+    mockRestack.mockResolvedValue({
+      status: 'conflict',
+      rebased: [],
+      conflictBranch: 'feat/a',
+    });
+    mockRestackConflictPrompt.mockResolvedValue('exit');
+    mockDetectActiveOperation.mockResolvedValue('restack');
+
+    let captured: DubError | null = null;
+    try {
+      await sync('/repo', { interactive: true, restack: true });
+    } catch (error) {
+      captured = error as DubError;
+    }
+    expect(captured).toBeInstanceOf(DubError);
+    expect(captured?.message).toContain('Sync exited mid-conflict');
+    expect(captured?.recovery).toEqual(
+      expect.arrayContaining([
         expect.stringContaining('dub continue'),
         expect.stringContaining('dub abort'),
       ]),

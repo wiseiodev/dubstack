@@ -1,5 +1,6 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
+import chalk from 'chalk';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -29,6 +30,11 @@ import {
 } from '../lib/github';
 import { detectActiveOperation } from '../lib/operation-state';
 import {
+  resolveRestackConflictDecision,
+  restackConflictPrompt,
+} from '../lib/restack-conflict-prompt';
+import { rollbackRestack } from '../lib/restack-rollback';
+import {
   type Branch,
   findStackForBranch,
   readState,
@@ -37,6 +43,7 @@ import {
 import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
 import { buildCleanupPlan } from '../lib/sync/cleanup';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
+import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
 import type {
   BranchSyncOutcome,
@@ -159,6 +166,7 @@ export async function sync(
   let restoreTarget = originalBranch;
   let needsSubmitRefresh = false;
   let restackChanged = false;
+  let restackCancelled = false;
   const reparentedBranchNames = new Set<string>();
   const worktreeSkippedBranches = new Set<string>();
   const recordWorktreeSkip = (branch: string): boolean => {
@@ -584,23 +592,19 @@ export async function sync(
         branch,
         force: options.force,
         interactive: options.interactive,
-        promptChoice: () =>
-          choose(
-            `Branch '${branch}' diverged from remote. How should sync proceed?`,
-            [
-              {
-                label: 'Take remote version (discard local divergence)',
-                value: 'take-remote',
-              },
-              { label: 'Keep local version', value: 'keep-local' },
-              {
-                label: 'Attempt reconciliation and keep local commits',
-                value: 'reconcile',
-              },
-              { label: 'Skip this branch', value: 'skip' },
-            ],
-          ),
+        promptChoice: () => reconcilePrompt({ branch }),
       });
+
+      if (decision === 'abort') {
+        throw new DubError(
+          `Sync aborted by user while reconciling '${branch}'.`,
+          [
+            "Run 'dub sync' again to retry the reconcile flow.",
+            "Pass '--force --no-interactive' to take the remote version without prompting.",
+            "Pass '--force' alone if you want the prompt but a fallback take-remote on --no-interactive shells.",
+          ],
+        );
+      }
 
       if (decision === 'take-remote') {
         await hardResetBranchToRef(branch, remoteRef, cwd);
@@ -614,14 +618,7 @@ export async function sync(
           source: 'sync-adopt-remote',
           baseBranch: stateBranchMap.get(branch)?.parent ?? null,
         });
-      } else if (decision === 'keep-local') {
-        outcome = {
-          branch,
-          status: 'reconcile-needed',
-          action: 'kept-local',
-          message: `• Kept local '${branch}' (remote divergence ignored).`,
-        };
-      } else if (decision === 'reconcile') {
+      } else {
         const reconciled = await rebaseBranchOntoRef(branch, remoteRef, cwd);
         outcome = {
           branch,
@@ -638,15 +635,6 @@ export async function sync(
             baseBranch: stateBranchMap.get(branch)?.parent ?? null,
           });
         }
-      } else {
-        outcome = {
-          branch,
-          status: 'reconcile-needed',
-          action: 'skipped',
-          message: options.interactive
-            ? `⚠ Skipped '${branch}' by user choice.`
-            : `⚠ Skipped '${branch}' (diverged from remote; rerun with --force or interactive).`,
-        };
       }
       result.branches.push(outcome);
       printBranchOutcome(outcome);
@@ -669,8 +657,36 @@ export async function sync(
         await checkoutBranch(root, cwd);
         const restackResult = await restack(cwd);
         if (restackResult.status === 'conflict') {
+          const conflictBranch = restackResult.conflictBranch ?? 'unknown';
+          const conflictDecision = await resolveRestackConflictDecision({
+            branch: conflictBranch,
+            interactive: options.interactive,
+            promptChoice: (branchName) =>
+              restackConflictPrompt({ branch: branchName }),
+          });
+          if (conflictDecision === 'cancel') {
+            const rollback = await rollbackRestack(cwd);
+            console.log(
+              chalk.green(
+                `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+              ),
+            );
+            restoreTarget = rollback.previousBranch;
+            restackCancelled = true;
+            break;
+          }
+          if (conflictDecision === 'exit') {
+            throw new DubError(
+              `Sync exited mid-conflict on '${conflictBranch}'. The restack is paused in its current state.`,
+              [
+                "Run 'dub continue' once you have resolved the conflict to finish the restack.",
+                "Run 'dub continue --ai' to let DubStack attempt the resolution.",
+                "Run 'dub abort' to cancel and roll back to the pre-restack state.",
+              ],
+            );
+          }
           throw new DubError(
-            `Sync paused: conflict while restacking '${restackResult.conflictBranch ?? 'unknown'}'.`,
+            `Sync paused: conflict while restacking '${conflictBranch}'.`,
             [
               'Resolve conflicts and stage the resolved files.',
               "Run 'dub continue --ai' to let DubStack try the resolution.",
@@ -683,10 +699,13 @@ export async function sync(
           restackChanged = true;
         }
       }
-      result.restacked = true;
+      result.restacked = !restackCancelled;
     }
 
-    if (result.cleaned.length > 0 || needsSubmitRefresh || restackChanged) {
+    if (
+      !restackCancelled &&
+      (result.cleaned.length > 0 || needsSubmitRefresh || restackChanged)
+    ) {
       const preferredBranch = resolvePreferredBranch(
         scopeStacks,
         originalBranch,
