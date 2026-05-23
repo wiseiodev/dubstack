@@ -4,7 +4,10 @@ import { doctor } from '../commands/doctor';
 import { DubError } from './errors';
 import { getCurrentBranch, getRepoRoot } from './git';
 import { readHistory } from './history';
+import { sanitizeRemoteUrl } from './sanitize';
 import { type DubState, findStackForBranch, readState } from './state';
+
+export { sanitizeRemoteUrl };
 
 export type SupportBundleSourceName =
   | 'repo'
@@ -501,13 +504,4 @@ function sanitizeRemoteLine(line: string): string {
   const url = parts[1] ?? '';
   const suffix = parts.length > 2 ? ` ${parts.slice(2).join(' ')}` : '';
   return `${remote} ${sanitizeRemoteUrl(url)}${suffix}`;
-}
-
-export function sanitizeRemoteUrl(url: string): string {
-  return url
-    .replace(/(https?:\/\/)([^/\s@]+)@/gi, '$1[REDACTED]@')
-    .replace(
-      /([?&](?:token|access_token|auth|key|secret)=)[^&\s]+/gi,
-      '$1[REDACTED]',
-    );
 }

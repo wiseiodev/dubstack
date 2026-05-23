@@ -1,6 +1,6 @@
 import process from 'node:process';
 import cliProgress from 'cli-progress';
-import { sanitizeRemoteUrl } from './support-bundle';
+import { sanitizeRemoteUrl } from './sanitize';
 
 export interface Progress {
   start(label: string, total?: number): void;
@@ -71,11 +71,13 @@ function createTTYProgress(stream: NodeJS.WriteStream): Progress {
   let state: BarState | null = null;
   let paused = false;
 
-  const buildBar = (): cliProgress.SingleBar =>
+  const buildBar = (indeterminate: boolean): cliProgress.SingleBar =>
     new cliProgress.SingleBar(
       {
         stream,
-        format: '{label} [{bar}] {value}/{total} {detail}',
+        format: indeterminate
+          ? '{label} {value} {detail}'
+          : '{label} [{bar}] {value}/{total} {detail}',
         clearOnComplete: false,
         hideCursor: true,
       },
@@ -83,8 +85,12 @@ function createTTYProgress(stream: NodeJS.WriteStream): Progress {
     );
 
   const startBarFromState = (next: BarState) => {
-    bar = buildBar();
-    bar.start(next.total, next.current, {
+    const indeterminate = next.total <= 0;
+    bar = buildBar(indeterminate);
+    // cli-progress requires total > 0 to render a bar; for indeterminate mode
+    // we still pass a positive total to keep the renderer happy and only show
+    // the value/label/detail in the format string.
+    bar.start(indeterminate ? 1 : next.total, next.current, {
       label: next.label,
       detail: next.detail ?? '',
     });

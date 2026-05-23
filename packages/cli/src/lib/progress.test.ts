@@ -141,6 +141,24 @@ describe('createProgress', () => {
     expect(getActiveProgress()).toBeNull();
   });
 
+  it('uses an indeterminate format when total is omitted', () => {
+    const stream = createFakeStream(true);
+    const progress = createProgress({
+      stream: stream as unknown as NodeJS.WriteStream,
+      isTTY: true,
+      ci: false,
+    });
+
+    progress.start('scanning');
+    progress.update('scanning', 3, 'feat/c');
+    progress.complete('scanning');
+
+    const combined = stream.writes.join('');
+    expect(combined).toContain('scanning');
+    // Indeterminate mode should never render the "{value}/{total}" pair as 0/0
+    expect(combined).not.toMatch(/\b0\/0\b/);
+  });
+
   it('pause is a no-op when already paused or not started', () => {
     const stream = createFakeStream(true);
     const progress = createProgress({
