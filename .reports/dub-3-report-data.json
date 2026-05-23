@@ -1,0 +1,262 @@
+{
+  "meta": {
+    "workId": "DUB-3",
+    "title": "lib/progress.ts TTY-aware progress wrapper + --verbose flag",
+    "artifactId": "dub-3",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-3-libprogressts-tty-aware-progress-wrapper-verbose-flag",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-3",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 6,
+    "additions": 493,
+    "deletions": 1,
+    "diffStat": "6 files changed, 493 insertions(+), 1 deletion(-)"
+  },
+  "prompt": "Foundation slice for Tier 0 sync magic: ship a TTY-aware progress wrapper and a global --verbose flag so future sync/submit/restack work can render bars in real terminals, stay silent in CI, and optionally print every git/gh subprocess it runs.",
+  "tldr": "New lib/progress.ts exports a Progress interface + createProgress() factory backed by cli-progress in TTYs and a no-op in CI/non-TTY. A global --verbose flag on the commander root is plumbed via preAction into a module-level flag, and logVerboseCommand prints the next subprocess (sanitized of basic-auth and token query params) while pausing the active bar so it redraws cleanly.",
+  "why": {
+    "motivation": [
+      "Tier 0 sync/submit/restack work needs a progress UI that survives CI logs.",
+      "Operators currently can't see which git/gh subprocess a command is about to run, which makes hangs and rate-limit failures hard to triage.",
+      "The wrapper has to land before any command consumes it so each consumer can be a focused diff."
+    ],
+    "before": [
+      "No shared progress primitive — each command logs ad-hoc lines.",
+      "No way to trace subprocess invocations from the CLI without re-running under DEBUG/strace.",
+      "Secret-bearing URLs would leak into logs if added naïvely."
+    ],
+    "after": [
+      "createProgress() returns a TTY-aware bar or a no-op based on isTTY + CI detection.",
+      "dub --verbose <cmd> sets a process-level flag any wrapped subprocess call can read.",
+      "logVerboseCommand sanitizes URLs through support-bundle.ts:sanitizeRemoteUrl and pauses/resumes the active bar around each printed line."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/progress.ts",
+      "changeType": "new",
+      "additions": 178,
+      "deletions": 0,
+      "explanation": "New file. Exports the Progress interface from the spec, a createProgress() factory that returns a cli-progress-backed bar in TTYs or a no-op when isTTY is false or CI is detected, and a verbose-mode helper (setVerbose / isVerbose / logVerboseCommand / formatVerboseCommandLine) that prints the next subprocess sanitized of basic-auth and token query parameters. pause()/resume() drive cli-progress' SingleBar by stopping and re-instantiating with the last state.",
+      "snippet": "export function createProgress(options: ProgressOptions = {}): Progress {\n  const stream = options.stream ?? process.stderr;\n  const isTTY = options.isTTY ?? Boolean(stream.isTTY);\n  const ci = options.ci ?? isCIEnvironment();\n  if (!isTTY || ci) return createNoopProgress();\n  return createTTYProgress(stream);\n}",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/progress.test.ts",
+      "changeType": "new",
+      "additions": 285,
+      "deletions": 0,
+      "explanation": "14 unit tests covering: no-op behavior in non-TTY and CI, TTY rendering + activeProgress registration, pause/resume semantics (including update-during-pause being silent and resume re-rendering), double-pause/resume no-ops, the global verbose flag toggle, no-op when verbose is off, sanitization of basic-auth credentials and token query params, pause/resume around the printed command line when a progress is supplied, fallback to activeProgress when no progress is passed, and formatVerboseCommandLine edge cases.",
+      "snippet": "it('pause clears output and resume resumes rendering', () => {\n  // ...\n  progress.pause();\n  const writesAfterPause = stream.writes.length;\n  progress.update('pushing', 3, 'feat/b');\n  expect(stream.writes.length).toBe(writesAfterPause);\n  progress.resume();\n  expect(stream.writes.length).toBeGreaterThan(writesAfterPause);\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 6,
+      "deletions": 0,
+      "explanation": "Adds the global --verbose option to the program root and a preAction hook line that pushes program.opts().verbose into setVerbose() before each command runs. Reads from program.opts() directly (not optsWithGlobals on the subcommand) so the modify command's existing -v/--verbose numeric counter does not shadow the global boolean.",
+      "snippet": "program.hook('preAction', () => {\n  setVerbose(Boolean(program.opts().verbose));\n  beginHistoryCapture();\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/support-bundle.ts",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 1,
+      "explanation": "Adds the export keyword to sanitizeRemoteUrl so the new progress wrapper can reuse it as the acceptance criterion requires. No behavior change.",
+      "snippet": "export function sanitizeRemoteUrl(url: string): string {",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/package.json",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 0,
+      "explanation": "Adds cli-progress (runtime) and @types/cli-progress (dev) per the issue's recommended library choice. cli-progress is small, mature, has no React tree, and matches the start/update/stop semantics the spec implies.",
+      "snippet": "\"cli-progress\": \"^3.12.0\",",
+      "snippetLanguage": "json",
+      "open": false
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "changeType": "mod",
+      "additions": 21,
+      "deletions": 0,
+      "explanation": "Lockfile entries for cli-progress and @types/cli-progress.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Pause/resume state machine in createTTYProgress",
+      "location": "packages/cli/src/lib/progress.ts:74-138",
+      "rationale": "cli-progress' SingleBar does not expose pause/resume natively, so pause() stops and nulls the bar while resume() rebuilds from the cached BarState. Verify there's no path where state becomes inconsistent: complete-while-paused, double-pause, resume-without-pause, start-twice, update-without-start."
+    },
+    {
+      "title": "Global --verbose vs. modify command's local -v/--verbose counter",
+      "location": "packages/cli/src/index.ts:96-100, 1289-1294, 1467-1470",
+      "rationale": "modify has a pre-existing -v/--verbose option that is a numeric counter for diff display. The preAction hook intentionally reads program.opts().verbose (not the subcommand opts) so the modify counter does not shadow the boolean. Confirm the global flag is reachable as dub --verbose <cmd>, and document the limitation that dub modify -v does not enable subprocess tracing."
+    },
+    {
+      "title": "Secret sanitization scope of formatVerboseCommandLine",
+      "location": "packages/cli/src/lib/progress.ts:161-178, packages/cli/src/lib/support-bundle.ts:506-513",
+      "rationale": "Reuses sanitizeRemoteUrl which redacts basic-auth and the {token,access_token,auth,key,secret} query keys. URL detection is limited to https:// / http:// — SSH URLs are passed through unmodified (sanitizer is a no-op for them). Less common token names (oauth_token, bearer, apikey) are not sanitized; this matches the existing support-bundle contract."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "progress.test.ts — 14 tests",
+      "status": "done",
+      "evidence": "pnpm test -- progress: 14/14 passed; covers TTY/CI branching, pause/resume, verbose toggle, sanitization, activeProgress fallback"
+    },
+    {
+      "kind": "build",
+      "label": "tsup build of @dubstack/cli",
+      "status": "done",
+      "evidence": "tsup ESM build success (dist/index.js 310.22 KB)"
+    },
+    {
+      "kind": "manual",
+      "label": "dub --help shows --verbose at root",
+      "status": "done",
+      "evidence": "node packages/cli/dist/index.js --help lists --verbose with the documented description"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "biome (lint + format)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 190 files in 48ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo run typecheck: dubstack:typecheck OK, docs:typecheck cache hit"
+    },
+    {
+      "name": "unit tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "69 test files, 513 tests passed in 6.69s"
+    },
+    {
+      "name": "evals",
+      "command": "pnpm evals",
+      "status": "not_available",
+      "evidence": "Pre-existing better-sqlite3 NODE_MODULE_VERSION mismatch (127 vs 137) blocks local evals run. AGENTS.md only requires evals when AI metadata/prompts change; this PR touches neither."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files touched. The change is a pure CLI library + a commander option declaration; there are no consumers in this PR (foundation slice), so terminal recording would not demonstrate the new behavior.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-3-qa.md",
+    "caption": "Deterministic proof via unit suite (14 progress.test.ts tests, all green), whole-repo gates (lint/typecheck/513 tests), CLI help end-to-end check, and an independent adversarial review whose two findings were both fixed.",
+    "scenarios": [
+      "createProgress in non-TTY returns a no-op (no stream writes)",
+      "createProgress in CI returns a no-op even when isTTY is true",
+      "createProgress in a TTY writes to the stream and registers activeProgress; complete() clears it",
+      "pause() stops rendering; update() during pause is silent; resume() re-renders the bar",
+      "setVerbose toggles isVerbose; logVerboseCommand is silent when verbose is off",
+      "logVerboseCommand sanitizes https://user:secret@host into [REDACTED]@host and redacts token=… query params",
+      "logVerboseCommand pauses + resumes the supplied progress around the printed line",
+      "logVerboseCommand falls back to the global activeProgress when none is supplied"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "packages/cli/src/lib/progress.ts exports a Progress interface and createProgress() factory",
+      "status": "satisfied",
+      "evidence": "progress.ts:5-49 declares Progress and createProgress; both are re-exported from lib"
+    },
+    {
+      "criterion": "TTY detection: full UI in TTY, no-op in CI",
+      "status": "satisfied",
+      "evidence": "progress.ts:51-59 branches on isTTY + isCIEnvironment; covered by two no-op tests and one TTY-render test"
+    },
+    {
+      "criterion": "--verbose flag plumbed through commander.js root so it's available to every command",
+      "status": "satisfied",
+      "evidence": "index.ts:96-100 declares --verbose on program; index.ts:1467-1470 preAction copies into setVerbose; help text confirms presence at the root"
+    },
+    {
+      "criterion": "Verbose mode integrates with progress (pauses bar while printing command lines)",
+      "status": "satisfied",
+      "evidence": "logVerboseCommand calls progress.pause() before writing and progress.resume() after; falls back to activeProgress; covered by 'pauses and resumes' and 'falls back to active progress' tests"
+    },
+    {
+      "criterion": "Sanitization of secrets in printed URLs (reuse support-bundle.ts:sanitizeRemoteUrl)",
+      "status": "satisfied",
+      "evidence": "support-bundle.ts:506 now exports sanitizeRemoteUrl; formatVerboseCommandLine imports and applies it; covered by two sanitization tests and one no-op-for-non-URL test"
+    },
+    {
+      "criterion": "Unit tests: TTY vs non-TTY, verbose flag propagation, pause/resume semantics",
+      "status": "satisfied",
+      "evidence": "progress.test.ts: 14 tests across three describe blocks covering exactly these areas; all passing"
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Fixed: looksLikeUrl no longer routes git@ SSH URLs into sanitizeRemoteUrl (it's a no-op for them — removing the branch eliminates a false promise).",
+      "Fixed: 'logVerboseCommand falls back to active progress' test now actually exercises the activeProgress global fallback path (previously passed progress explicitly, contradicting the test name).",
+      "Accepted as out-of-scope: dub modify -v continues to be a numeric counter for diff display, not subprocess tracing. The global flag is reachable as dub --verbose <subcommand>; unifying short-flag semantics is a separate UX change."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "cli-progress",
+      "status": "added (runtime, ^3.12.0) — recommended in the issue body"
+    },
+    {
+      "name": "@types/cli-progress",
+      "status": "added (dev, ^3.11.6)"
+    },
+    {
+      "name": "support-bundle.ts:sanitizeRemoteUrl",
+      "status": "now exported (one-line change, no behavior change)"
+    }
+  ],
+  "rollout": {
+    "summary": "Library-only change with no command consumers; safe to merge and ship in the next release without coordinated rollout.",
+    "steps": [
+      {
+        "when": "On merge to main",
+        "label": "No-op for existing commands",
+        "details": "createProgress is not yet called from any command and --verbose is a passive flag, so behavior of every existing command is unchanged."
+      },
+      {
+        "when": "Next slice",
+        "label": "Wire into sync/submit/restack",
+        "details": "Subsequent issue should call createProgress() at the entry of each long-running command and route the execa/git/gh wrappers through logVerboseCommand so --verbose produces visible subprocess traces."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "19646080118ce939d3b1cc20d1e60bfccc855529",
+    "shortSha": "1964608",
+    "message": "feat(cli): add tty-aware progress wrapper and --verbose global flag"
+  }
+}

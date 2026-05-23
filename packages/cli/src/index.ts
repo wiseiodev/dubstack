@@ -70,6 +70,7 @@ import {
   sanitizeCommandArgs,
 } from './lib/history';
 import { detectActiveOperation } from './lib/operation-state';
+import { setVerbose } from './lib/progress';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -89,6 +90,10 @@ program
   .name('dub')
   .description('Manage stacked diffs (dependent git branches) with ease')
   .version(version)
+  .option(
+    '--verbose',
+    'Print each git/gh subprocess before running (sanitized of secrets)',
+  )
   .addHelpText(
     'after',
     `
@@ -1459,6 +1464,7 @@ let invocationMetadata: ShortcutMetadata & {
 } = {};
 
 program.hook('preAction', () => {
+  setVerbose(Boolean(program.opts().verbose));
   beginHistoryCapture();
 });
 
