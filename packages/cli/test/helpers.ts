@@ -57,3 +57,31 @@ export async function gitInRepo(
 ): Promise<{ stdout: string; stderr: string }> {
   return execa('git', args, { cwd: dir, env: GIT_TEST_ENV });
 }
+
+/**
+ * Creates an isolated bare repository to use as a remote for the given
+ * local repo. Configures it as `origin`. Returns the bare-repo path and a
+ * cleanup function.
+ */
+export async function attachBareRemote(localDir: string): Promise<{
+  remoteDir: string;
+  cleanup: () => Promise<void>;
+}> {
+  const remoteDir = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), 'dubstack-test-remote-'),
+  );
+  await execa('git', ['init', '-b', 'main', '--bare'], {
+    cwd: remoteDir,
+    env: GIT_TEST_ENV,
+  });
+  await execa('git', ['remote', 'add', 'origin', remoteDir], {
+    cwd: localDir,
+    env: GIT_TEST_ENV,
+  });
+  return {
+    remoteDir,
+    cleanup: async () => {
+      await fs.promises.rm(remoteDir, { recursive: true, force: true });
+    },
+  };
+}

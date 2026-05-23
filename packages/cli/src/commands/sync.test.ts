@@ -5,6 +5,7 @@ vi.mock('../lib/git.js', () => ({
   branchExists: vi.fn(),
   checkoutBranch: vi.fn(),
   checkoutRemoteBranch: vi.fn(),
+  clearStaleNamespacedFetchRefs: vi.fn(),
   deleteBranch: vi.fn(),
   fastForwardBranchToRef: vi.fn(),
   fetchBranches: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('../lib/git.js', () => ({
   getRefSha: vi.fn(),
   hardResetBranchToRef: vi.fn(),
   isAncestor: vi.fn(),
+  pruneRemote: vi.fn(),
   remoteBranchExists: vi.fn(),
 }));
 
@@ -45,6 +47,7 @@ import {
   branchExists,
   checkoutBranch,
   checkoutRemoteBranch,
+  clearStaleNamespacedFetchRefs,
   deleteBranch,
   fastForwardBranchToRef,
   fetchBranches,
@@ -52,6 +55,7 @@ import {
   getRefSha,
   hardResetBranchToRef,
   isAncestor,
+  pruneRemote,
   remoteBranchExists,
 } from '../lib/git';
 import {
@@ -84,6 +88,9 @@ const mockFastForwardBranchToRef = fastForwardBranchToRef as ReturnType<
   typeof vi.fn
 >;
 const mockFetchBranches = fetchBranches as ReturnType<typeof vi.fn>;
+const mockClearStaleNamespacedFetchRefs =
+  clearStaleNamespacedFetchRefs as ReturnType<typeof vi.fn>;
+const mockPruneRemote = pruneRemote as ReturnType<typeof vi.fn>;
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 const mockGetRefSha = getRefSha as ReturnType<typeof vi.fn>;
 const mockHardResetBranchToRef = hardResetBranchToRef as ReturnType<
@@ -142,6 +149,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetCurrentBranch.mockResolvedValue('feat/a');
   mockFetchBranches.mockResolvedValue(undefined);
+  mockClearStaleNamespacedFetchRefs.mockResolvedValue([]);
+  mockPruneRemote.mockResolvedValue(undefined);
   mockFastForwardBranchToRef.mockResolvedValue(true);
   mockBranchExists.mockResolvedValue(true);
   mockRemoteBranchExists.mockResolvedValue(true);
@@ -203,6 +212,49 @@ describe('sync', () => {
     expect(result.fetched).toEqual(['main', 'feat/a']);
     expect(result.branches[0].status).toBe('up-to-date');
     expect(mockRestack).not.toHaveBeenCalled();
+  });
+
+  it('clears stale namespaced fetch refs and prunes remote once before trunk pull', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const callOrder: string[] = [];
+    mockClearStaleNamespacedFetchRefs.mockImplementation(async () => {
+      callOrder.push('clearStale');
+      return [];
+    });
+    mockFetchBranches.mockImplementation(async () => {
+      callOrder.push('fetch');
+    });
+    mockPruneRemote.mockImplementation(async () => {
+      callOrder.push('prune');
+    });
+    mockFastForwardBranchToRef.mockImplementation(async (branch: string) => {
+      callOrder.push(`ff:${branch}`);
+      return true;
+    });
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    expect(mockClearStaleNamespacedFetchRefs).toHaveBeenCalledTimes(1);
+    const [keepArg] = mockClearStaleNamespacedFetchRefs.mock.calls[0];
+    expect([...(keepArg as Set<string>)].sort()).toEqual(
+      ['feat/a', 'feat/b', 'main'].sort(),
+    );
+    expect(mockPruneRemote).toHaveBeenCalledTimes(1);
+    expect(mockPruneRemote).toHaveBeenCalledWith('origin', '/repo');
+    expect(callOrder.indexOf('clearStale')).toBeLessThan(
+      callOrder.indexOf('fetch'),
+    );
+    expect(callOrder.indexOf('prune')).toBeLessThan(
+      callOrder.indexOf('ff:main'),
+    );
   });
 
   it('restacks by default', async () => {
