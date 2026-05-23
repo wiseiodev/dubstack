@@ -662,7 +662,7 @@ export async function sync(
               );
         const errorOutcome: BranchSyncOutcome = {
           branch,
-          status: 'reconcile-needed',
+          status: 'error',
           action: 'error',
           message: dubErr.message,
           recovery: dubErr.recovery,

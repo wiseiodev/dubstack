@@ -29,15 +29,20 @@ export function printSyncSummary(result: SyncResult): void {
   ).length;
   const worktreeSuffix =
     worktreeSkipped > 0 ? ` (${worktreeSkipped} checked-out-elsewhere)` : '';
-  console.log(
-    `✔ Sync complete: ${synced} synced, ${keptLocal} kept-local, ${skipped} skipped${worktreeSuffix}, ${result.cleaned.length} cleaned, ${errored.length} errored`,
-  );
+  const counts = `${synced} synced, ${keptLocal} kept-local, ${skipped} skipped${worktreeSuffix}, ${result.cleaned.length} cleaned, ${errored.length} errored`;
   if (errored.length > 0) {
+    console.error(chalk.yellow(`⚠ Sync completed with errors: ${counts}`));
     console.error(
       chalk.red(`✖ ${errored.length} branch(es) hit unexpected errors:`),
     );
     for (const outcome of errored) {
-      console.error(chalk.red(`  • ${outcome.branch}: ${outcome.message}`));
+      const [firstLine, ...rest] = outcome.message.split('\n');
+      console.error(chalk.red(`  • ${outcome.branch}: ${firstLine}`));
+      for (const line of rest) {
+        console.error(chalk.red(`      ${line}`));
+      }
     }
+    return;
   }
+  console.log(`✔ Sync complete: ${counts}`);
 }

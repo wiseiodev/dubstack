@@ -8,7 +8,8 @@ export type BranchSyncStatus =
   | 'needs-remote-sync-safe'
   | 'needs-remote-sync'
   | 'reconcile-needed'
-  | 'local-ahead';
+  | 'local-ahead'
+  | 'error';
 
 export interface SyncOptions {
   force: boolean;
