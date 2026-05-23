@@ -691,7 +691,23 @@ export async function listBranches(cwd: string): Promise<string[]> {
 }
 
 /**
- * Fetches the provided branches from the remote.
+ * Git ref namespace where DubStack writes fetched branch tips so that
+ * user-managed `FETCH_HEAD` is never clobbered by sync operations.
+ */
+export const DUBSTACK_FETCH_REF_PREFIX = 'refs/dubstack/fetch-head/';
+
+/**
+ * Returns the namespaced fetch ref for the given branch.
+ */
+export function namespacedFetchRef(branch: string): string {
+  return `${DUBSTACK_FETCH_REF_PREFIX}${branch}`;
+}
+
+/**
+ * Fetches the provided branches from the remote into a namespaced ref
+ * (`refs/dubstack/fetch-head/<branch>`) so that the user's own `FETCH_HEAD`
+ * is left untouched. Also passes `--no-tags` to cut network cost on repos
+ * with many release tags.
  */
 export async function fetchBranches(
   branches: string[],
@@ -700,8 +716,13 @@ export async function fetchBranches(
 ): Promise<void> {
   if (branches.length === 0) return;
   for (const branch of branches) {
+    const refspec = `${branch}:${namespacedFetchRef(branch)}`;
     try {
-      await execa('git', ['fetch', remote, branch], { cwd });
+      await execa(
+        'git',
+        ['fetch', '--no-write-fetch-head', '--no-tags', '-f', remote, refspec],
+        { cwd },
+      );
     } catch (error: unknown) {
       const stderr =
         typeof (error as { stderr?: unknown })?.stderr === 'string'
@@ -720,6 +741,72 @@ export async function fetchBranches(
         `Run 'git remote -v' to verify '${remote}' is configured correctly.`,
       ]);
     }
+  }
+}
+
+/**
+ * Lists every ref under `refs/dubstack/fetch-head/`.
+ * Returns full ref names (e.g. `refs/dubstack/fetch-head/feat/a`).
+ */
+export async function listNamespacedFetchRefs(cwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['for-each-ref', '--format=%(refname)', DUBSTACK_FETCH_REF_PREFIX],
+      { cwd },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Deletes a single git ref. Silently no-ops if the ref does not exist.
+ */
+export async function deleteRef(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['update-ref', '-d', ref], { cwd });
+  } catch {
+    // ref may already be gone; nothing to do.
+  }
+}
+
+/**
+ * Walks `refs/dubstack/fetch-head/*` and deletes any ref whose source branch
+ * is not in `keepBranches`. Returns the deleted ref names.
+ */
+export async function clearStaleNamespacedFetchRefs(
+  keepBranches: Iterable<string>,
+  cwd: string,
+): Promise<string[]> {
+  const keep = new Set(keepBranches);
+  const refs = await listNamespacedFetchRefs(cwd);
+  const deleted: string[] = [];
+  for (const ref of refs) {
+    const branch = ref.slice(DUBSTACK_FETCH_REF_PREFIX.length);
+    if (!keep.has(branch)) {
+      await deleteRef(ref, cwd);
+      deleted.push(ref);
+    }
+  }
+  return deleted;
+}
+
+/**
+ * Runs `git remote prune <remote>` to clear deleted-remote-branch ghost refs.
+ */
+export async function pruneRemote(remote: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['remote', 'prune', remote], { cwd });
+  } catch {
+    throw new DubError(`Failed to prune remote '${remote}'.`, [
+      `Run 'git remote prune ${remote}' manually to inspect the underlying error.`,
+      `Run 'git remote -v' to verify '${remote}' is configured correctly.`,
+    ]);
   }
 }
 

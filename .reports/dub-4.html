@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-4 - Namespaced fetch refs + --no-tags + git remote prune</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-4</div>
+        <h1>DUB-4 - Namespaced fetch refs + --no-tags + git remote prune</h1>
+        <div class="meta"><span><strong>5</strong> files</span>
+<span><span class="add">+305</span> / <span class="del">-3</span></span>
+<span>branch <strong>feature/dub-4-namespaced-fetch-refs-no-tags-git-remote-prune</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Adopt Graphite&#39;s fetch discipline so `dub sync` no longer clobbers the user&#39;s `git fetch` state: write fetched branch tips to a `refs/dubstack/fetch-head/&lt;branch&gt;` namespace, pass `--no-write-fetch-head --no-tags`, and `git remote prune origin` between fetch and trunk pull.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>`dub sync` now leaves the user&#39;s `FETCH_HEAD` untouched, skips tag transfer, and clears deleted-remote-branch ghost refs before fast-forwarding trunk. Fetched tips land in a private `refs/dubstack/fetch-head/&lt;branch&gt;` namespace; the same opportunistic update keeps `origin/&lt;branch&gt;` current for downstream sync logic.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Users running `git fetch` manually expect `FETCH_HEAD` to reflect THEIR last fetch, not DubStack&#39;s background sync.</p>
+<p class="lede">On repos with many release tags, `git fetch origin &lt;branch&gt;` pulls every reachable tag, which is wasted bandwidth. `--no-tags` matches Graphite&#39;s v1.6.2 optimization.</p>
+<p class="lede">Stale `refs/remotes/origin/&lt;branch&gt;` ghost refs from deleted-remote branches confuse trunk fast-forward and the cleanup heuristics.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`fetchBranches` ran `git fetch &lt;remote&gt; &lt;branch&gt;`, which writes `FETCH_HEAD` and pulls all reachable tags.</li>
+<li>Sync never pruned the remote, so branches deleted on origin still appeared via stale tracking refs.</li>
+<li>No private fetch namespace existed; nothing to clean up at sync start.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`fetchBranches` runs `git fetch --no-write-fetch-head --no-tags -f origin &lt;branch&gt;:refs/dubstack/fetch-head/&lt;branch&gt;`, leaving FETCH_HEAD alone and skipping tags.</li>
+<li>Sync calls `clearStaleNamespacedFetchRefs` at the top of the run, deleting any `refs/dubstack/fetch-head/*` entry whose source branch is no longer tracked in DubStack state.</li>
+<li>Sync calls `git remote prune origin` once between fetch and trunk fast-forward.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+89</span> <span class="del">-2</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Exports the `DUBSTACK_FETCH_REF_PREFIX` constant + `namespacedFetchRef` helper. Rewrites `fetchBranches` to use the namespaced refspec with `--no-write-fetch-head --no-tags -f`. Adds `listNamespacedFetchRefs`, `deleteRef`, `clearStaleNamespacedFetchRefs`, and `pruneRemote` so `sync` can drive the namespace cleanup and remote prune.</p>
+    <div class="code"><pre>export const DUBSTACK_FETCH_REF_PREFIX = &#39;refs/dubstack/fetch-head/&#39;;
+
+export async function fetchBranches(branches, cwd, remote = &#39;origin&#39;) {
+  if (branches.length === 0) return;
+  for (const branch of branches) {
+    const refspec = `${branch}:${namespacedFetchRef(branch)}`;
+    await execa(&#39;git&#39;, [&#39;fetch&#39;, &#39;--no-write-fetch-head&#39;, &#39;--no-tags&#39;, &#39;-f&#39;, remote, refspec], { cwd });
+  }
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+9</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Imports the two new git helpers. Computes the keep-set from the full state (`state.stacks`, not just the scoped stacks) so a partial `dub sync` never deletes namespaced refs that belong to other tracked stacks. Calls `clearStaleNamespacedFetchRefs` at the top of the `try` block, then `pruneRemote(&#39;origin&#39;, cwd)` after `fetchBranches` and before the trunk fast-forward loop.</p>
+    <div class="code"><pre>const allTrackedBranches = new Set(
+  state.stacks.flatMap((s) =&gt; s.branches.map((b) =&gt; b.name)),
+);
+await clearStaleNamespacedFetchRefs(allTrackedBranches, cwd);
+
+console.log(&#39;🌲 Fetching branches from remote...&#39;);
+const toFetch = [...new Set([...roots, ...stackBranches])];
+if (toFetch.length &gt; 0) {
+  await fetchBranches(toFetch, cwd);
+  result.fetched = toFetch;
+}
+
+await pruneRemote(&#39;origin&#39;, cwd);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+127</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Real-git integration tests for the four behaviors: namespaced ref written, FETCH_HEAD untouched, no tags fetched, missing remote refs skipped. Plus unit-style coverage for `clearStaleNamespacedFetchRefs` (delete-only-stale) and `pruneRemote` (happy path + bad-remote DubError).</p>
+    <div class="code"><pre>it(&#39;leaves the user FETCH_HEAD untouched (--no-write-fetch-head)&#39;, async () =&gt; {
+  const fetchHeadPath = path.join(dir, &#39;.git&#39;, &#39;FETCH_HEAD&#39;);
+  const manualContent = &#39;sentinel value written by user\n&#39;;
+  fs.writeFileSync(fetchHeadPath, manualContent);
+  await fetchBranches([&#39;feat/a&#39;], dir);
+  expect(fs.readFileSync(fetchHeadPath, &#39;utf8&#39;)).toBe(manualContent);
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+52</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Mocks the two new git helpers and adds an ordering test that asserts `clearStale → fetch → prune → trunk fast-forward` and that the keep-set passed to `clearStaleNamespacedFetchRefs` is the full state, not just the scoped stacks.</p>
+    <div class="code"><pre>expect(callOrder.indexOf(&#39;clearStale&#39;)).toBeLessThan(callOrder.indexOf(&#39;fetch&#39;));
+expect(callOrder.indexOf(&#39;prune&#39;)).toBeLessThan(callOrder.indexOf(&#39;ff:main&#39;));</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/test/helpers.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+28</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `attachBareRemote(localDir)` helper that creates a bare repo in tmp and configures it as `origin` on the given local repo, so git.test.ts can drive real fetches end-to-end.</p>
+    <div class="code"><pre>export async function attachBareRemote(localDir) {
+  const remoteDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), &#39;dubstack-test-remote-&#39;));
+  await execa(&#39;git&#39;, [&#39;init&#39;, &#39;-b&#39;, &#39;main&#39;, &#39;--bare&#39;], { cwd: remoteDir, env: GIT_TEST_ENV });
+  await execa(&#39;git&#39;, [&#39;remote&#39;, &#39;add&#39;, &#39;origin&#39;, remoteDir], { cwd: localDir, env: GIT_TEST_ENV });
+  return { remoteDir, cleanup: async () =&gt; fs.promises.rm(remoteDir, { recursive: true, force: true }) };
+}</pre></div>
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Opportunistic origin/&lt;branch&gt; updates are still relied on</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts:175,270 + packages/cli/src/lib/git.ts:fetchBranches</code> Downstream sync logic (`fastForwardBranchToRef`, `hardResetBranchToRef`, `remoteBranchExists`, `isAncestor`) still reads `origin/&lt;branch&gt;` rather than the new namespaced ref. This is intentional and safe — when the explicit refspec `&lt;branch&gt;:refs/dubstack/fetch-head/&lt;branch&gt;` is given, git still opportunistically updates `refs/remotes/origin/&lt;branch&gt;` via the configured `+refs/heads/*:refs/remotes/origin/*` refspec. Verified manually in a scratch repo. Worth a careful eye in review.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Keep-set for stale-ref cleanup uses full state, not scoped stacks</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts:158-163</code> `clearStaleNamespacedFetchRefs(allTrackedBranches, cwd)` deliberately uses `state.stacks` (every tracked stack), not `scopeStacks`, so a single-stack `dub sync` never deletes namespaced refs belonging to other stacks the user is still tracking. Confirm this matches expected semantics.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Prune ordering vs. fetch</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts after fetchBranches call</code> `git remote prune origin` runs AFTER `fetchBranches`. The fetch creates/updates namespaced refs and opportunistically refreshes `origin/&lt;branch&gt;`; the subsequent prune only removes `refs/remotes/origin/&lt;branch&gt;` entries that have no counterpart on the remote. This is safe because the just-fetched refs reference branches that DO exist on origin and won&#39;t be pruned.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">fetchBranches writes namespaced ref + leaves FETCH_HEAD alone + skips tags + skips missing remote refs</div>
+      <div class="note">src/lib/git.test.ts `describe(&#39;fetchBranches&#39;)` — four real-git tests against a bare remote.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">clearStaleNamespacedFetchRefs deletes only refs whose source branch is not in the keep set</div>
+      <div class="note">src/lib/git.test.ts `describe(&#39;clearStaleNamespacedFetchRefs&#39;)` — two tests.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pruneRemote happy path and bad-remote DubError</div>
+      <div class="note">src/lib/git.test.ts `describe(&#39;pruneRemote&#39;)` — two tests.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">sync orders clearStale → fetch → prune → trunk fast-forward and passes the full tracked-branch set as keep</div>
+      <div class="note">src/commands/sync.test.ts `clears stale namespaced fetch refs and prunes remote once before trunk pull`.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Confirmed in scratch repo that explicit refspec still opportunistically updates refs/remotes/origin/*</div>
+      <div class="note">/tmp scratch repos: fetched with the new refspec, observed both `refs/dubstack/fetch-head/feature` and `refs/remotes/origin/feature` updated by a single `git fetch` call.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">biome check</div>
+      <div class="note">Command: pnpm checks. Checked 188 files in 28ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">typecheck</div>
+      <div class="note">Command: pnpm typecheck. turbo: 2 successful, 2 total. dubstack:typecheck and docs:typecheck both clean.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">unit tests</div>
+      <div class="note">Command: pnpm test. Test Files: 68 passed (68). Tests: 508 passed (508). Includes 41 in src/lib/git.test.ts (with the new behaviors) and the expanded src/commands/sync.test.ts.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">evals</div>
+      <div class="note">Command: pnpm evals. Pre-existing `better-sqlite3` NODE_MODULE_VERSION mismatch in local node_modules. Unrelated to this change; this PR does not touch AI metadata or prompts, so per AGENTS.md evals are not required.</div>
+    </div>
+    <span class="status not-available">not_available</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Deterministic proof via test logs and manual scratch-repo verification of opportunistic ref updates.</div>
+      <div class="note">Pure backend change to a CLI tool. No .tsx file changed; no browser-demoable surface.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-4-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Fetch a moved remote branch and assert the namespaced ref equals the remote tip.</li>
+<li>Pre-write a sentinel to .git/FETCH_HEAD, fetch, assert the sentinel is byte-identical.</li>
+<li>Push a tag to remote, fetch, assert `git tag -l` is empty locally.</li>
+<li>Create stale and live entries under refs/dubstack/fetch-head/, run cleanup, assert only the stale one is deleted.</li>
+<li>Sync ordering: clearStale → fetch → prune → trunk fast-forward, with the full tracked-branch set as keep.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">fetchBranches in lib/git.ts uses namespaced refs and the flag set above</div>
+      <div class="note">packages/cli/src/lib/git.ts fetchBranches now runs `git fetch --no-write-fetch-head --no-tags -f origin &lt;branch&gt;:refs/dubstack/fetch-head/&lt;branch&gt;`. Covered by `src/lib/git.test.ts &#39;writes fetched tip to refs/dubstack/fetch-head/&lt;branch&gt;&#39;`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Sync calls git remote prune once before trunk pull</div>
+      <div class="note">packages/cli/src/commands/sync.ts calls `pruneRemote(&#39;origin&#39;, cwd)` between `fetchBranches` and the `for (const root of roots)` trunk fast-forward loop. Ordering asserted in `src/commands/sync.test.ts &#39;clears stale namespaced fetch refs and prunes remote once before trunk pull&#39;`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Stale refs/dubstack/fetch-head/* cleared at sync start</div>
+      <div class="note">Top of the sync `try` block calls `clearStaleNamespacedFetchRefs(allTrackedBranches, cwd)`. Behavior covered by `src/lib/git.test.ts &#39;deletes refs whose source branch is not in the keep set&#39;` and the ordering test in `sync.test.ts`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">User&#39;s own FETCH_HEAD is untouched after dub sync</div>
+      <div class="note">`--no-write-fetch-head` on every fetch. `src/lib/git.test.ts &#39;leaves the user FETCH_HEAD untouched (--no-write-fetch-head)&#39;` writes a sentinel into .git/FETCH_HEAD before fetch and asserts byte-equality after.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">No tags fetched (verify by checking refs after sync against a repo with tags)</div>
+      <div class="note">`--no-tags` on every fetch. `src/lib/git.test.ts &#39;does not fetch remote tags (--no-tags)&#39;` pushes a tag to the remote, runs fetchBranches, and asserts `git tag -l` returns nothing locally.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests for all four behaviors</div>
+      <div class="note">All four behaviors plus the missing-remote-ref edge case and the sync-ordering invariant are covered. Total 508/508 tests pass.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer raised theoretical concern that sync still reads `origin/&lt;branch&gt;` rather than the namespaced ref. Investigated and resolved: opportunistic refspec update keeps `origin/&lt;branch&gt;` current, the new `git remote prune origin` actively removes stale tracking refs (strictly safer than the pre-PR behavior), and the issue&#39;s scope is explicitly limited to `fetchBranches` and the top of `sync.ts`. No regression vs. pre-PR behavior.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">Linear DUB-4 description / acceptance criteria</div>
+  <div class="note">intake complete</div>
+</div>
+<div class="dep">
+  <div class="item-title">Graphite Charcoal fetch discipline (reference, public)</div>
+  <div class="note">intake complete</div>
+</div>
+<div class="dep">
+  <div class="item-title">No external dependencies blocking</div>
+  <div class="note">satisfied</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Standalone behavior change inside `dub sync`. No flag, no migration, no user action required. Existing repos with refs under `refs/dubstack/fetch-head/` (none today) would be cleaned up automatically on the next sync.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Merge to main</div>
+  <div class="note">Standard squash-merge per repo conventions.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">On next dub sync</div>
+  <div class="label">Namespace populated</div>
+  <div class="note">Each fetched branch lands at refs/dubstack/fetch-head/&lt;branch&gt;. User FETCH_HEAD untouched from that point on.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">On next dub sync after a branch deletion</div>
+  <div class="label">Stale namespace + tracking refs cleaned</div>
+  <div class="note">clearStaleNamespacedFetchRefs removes refs for branches no longer tracked; git remote prune origin removes tracking refs for branches deleted on origin.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>8c8d8db</strong> <code>8c8d8dbb907aba40360ce78d1a708d03ddd36a77</code></div>
+  <pre>feat(cli): namespaced fetch refs + --no-tags + remote prune in sync</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">sync.ts</a>
+<a href="#tour" class="sub">git.test.ts</a>
+<a href="#tour" class="sub">sync.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
