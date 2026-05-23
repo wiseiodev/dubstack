@@ -327,15 +327,22 @@ export async function sync(
       if (recordWorktreeSkip(branch)) continue;
 
       if (freshSkipped.has(branch)) {
-        const outcome: BranchSyncOutcome = {
-          branch,
-          status: 'fresh',
-          action: 'cached',
-          message: `⚡ '${branch}' synced recently — reused cached state (--fresh to refetch).`,
-        };
-        result.branches.push(outcome);
-        printBranchOutcome(outcome);
-        continue;
+        // `pruneRemote` ran just above, so a branch deleted upstream since
+        // the last sync may have lost its `origin/<branch>` ref. Fall through
+        // to the normal classification path in that case so the user sees
+        // `missing-remote` instead of a misleading "reused cached state".
+        const remoteStillExists = await remoteBranchExists(branch, cwd);
+        if (remoteStillExists) {
+          const outcome: BranchSyncOutcome = {
+            branch,
+            status: 'fresh',
+            action: 'cached',
+            message: `⚡ '${branch}' synced recently — reused cached state (--fresh to refetch).`,
+          };
+          result.branches.push(outcome);
+          printBranchOutcome(outcome);
+          continue;
+        }
       }
 
       try {

@@ -1460,6 +1460,30 @@ describe('sync', () => {
       );
     });
 
+    it('falls through to missing-remote when a fresh-cached branch was pruned upstream', async () => {
+      const recent = new Date(Date.now() - 60_000).toISOString();
+      mockReadState.mockResolvedValue(
+        makeStateWithSync([
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main', last_synced_at: recent },
+        ]),
+      );
+      // Simulate `pruneRemote` having dropped origin/feat/a since the last sync.
+      mockRemoteBranchExists.mockImplementation(
+        async (branch: string) => branch !== 'feat/a',
+      );
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      const result = await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      const featA = result.branches.find((b) => b.branch === 'feat/a');
+      expect(featA?.status).toBe('missing-remote');
+      expect(featA?.action).toBe('skipped');
+    });
+
     it('stamps last_synced_at for local-ahead branches so re-sync skips fetch', async () => {
       let currentState: DubState = makeStateWithSync([
         { name: 'main', parent: null, type: 'root' },
