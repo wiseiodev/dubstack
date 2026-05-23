@@ -30,7 +30,10 @@ export async function ensureGhInstalled(): Promise<void> {
   try {
     await execa('gh', ['--version']);
   } catch {
-    throw new DubError('gh CLI not found. Install it: https://cli.github.com');
+    throw new DubError('gh CLI not found.', [
+      'Install the GitHub CLI from https://cli.github.com.',
+      "Run 'gh --version' to confirm installation, then retry.",
+    ]);
   }
 }
 
@@ -42,7 +45,10 @@ export async function checkGhAuth(): Promise<void> {
   try {
     await execa('gh', ['auth', 'status']);
   } catch {
-    throw new DubError("Not authenticated with GitHub. Run 'gh auth login'.");
+    throw new DubError('Not authenticated with GitHub.', [
+      "Run 'gh auth login' and sign in with the 'repo' scope.",
+      "Run 'gh auth status' to confirm authentication, then retry.",
+    ]);
   }
 }
 
@@ -77,7 +83,10 @@ export async function getPr(
   try {
     return JSON.parse(trimmed) as PrInfo;
   } catch {
-    throw new DubError(`Failed to parse PR info for branch '${branch}'.`);
+    throw new DubError(`Failed to parse PR info for branch '${branch}'.`, [
+      `Run 'gh pr list --head ${branch}' to inspect the raw response.`,
+      'Retry once GitHub is healthy if the response is partial.',
+    ]);
   }
 }
 
@@ -108,14 +117,20 @@ export async function getPrByNumber(
   } catch (error) {
     if (isPrNotFoundError(error)) return null;
     const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`);
+    throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`, [
+      `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
   }
   const trimmed = stdout.trim();
   if (!trimmed || trimmed === 'null') return null;
   try {
     return JSON.parse(trimmed) as PrInfo;
   } catch {
-    throw new DubError(`Failed to parse PR #${prNumber}.`);
+    throw new DubError(`Failed to parse PR #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json number,url,title,body' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
   }
 }
 
@@ -187,6 +202,10 @@ export async function getBranchPrSyncInfo(
   } catch {
     throw new DubError(
       `Failed to parse PR lifecycle state for branch '${branch}'.`,
+      [
+        `Run 'gh pr list --head ${branch}' to inspect the raw response.`,
+        'Retry once GitHub is healthy.',
+      ],
     );
   }
 }
@@ -209,7 +228,13 @@ export async function getPrStateByNumber(
   } catch (error) {
     if (isPrNotFoundError(error)) return 'NONE';
     const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(`Failed to fetch PR state for #${prNumber}: ${message}`);
+    throw new DubError(
+      `Failed to fetch PR state for #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
   }
   const trimmed = stdout.trim();
   if (!trimmed || trimmed === 'null') return 'NONE';
@@ -223,7 +248,10 @@ export async function getPrStateByNumber(
     if (parsed.state === 'CLOSED') return 'CLOSED';
     return 'NONE';
   } catch {
-    throw new DubError(`Failed to parse PR state for #${prNumber}.`);
+    throw new DubError(`Failed to parse PR state for #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json state,mergedAt' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
   }
 }
 
@@ -260,6 +288,10 @@ export async function getPrMergeStatusByNumber(
     const message = error instanceof Error ? error.message : String(error);
     throw new DubError(
       `Failed to fetch mergeability for PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
     );
   }
 
@@ -281,7 +313,10 @@ export async function getPrMergeStatusByNumber(
       mergeStateStatus: parsed.mergeStateStatus ?? null,
     };
   } catch {
-    throw new DubError(`Failed to parse mergeability for PR #${prNumber}.`);
+    throw new DubError(`Failed to parse mergeability for PR #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json mergeable,mergeStateStatus' to inspect.`,
+      'Retry once GitHub is healthy.',
+    ]);
   }
 }
 
@@ -336,17 +371,24 @@ export async function createPr(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes('403') || message.includes('insufficient')) {
-      throw new DubError(
-        "GitHub token lacks required permissions. Run 'gh auth login' with the 'repo' scope.",
-      );
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
     }
-    throw new DubError(`Failed to create PR for '${branch}': ${message}`);
+    throw new DubError(`Failed to create PR for '${branch}': ${message}`, [
+      `Run 'gh pr create --head ${branch}' manually to inspect the failure.`,
+      'Confirm the branch has been pushed to the remote, then retry.',
+    ]);
   }
 
   const url = stdout.trim();
   const numberMatch = url.match(/\/pull\/(\d+)$/);
   if (!numberMatch) {
-    throw new DubError(`Unexpected output from 'gh pr create': ${url}`);
+    throw new DubError(`Unexpected output from 'gh pr create': ${url}`, [
+      "Inspect the printed URL; if a PR was created, rerun 'dub submit' to refresh metadata.",
+      "Run 'gh --version' to verify the installed CLI version, then retry.",
+    ]);
   }
 
   return {
@@ -376,11 +418,15 @@ export async function updatePrBody(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.includes('403') || message.includes('insufficient')) {
-      throw new DubError(
-        "GitHub token lacks required permissions. Run 'gh auth login' with the 'repo' scope.",
-      );
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
     }
-    throw new DubError(`Failed to update PR #${prNumber}: ${message}`);
+    throw new DubError(`Failed to update PR #${prNumber}: ${message}`, [
+      `Run 'gh pr edit ${prNumber}' manually to inspect the failure.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
   }
 }
 
@@ -400,6 +446,10 @@ export async function retargetPrBase(
     const message = error instanceof Error ? error.message : String(error);
     throw new DubError(
       `Failed to retarget PR '${target}' to '${baseBranch}': ${message}`,
+      [
+        `Run 'gh pr edit ${target} --base ${baseBranch}' manually to inspect the failure.`,
+        `Confirm '${baseBranch}' exists on the remote, then retry.`,
+      ],
     );
   }
 }
@@ -430,7 +480,11 @@ export async function mergePr(
     await execa('gh', args, { cwd, stdio: 'inherit' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(`Failed to merge PR #${prNumber}: ${message}`);
+    throw new DubError(`Failed to merge PR #${prNumber}: ${message}`, [
+      `Run 'gh pr view ${prNumber} --web' to inspect required checks and reviews.`,
+      `Run 'dub merge-check --pr ${prNumber}' to validate DubStack merge order.`,
+      'Retry once required checks pass.',
+    ]);
   }
 }
 
@@ -444,11 +498,15 @@ export async function getRepositoryWebUrl(cwd: string): Promise<string> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message.toLowerCase().includes('not a git repository')) {
-      throw new DubError(
-        'Not a git repository. Run this command inside a git repo.',
-      );
+      throw new DubError('Not a git repository.', [
+        "Run 'git init' in the desired project directory.",
+        "Run 'cd <repo>' to switch into an existing git repository and retry.",
+      ]);
     }
-    throw new DubError(`Failed to read git remote '${remote}': ${message}`);
+    throw new DubError(`Failed to read git remote '${remote}': ${message}`, [
+      `Run 'git remote -v' to confirm the '${remote}' remote is configured.`,
+      `Run 'git remote add ${remote} <url>' to add a remote if it is missing.`,
+    ]);
   }
 
   return normalizeGitHubRepositoryUrl(remoteUrl);
@@ -481,12 +539,27 @@ export async function openPrInBrowser(
         target
           ? `No PR found for '${target}'.`
           : 'No PR found for the current branch.',
+        target
+          ? [
+              `Run 'gh pr list --head ${target}' to confirm whether a PR exists.`,
+              "Run 'dub submit' to push the branch and create a PR.",
+            ]
+          : [
+              "Run 'dub submit' to push the current branch and create a PR.",
+              "Run 'dub ready' to verify the branch is ready to submit.",
+            ],
       );
     }
     throw new DubError(
       target
         ? `Failed to open PR for '${target}': ${message}`
         : `Failed to open PR: ${message}`,
+      [
+        target
+          ? `Run 'gh pr view ${target} --web' manually to inspect the failure.`
+          : "Run 'gh pr view --web' manually to inspect the failure.",
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
     );
   }
 }
@@ -529,5 +602,9 @@ function normalizeGitHubRepositoryUrl(remoteUrl: string): string {
 
   throw new DubError(
     `Remote URL '${trimmed}' does not point to GitHub. 'dub repo' currently supports GitHub remotes only.`,
+    [
+      "Run 'git remote -v' to inspect configured remotes.",
+      "Run 'git remote set-url origin <github-url>' to point the remote at GitHub.",
+    ],
   );
 }

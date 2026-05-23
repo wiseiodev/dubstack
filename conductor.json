@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "setup": "bash scripts/conductor-setup.sh",
+    "remoteSetup": "bash scripts/conductor-setup.sh",
+    "run": "pnpm dev"
+  }
+}

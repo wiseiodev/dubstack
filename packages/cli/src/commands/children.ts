@@ -15,9 +15,10 @@ export async function children(
   const state = await readState(cwd);
   const stack = findStackForBranch(state, branch);
   if (!stack) {
-    throw new DubError(
-      `Branch '${branch}' is not tracked. Run 'dub track ${branch} --parent <branch>' first.`,
-    );
+    throw new DubError(`Branch '${branch}' is not tracked.`, [
+      `Run 'dub track ${branch} --parent <branch>' to track it.`,
+      "Run 'dub log' to see currently tracked branches.",
+    ]);
   }
   const childBranches = stack.branches
     .filter((entry) => entry.parent === branch)

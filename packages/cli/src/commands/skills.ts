@@ -16,9 +16,10 @@ function validateSkills(skills: string[]): SkillName[] {
   const invalidSkills = skills.filter((s) => !(s in AVAILABLE_SKILLS));
 
   if (invalidSkills.length > 0) {
-    throw new DubError(
-      `Unknown skill(s): ${invalidSkills.join(', ')}. Available skills: ${Object.keys(AVAILABLE_SKILLS).join(', ')}`,
-    );
+    throw new DubError(`Unknown skill(s): ${invalidSkills.join(', ')}.`, [
+      `Pass one of: ${Object.keys(AVAILABLE_SKILLS).join(', ')}.`,
+      "Rerun 'dub skills add' without arguments to install all available skills.",
+    ]);
   }
 
   return skills as SkillName[];

@@ -441,7 +441,9 @@ describe('submit', () => {
     await expect(submit('/repo', false)).rejects.toThrow(
       'Cannot submit from a root branch',
     );
-    await expect(submit('/repo', false)).rejects.toThrow('dub up');
+    await expect(submit('/repo', false)).rejects.toMatchObject({
+      recovery: expect.arrayContaining([expect.stringContaining('dub up')]),
+    });
   });
 
   it('throws when stack has branching children', async () => {
@@ -460,12 +462,14 @@ describe('submit', () => {
     await expect(submit('/repo', false, { path: 'stack' })).rejects.toThrow(
       'main -> feat/a, feat/b',
     );
-    await expect(submit('/repo', false, { path: 'stack' })).rejects.toThrow(
-      'dub submit --path current',
-    );
-    await expect(submit('/repo', false, { path: 'stack' })).rejects.toThrow(
-      'dub track',
-    );
+    await expect(
+      submit('/repo', false, { path: 'stack' }),
+    ).rejects.toMatchObject({
+      recovery: expect.arrayContaining([
+        expect.stringContaining('dub submit --path current'),
+        expect.stringContaining('dub track'),
+      ]),
+    });
   });
 
   it('defaults to current path and ignores sibling submit blockers', async () => {

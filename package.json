@@ -1,7 +1,7 @@
 {
   "name": "dubstack-workspace",
   "private": true,
-  "packageManager": "pnpm@10.29.1",
+  "packageManager": "pnpm@11.2.2",
   "engines": {
     "node": ">=22"
   },
@@ -15,19 +15,25 @@
     "checks": "biome check .",
     "checks:fix": "biome check --write .",
     "checks:fix:unsafe": "biome check --write --unsafe .",
+    "commitlint:edit": "commitlint --edit",
     "dev": "turbo run dev",
+    "lint:fix:staged": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off",
+    "prepare": "node -e \"const fs=require('node:fs');if(process.env.CI||!fs.existsSync('.git'))process.exit(0)\" && lefthook install",
     "evals": "evalite run",
     "evals:watch": "evalite watch",
     "evals:export": "evalite export --output .evalite-export"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.2",
+    "@commitlint/cli": "21.0.1",
+    "@commitlint/config-conventional": "21.0.1",
     "@semantic-release/commit-analyzer": "^13.0.1",
     "@semantic-release/exec": "^7.1.0",
     "@semantic-release/github": "^12.0.8",
     "@semantic-release/npm": "^13.1.5",
     "@semantic-release/release-notes-generator": "^14.1.1",
     "evalite": "0.19.0",
+    "lefthook": "2.1.6",
     "semantic-release": "^25.0.1",
     "turbo": "^2.9.14"
   }

@@ -56,6 +56,9 @@ describe('children command', () => {
     vi.mocked(getCurrentBranch).mockResolvedValue('feat/a');
     vi.mocked(readState).mockResolvedValue({ stacks: [] });
 
-    await expect(children('/tmp/repo')).rejects.toThrow('dub track');
+    await expect(children('/tmp/repo')).rejects.toMatchObject({
+      message: expect.stringContaining("'feat/a' is not tracked"),
+      recovery: expect.arrayContaining([expect.stringContaining('dub track')]),
+    });
   });
 });

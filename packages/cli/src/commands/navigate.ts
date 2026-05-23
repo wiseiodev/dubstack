@@ -24,6 +24,10 @@ function getTrackedStackOrThrow(
   if (!stack) {
     throw new DubError(
       `Current branch '${stateBranch}' is not tracked by DubStack.`,
+      [
+        `Run 'dub track ${stateBranch} --parent <branch>' to track it.`,
+        "Run 'dub log' to see currently tracked branches.",
+      ],
     );
   }
   return stack;
@@ -46,7 +50,9 @@ export async function upBySteps(
   steps: number,
 ): Promise<NavigateResult> {
   if (!Number.isInteger(steps) || steps < 1) {
-    throw new DubError("'steps' must be a positive integer.");
+    throw new DubError("'steps' must be a positive integer.", [
+      "Pass '<n>' or '--steps <n>' as a positive integer (e.g. 'dub up 2').",
+    ]);
   }
 
   const state = await readState(cwd);
@@ -60,11 +66,18 @@ export async function upBySteps(
   for (let i = 0; i < steps; i++) {
     const children = getChildren(stack, target);
     if (children.length === 0) {
-      throw new DubError(`No branch above '${target}' in the current stack.`);
+      throw new DubError(`No branch above '${target}' in the current stack.`, [
+        "Run 'dub create <branch>' to add a new branch above this one.",
+        "Run 'dub log' to inspect the stack and confirm there is no upstack branch.",
+      ]);
     }
     if (children.length > 1) {
       throw new DubError(
         `Branch '${target}' has multiple children; 'dub up' requires a linear stack path.`,
+        [
+          "Run 'dub checkout <child>' to switch to the specific child branch.",
+          "Run 'dub log' to see all upstack branches.",
+        ],
       );
     }
     target = children[0];
@@ -89,7 +102,9 @@ export async function downBySteps(
   steps: number,
 ): Promise<NavigateResult> {
   if (!Number.isInteger(steps) || steps < 1) {
-    throw new DubError("'steps' must be a positive integer.");
+    throw new DubError("'steps' must be a positive integer.", [
+      "Pass '<n>' or '--steps <n>' as a positive integer (e.g. 'dub up 2').",
+    ]);
   }
 
   const state = await readState(cwd);
@@ -104,11 +119,19 @@ export async function downBySteps(
     if (!branch) {
       throw new DubError(
         `Current branch '${target}' is not tracked by DubStack.`,
+        [
+          `Run 'dub track ${target} --parent <branch>' to track it.`,
+          "Run 'dub log' to see currently tracked branches.",
+        ],
       );
     }
     if (!branch.parent) {
       throw new DubError(
         `Already at the bottom of the stack (root branch '${target}').`,
+        [
+          "Run 'dub up' to move back to a non-root branch.",
+          "Run 'dub log' to see the stack layout.",
+        ],
       );
     }
     target = branch.parent;
@@ -136,6 +159,10 @@ export async function top(cwd: string): Promise<NavigateResult> {
     if (children.length > 1) {
       throw new DubError(
         `Branch '${target}' has multiple children; 'dub top' requires a linear stack path.`,
+        [
+          "Run 'dub checkout <child>' to switch to the specific child branch.",
+          "Run 'dub log' to see all upstack branches.",
+        ],
       );
     }
     target = children[0];
@@ -162,6 +189,10 @@ export async function bottom(cwd: string): Promise<NavigateResult> {
   if (!branch) {
     throw new DubError(
       `Current branch '${current}' is not tracked by DubStack.`,
+      [
+        `Run 'dub track ${current} --parent <branch>' to track it.`,
+        "Run 'dub log' to see currently tracked branches.",
+      ],
     );
   }
 
@@ -171,11 +202,16 @@ export async function bottom(cwd: string): Promise<NavigateResult> {
     if (children.length === 0) {
       throw new DubError(
         `No branch above root '${current}' in the current stack.`,
+        ["Run 'dub create <branch>' to add a branch above the root."],
       );
     }
     if (children.length > 1) {
       throw new DubError(
         `Root branch '${current}' has multiple children; 'dub bottom' requires a linear stack path.`,
+        [
+          "Run 'dub checkout <child>' to switch to a specific child branch.",
+          "Run 'dub log' to see all branches above the root.",
+        ],
       );
     }
     target = children[0];

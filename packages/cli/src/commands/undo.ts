@@ -32,9 +32,11 @@ export async function undo(cwd: string): Promise<UndoResult> {
   const entry = await readUndoEntry(cwd);
 
   if (!(await isWorkingTreeClean(cwd))) {
-    throw new DubError(
-      'Working tree has uncommitted changes. Commit or stash them before undoing.',
-    );
+    throw new DubError('Working tree has uncommitted changes.', [
+      "Run 'git status' to see the uncommitted changes.",
+      "Run 'git stash' to set the changes aside, then rerun 'dub undo'.",
+      'Run \'dub modify -am "<message>"\' to commit the changes first.',
+    ]);
   }
 
   const currentBranch = await getCurrentBranch(cwd);

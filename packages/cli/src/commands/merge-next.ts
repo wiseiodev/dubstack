@@ -32,25 +32,28 @@ export async function mergeNext(
   const plan = await getSubmitPlan(cwd, { path: 'current', fix: true });
   const nextBranch = plan.branches[0]?.name;
   if (!nextBranch) {
-    throw new DubError(
-      'No mergeable branch found in the current path. Check out a non-root stack branch first.',
-    );
+    throw new DubError('No mergeable branch found in the current path.', [
+      "Run 'dub checkout <branch>' to switch to a non-root stack branch.",
+      "Run 'dub log' to inspect the stack and find a mergeable branch.",
+    ]);
   }
 
   const pr = await getPr(nextBranch, cwd);
   if (!pr) {
-    throw new DubError(
-      `No open PR found for '${nextBranch}'. Run 'dub ss --path current' first.`,
-    );
+    throw new DubError(`No open PR found for '${nextBranch}'.`, [
+      "Run 'dub ss --path current' to push the branch and create the PR.",
+      `Run 'gh pr view ${nextBranch}' to confirm a PR exists on GitHub.`,
+    ]);
   }
   const nextEntry = plan.stack.branches.find(
     (branch) => branch.name === nextBranch,
   );
   const nextParent = nextEntry?.parent;
   if (!nextParent) {
-    throw new DubError(
-      `Branch '${nextBranch}' has no tracked parent. Run 'dub track ${nextBranch} --parent <branch>' first.`,
-    );
+    throw new DubError(`Branch '${nextBranch}' has no tracked parent.`, [
+      `Run 'dub track ${nextBranch} --parent <branch>' to set the parent.`,
+      "Run 'dub doctor' to inspect the stack for related issues.",
+    ]);
   }
   const directChildren = plan.stack.branches
     .filter((branch) => branch.type !== 'root' && branch.parent === nextBranch)

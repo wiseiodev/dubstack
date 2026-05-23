@@ -94,9 +94,10 @@ export async function readConfig(cwd: string): Promise<DubConfig> {
     const parsed = JSON.parse(raw) as DeepPartial<DubConfig>;
     return normalizeConfig(parsed);
   } catch {
-    throw new DubError(
-      "Config file is corrupted. Delete .git/dubstack/config.json or run 'dub config ai-assistant off' to reset it.",
-    );
+    throw new DubError('Config file is corrupted.', [
+      "Run 'rm .git/dubstack/config.json' to delete the corrupted file.",
+      "Run 'dub config ai-assistant off' to reset the configuration.",
+    ]);
   }
 }
 

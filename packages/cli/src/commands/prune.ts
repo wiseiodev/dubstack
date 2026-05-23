@@ -94,9 +94,10 @@ function resolveScopedStacks(
   if (options.all) return stacks;
   const stack = findStackForBranch({ stacks }, currentBranch);
   if (!stack) {
-    throw new DubError(
-      `Branch '${currentBranch}' is not part of any stack. Run 'dub create' first.`,
-    );
+    throw new DubError(`Branch '${currentBranch}' is not part of any stack.`, [
+      "Run 'dub create <branch>' to start a stack from this branch.",
+      "Rerun 'dub prune --all' to prune across all tracked stacks instead.",
+    ]);
   }
   return [stack];
 }

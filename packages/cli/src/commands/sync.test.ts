@@ -1054,11 +1054,22 @@ describe('sync', () => {
     });
     mockDetectActiveOperation.mockResolvedValue('restack');
 
-    await expect(
-      sync('/repo', { interactive: false, restack: true }),
-    ).rejects.toThrow('dub continue');
-    await expect(
-      sync('/repo', { interactive: false, restack: true }),
-    ).rejects.toThrow('dub abort');
+    let captured: DubError | null = null;
+    try {
+      await sync('/repo', { interactive: false, restack: true });
+    } catch (error) {
+      captured = error as DubError;
+    }
+    expect(captured).toBeInstanceOf(DubError);
+    expect(captured?.message).toContain(
+      "Sync paused: conflict while restacking 'feat/a'",
+    );
+    expect(captured?.recovery).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('dub continue --ai'),
+        expect.stringContaining('dub continue'),
+        expect.stringContaining('dub abort'),
+      ]),
+    );
   });
 });

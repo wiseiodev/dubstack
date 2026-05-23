@@ -125,7 +125,7 @@ describe('generateCreateMetadata', () => {
         {},
         createProviderConfig(),
       ),
-    ).rejects.toThrow('DUBSTACK_GEMINI_API_KEY');
+    ).rejects.toThrow('AI assistant has no configured provider.');
   });
 
   it('throws when AI metadata is missing required fields', async () => {

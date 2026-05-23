@@ -90,7 +90,7 @@ describe('askAi', () => {
       askAi('hello', dir, {
         output: createOutputCapture().stream,
       }),
-    ).rejects.toThrow("Enable it with 'dub config ai-assistant on'.");
+    ).rejects.toThrow('AI assistant is disabled for this repo.');
   });
 
   it('uses Google provider when DUBSTACK_GEMINI_API_KEY is set', async () => {
@@ -480,6 +480,6 @@ describe('askAi', () => {
       askAi('hello', dir, {
         output: createOutputCapture().stream,
       }),
-    ).rejects.toThrow('DUBSTACK_BEDROCK_AWS_REGION + DUBSTACK_BEDROCK_MODEL');
+    ).rejects.toThrow('AI assistant has no configured provider.');
   });
 });

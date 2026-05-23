@@ -60,14 +60,16 @@ export async function askAi(
 ): Promise<AskAiResult> {
   const normalizedPrompt = prompt.trim();
   if (normalizedPrompt.length === 0) {
-    throw new DubError('Prompt cannot be empty.');
+    throw new DubError('Prompt cannot be empty.', [
+      'Pass a non-empty prompt (e.g. \'dub "what changed?"\').',
+    ]);
   }
 
   const config = await readConfig(cwd);
   if (!config.aiAssistantEnabled) {
-    throw new DubError(
-      "AI assistant is disabled for this repo. Enable it with 'dub config ai-assistant on'.",
-    );
+    throw new DubError('AI assistant is disabled for this repo.', [
+      "Run 'dub config ai-assistant on' to enable AI for this repo.",
+    ]);
   }
 
   const output = options.output ?? process.stdout;
@@ -201,7 +203,10 @@ async function renderStream(
         case 'error': {
           throw part.error instanceof Error
             ? part.error
-            : new DubError('AI assistant stream failed unexpectedly.');
+            : new DubError('AI assistant stream failed unexpectedly.', [
+                'Retry the prompt; the AI provider may have transient errors.',
+                "Run 'dub config ai-provider' to switch providers if errors persist.",
+              ]);
         }
         default: {
           break;

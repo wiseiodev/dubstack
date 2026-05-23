@@ -12,12 +12,17 @@ export async function openUrl(
     await execa(opener, [url], { stdio: 'ignore' });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(`Failed to open '${url}' in your browser: ${message}`);
+    throw new DubError(`Failed to open '${url}' in your browser: ${message}`, [
+      `Copy the URL '${url}' into your browser manually.`,
+    ]);
   }
 }
 
 function resolveOpener(platform: NodeJS.Platform): string {
   if (platform === 'darwin') return 'open';
   if (platform === 'linux') return 'xdg-open';
-  throw new DubError(`Unsupported platform '${platform}' for browser opening.`);
+  throw new DubError(
+    `Unsupported platform '${platform}' for browser opening.`,
+    ['Copy the printed URL into your browser manually.'],
+  );
 }

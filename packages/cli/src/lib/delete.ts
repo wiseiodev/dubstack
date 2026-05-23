@@ -28,9 +28,10 @@ export async function getDeletePreview(
   const state = await readState(cwd);
   const stack = findStackForBranch(state, options.branch);
   if (!stack) {
-    throw new DubError(
-      `Branch '${options.branch}' is not tracked. Run 'dub track ${options.branch} --parent <branch>' first.`,
-    );
+    throw new DubError(`Branch '${options.branch}' is not tracked.`, [
+      `Run 'dub track ${options.branch} --parent <branch>' to track it.`,
+      "Run 'dub log' to see currently tracked branches.",
+    ]);
   }
   const targets = collectTargets(stack, options);
   return { branch: options.branch, targets };
@@ -48,6 +49,10 @@ export async function deleteTrackedBranch(
   if (!stack) {
     throw new DubError(
       `Branch '${options.branch}' is not tracked by DubStack.`,
+      [
+        `Run 'dub track ${options.branch} --parent <branch>' to track it.`,
+        "Run 'dub log' to see currently tracked branches.",
+      ],
     );
   }
 
@@ -109,11 +114,16 @@ function collectTargets(
   if (!target) {
     throw new DubError(
       `Branch '${options.branch}' is missing from tracked stack.`,
+      ["Run 'dub doctor' to inspect the stack for metadata damage."],
     );
   }
   if (target.type === 'root') {
     throw new DubError(
       `Cannot delete root branch '${options.branch}' via dub delete.`,
+      [
+        `Run 'git branch -D ${options.branch}' manually if you must remove the root locally.`,
+        "Run 'dub log' to inspect the stack and pick a non-root branch.",
+      ],
     );
   }
 
@@ -152,5 +162,8 @@ function resolveFallbackBranch(
   if (root && !deleteSet.has(root)) return root;
   throw new DubError(
     'Unable to determine a safe checkout target before deleting current branch.',
+    [
+      "Run 'dub checkout <branch>' to switch off the target branch first, then retry.",
+    ],
   );
 }

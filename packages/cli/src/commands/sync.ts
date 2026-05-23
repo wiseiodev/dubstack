@@ -109,7 +109,12 @@ export async function sync(
         const stack = findStackForBranch(state, originalBranch);
         if (!stack) {
           throw new DubError(
-            `Branch '${originalBranch}' is not part of any stack. Run 'dub create' first.`,
+            `Branch '${originalBranch}' is not part of any stack.`,
+            [
+              "Run 'dub create <branch>' to start a stack from this branch.",
+              "Run 'dub track <branch>' to track this branch under an existing parent.",
+              "Run 'dub sync --all' to sync every tracked stack instead.",
+            ],
           );
         }
         return [stack];
@@ -608,12 +613,13 @@ export async function sync(
         const restackResult = await restack(cwd);
         if (restackResult.status === 'conflict') {
           throw new DubError(
-            `Sync paused: conflict while restacking '${restackResult.conflictBranch ?? 'unknown'}'.\n` +
-              'Recovery:\n' +
-              '  1. Resolve conflicts and stage files.\n' +
-              "  2. Run 'dub continue --ai' to let DubStack try the small conflict for you.\n" +
-              "  3. Run 'dub continue' to resume manually.\n" +
-              "  4. Run 'dub abort' to cancel recovery and roll back progress.",
+            `Sync paused: conflict while restacking '${restackResult.conflictBranch ?? 'unknown'}'.`,
+            [
+              'Resolve conflicts and stage the resolved files.',
+              "Run 'dub continue --ai' to let DubStack try the resolution.",
+              "Run 'dub continue' after resolving manually.",
+              "Run 'dub abort' to cancel recovery and roll back progress.",
+            ],
           );
         }
         if (restackResult.status === 'success') {
@@ -650,8 +656,11 @@ export async function sync(
     } catch {
       if (!pendingError) {
         pendingError = new DubError(
-          `Sync completed but could not restore branch '${restoreTarget}'.\n` +
+          `Sync completed but could not restore branch '${restoreTarget}'.`,
+          [
             `Run 'git checkout ${restoreTarget}' to return to your working context.`,
+            'Inspect the working tree for uncommitted changes that may be blocking checkout.',
+          ],
         );
       }
     }
@@ -674,13 +683,15 @@ async function wrapSyncError(error: unknown, cwd: string): Promise<Error> {
   if (activeOperation === 'none') {
     return baseError;
   }
-  return new DubError(
-    `${baseError.message}\n` +
-      'Recovery:\n' +
-      "  1. Run 'dub continue --ai' to let DubStack try the small conflict for you.\n" +
-      "  2. Run 'dub continue' after resolving conflicts manually.\n" +
-      "  3. Run 'dub abort' to exit the in-progress operation safely.",
-  );
+  const recovery =
+    baseError.recovery.length > 0
+      ? baseError.recovery
+      : [
+          "Run 'dub continue --ai' to let DubStack try the resolution.",
+          "Run 'dub continue' after resolving conflicts manually.",
+          "Run 'dub abort' to exit the in-progress operation safely.",
+        ];
+  return new DubError(baseError.message, recovery);
 }
 
 async function markBranchSynced(

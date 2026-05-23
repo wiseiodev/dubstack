@@ -56,7 +56,9 @@ export async function preprocessCliArgs(
   if (first === '--ai') {
     const promptArgs = rawArgs.slice(1);
     if (promptArgs.length === 0) {
-      throw new DubError('Prompt cannot be empty when using --ai.');
+      throw new DubError('Prompt cannot be empty when using --ai.', [
+        'Pass a non-empty prompt (e.g. \'dub --ai "summarize my stack"\').',
+      ]);
     }
     return {
       finalArgs: ['ai', 'ask', ...promptArgs],
@@ -77,9 +79,10 @@ export async function preprocessCliArgs(
   const suggestion = suggestLikelyCommand(first, knownCommands);
   if (suggestion) {
     if (!isInteractiveTty) {
-      throw new DubError(
-        `Unknown command '${first}'. Did you mean '${suggestion}'? Re-run with '--ai' to treat this as an AI prompt.`,
-      );
+      throw new DubError(`Unknown command '${first}'.`, [
+        `Did you mean 'dub ${suggestion}'?`,
+        "Rerun with '--ai' (e.g. 'dub --ai \"<prompt>\"') to treat this as an AI prompt.",
+      ]);
     }
 
     const choice = await chooseTypoResolution(first, suggestion);
@@ -92,7 +95,7 @@ export async function preprocessCliArgs(
       };
     }
     if (choice === 'cancel') {
-      throw new DubError('Cancelled.');
+      throw new DubError('Cancelled.', []);
     }
     return {
       finalArgs: ['ai', 'ask', ...rawArgs],

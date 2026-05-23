@@ -59,7 +59,11 @@ export async function modify(
     const parent = getParent(state, currentBranch);
     if (!parent) {
       throw new DubError(
-        `Could not determine parent branch for '${currentBranch}'. Cannot start interactive rebase.`,
+        `Could not determine parent branch for '${currentBranch}'.`,
+        [
+          `Run 'dub track ${currentBranch} --parent <branch>' to set the parent.`,
+          "Run 'dub log' to inspect the stack and confirm tracking state.",
+        ],
       );
     }
 
@@ -89,7 +93,10 @@ export async function modify(
 
   if (shouldCreateNew) {
     if (!hasStaged) {
-      throw new DubError('No staged changes to commit.');
+      throw new DubError('No staged changes to commit.', [
+        "Run 'git add <files>' to stage changes for the new commit.",
+        'Rerun \'dub modify -ac -m "<message>"\' to stage all changes and commit.',
+      ]);
     }
     await commit(cwd, { message, noEdit: !options.edit });
   } else {

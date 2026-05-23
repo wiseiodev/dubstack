@@ -41,9 +41,9 @@ export async function configureAiEnv(
     !options.bedrockRegion &&
     !options.bedrockModel
   ) {
-    throw new DubError(
-      'Provide at least one key, model, or Bedrock setting via --gemini-key, --gateway-key, --gemini-model, --gateway-model, --bedrock-profile, --bedrock-region, or --bedrock-model.',
-    );
+    throw new DubError('Provide at least one key, model, or Bedrock setting.', [
+      "Pass at least one of '--gemini-key', '--gateway-key', '--gemini-model', '--gateway-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
+    ]);
   }
 
   const profilePath = options.profile ?? resolveProfilePath(options.shell);
@@ -139,9 +139,10 @@ function resolveProfilePath(shellOverride?: string): string {
     return path.join(home, '.profile');
   }
 
-  throw new DubError(
-    'Could not detect a supported shell profile. Use --profile <path> (supported shells: zsh, bash).',
-  );
+  throw new DubError('Could not detect a supported shell profile.', [
+    "Pass '--profile <path>' explicitly.",
+    "Pass '--shell zsh' or '--shell bash' to force shell detection.",
+  ]);
 }
 
 function upsertExport(content: string, key: string, value: string): string {
@@ -217,12 +218,14 @@ function inferShellNameFromProfile(profilePath: string): string | null {
 function normalizeGeminiModel(value: string): string {
   const model = value.trim();
   if (model.length === 0) {
-    throw new DubError('Gemini model cannot be empty.');
+    throw new DubError('Gemini model cannot be empty.', [
+      "Pass a non-empty model name (e.g. 'gemini-3-flash-preview').",
+    ]);
   }
   if (model.includes('/')) {
-    throw new DubError(
-      "Gemini model should not include '/'. Use names like 'gemini-3-flash-preview'.",
-    );
+    throw new DubError("Gemini model should not include '/'.", [
+      "Pass the bare model name without provider prefix (e.g. 'gemini-3-flash-preview').",
+    ]);
   }
   return model;
 }
@@ -230,7 +233,9 @@ function normalizeGeminiModel(value: string): string {
 function normalizeGatewayModel(value: string): string {
   const model = value.trim();
   if (model.length === 0) {
-    throw new DubError('Gateway model cannot be empty.');
+    throw new DubError('Gateway model cannot be empty.', [
+      'Pass a non-empty model identifier.',
+    ]);
   }
   return model;
 }
@@ -238,7 +243,9 @@ function normalizeGatewayModel(value: string): string {
 function normalizeBedrockProfile(value: string): string {
   const profile = value.trim();
   if (profile.length === 0) {
-    throw new DubError('Bedrock profile cannot be empty.');
+    throw new DubError('Bedrock profile cannot be empty.', [
+      'Pass a non-empty AWS profile name.',
+    ]);
   }
   return profile;
 }
@@ -246,7 +253,9 @@ function normalizeBedrockProfile(value: string): string {
 function normalizeBedrockRegion(value: string): string {
   const region = value.trim();
   if (region.length === 0) {
-    throw new DubError('Bedrock region cannot be empty.');
+    throw new DubError('Bedrock region cannot be empty.', [
+      "Pass a non-empty AWS region (e.g. 'us-east-1').",
+    ]);
   }
   return region;
 }
@@ -254,7 +263,9 @@ function normalizeBedrockRegion(value: string): string {
 function normalizeBedrockModel(value: string): string {
   const model = value.trim();
   if (model.length === 0) {
-    throw new DubError('Bedrock model cannot be empty.');
+    throw new DubError('Bedrock model cannot be empty.', [
+      'Pass a non-empty Bedrock model identifier.',
+    ]);
   }
   return model;
 }

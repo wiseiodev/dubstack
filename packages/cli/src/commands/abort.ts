@@ -13,7 +13,10 @@ interface AbortCommandResult {
 export async function abortCommand(cwd: string): Promise<AbortCommandResult> {
   const active = await detectActiveOperation(cwd);
   if (active === 'none') {
-    throw new DubError('No operation in progress. Nothing to abort.');
+    throw new DubError('No operation in progress.', [
+      "Run 'dub log' to inspect the stack.",
+      "Run 'dub restack' to start restacking the current stack if you intended to.",
+    ]);
   }
 
   if (await hasGitRebaseInProgress(cwd)) {

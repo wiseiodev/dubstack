@@ -61,7 +61,7 @@ import {
   type ShortcutMetadata,
 } from './lib/ai-shortcut';
 import { readConfig } from './lib/config';
-import { DubError } from './lib/errors';
+import { DubError, formatDubError } from './lib/errors';
 import { getCurrentBranch } from './lib/git';
 import {
   appendHistoryEntry,
@@ -1408,20 +1408,27 @@ function parseSteps(positional?: string, option?: string): number {
   if (!raw) return 1;
   const parsed = Number.parseInt(raw, 10);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new DubError('Steps must be a positive integer.');
+    throw new DubError('Steps must be a positive integer.', [
+      "Pass '<n>' or '--steps <n>' as a positive integer (e.g. 'dub up 2').",
+    ]);
   }
   return parsed;
 }
 
 function parseSubmitPath(value: string): SubmitPathMode {
   if (value === 'current' || value === 'stack') return value;
-  throw new DubError("Submit path must be either 'current' or 'stack'.");
+  throw new DubError("Submit path must be either 'current' or 'stack'.", [
+    "Pass '--path current' to submit your current linear path.",
+    "Pass '--path stack' to submit every branch in the stack.",
+  ]);
 }
 
 function parsePositiveInt(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new DubError('Expected a positive integer.');
+    throw new DubError('Expected a positive integer.', [
+      'Pass a positive integer (1, 2, 3, ...) for this option.',
+    ]);
   }
   return parsed;
 }
@@ -1430,7 +1437,9 @@ function parseMergeMethod(value: string): 'merge' | 'squash' | 'rebase' {
   if (value === 'merge' || value === 'squash' || value === 'rebase') {
     return value;
   }
-  throw new DubError('Merge method must be one of: merge, squash, rebase.');
+  throw new DubError('Merge method must be one of: merge, squash, rebase.', [
+    "Pass one of: '--method merge', '--method squash', or '--method rebase'.",
+  ]);
 }
 
 interface HistoryCaptureState {
@@ -1483,7 +1492,11 @@ async function main() {
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof DubError) {
-      console.error(chalk.red(`✖ ${error.message}`));
+      const [firstLine, ...rest] = formatDubError(error).split('\n');
+      console.error(chalk.red(`✖ ${firstLine}`));
+      for (const line of rest) {
+        console.error(line);
+      }
       await finalizeHistoryCapture('error', error.message);
       process.exit(1);
     }

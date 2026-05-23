@@ -59,26 +59,34 @@ export async function restack(cwd: string): Promise<RestackResult> {
   const state = await readState(cwd);
 
   if (!(await isWorkingTreeClean(cwd))) {
-    throw new DubError(
-      'Working tree has uncommitted changes. Commit or stash them before restacking.',
-    );
+    throw new DubError('Working tree has uncommitted changes.', [
+      "Run 'git status' to see the uncommitted changes.",
+      "Run 'git stash' to set the changes aside, then rerun 'dub restack'.",
+      'Run \'dub modify -am "<message>"\' to commit the changes onto the current branch.',
+    ]);
   }
 
   const originalBranch = await getCurrentBranch(cwd);
   const targetStacks = getTargetStacks(state.stacks, originalBranch);
 
   if (targetStacks.length === 0) {
-    throw new DubError(
-      `Branch '${originalBranch}' is not part of any stack. Run 'dub create' first.`,
-    );
+    throw new DubError(`Branch '${originalBranch}' is not part of any stack.`, [
+      "Run 'dub create <branch>' to start a stack from this branch.",
+      "Run 'dub track <branch>' to track this branch on a parent.",
+      "Run 'dub checkout <branch>' to switch to a tracked branch.",
+    ]);
   }
 
   const allBranches = targetStacks.flatMap((s) => s.branches);
   for (const branch of allBranches) {
     if (!(await branchExists(branch.name, cwd))) {
       throw new DubError(
-        `Branch '${branch.name}' is tracked in state but no longer exists in git.\n` +
-          '  Remove it from the stack or recreate it before restacking.',
+        `Branch '${branch.name}' is tracked in state but no longer exists in git.`,
+        [
+          `Run 'dub untrack ${branch.name}' to remove it from the stack.`,
+          `Run 'git checkout -b ${branch.name} <sha>' to recreate the branch before retrying.`,
+          "Run 'dub doctor' to inspect the stack for related issues.",
+        ],
       );
     }
   }
@@ -126,7 +134,9 @@ export async function restackContinue(cwd: string): Promise<RestackResult> {
   const progress = await readProgress(cwd);
 
   if (!progress) {
-    throw new DubError("No restack in progress. Run 'dub restack' to start.");
+    throw new DubError('No restack in progress.', [
+      "Run 'dub restack' to start restacking the current stack.",
+    ]);
   }
 
   await gitRebaseContinue(cwd);
