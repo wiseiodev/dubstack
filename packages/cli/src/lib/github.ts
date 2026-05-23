@@ -17,6 +17,20 @@ export interface BranchPrSyncInfo {
   baseRefName: string | null;
 }
 
+export interface AllPrSyncInfoBatch {
+  /** Map keyed by `headRefName` (branch). */
+  byBranch: Map<string, BranchPrSyncInfo>;
+  /**
+   * True when `gh pr list` likely truncated results (page-limit hit).
+   * Callers should fall back to `getBranchPrSyncInfo` for any branch
+   * missing from `byBranch`.
+   */
+  truncated: boolean;
+}
+
+/** Page limit for the batched `gh pr list` call. */
+const BATCH_PR_LIST_LIMIT = 100;
+
 export interface PrMergeStatus {
   mergeable: string | null;
   mergeStateStatus: string | null;
@@ -208,6 +222,99 @@ export async function getBranchPrSyncInfo(
       ],
     );
   }
+}
+
+/**
+ * Fetches PR sync info for all open + recent merged/closed PRs in one `gh` call.
+ *
+ * Replaces N per-branch `gh pr list --head <branch>` round-trips with a single
+ * batched query. Callers join in memory by `headRefName`.
+ *
+ * Returns `truncated: true` when the page limit was hit, signaling that
+ * branches missing from the map may still have PRs and should fall back to
+ * `getBranchPrSyncInfo`.
+ */
+export async function getAllPrSyncInfoBatch(
+  cwd: string,
+): Promise<AllPrSyncInfoBatch> {
+  let stdout: string;
+  try {
+    const result = await execa(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--json',
+        'headRefName,baseRefName,state,mergedAt',
+        '--limit',
+        String(BATCH_PR_LIST_LIMIT),
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DubError(`Failed to list PRs: ${message}`, [
+      "Run 'gh pr list --state all' manually to inspect the failure.",
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
+
+  const trimmed = stdout.trim();
+  const byBranch = new Map<string, BranchPrSyncInfo>();
+  if (!trimmed || trimmed === 'null') {
+    return { byBranch, truncated: false };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new DubError('Failed to parse batched PR list response.', [
+      "Run 'gh pr list --state all --json state' to inspect the raw response.",
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+  if (!Array.isArray(parsed)) {
+    return { byBranch, truncated: false };
+  }
+
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as {
+      headRefName?: string;
+      baseRefName?: string | null;
+      state?: string;
+      mergedAt?: string | null;
+    };
+    const head = record.headRefName;
+    if (!head) continue;
+    // First PR per branch wins. gh sorts newest first, so this prefers the
+    // most recent PR — matching getBranchPrSyncInfo's `.[0]` semantics.
+    if (byBranch.has(head)) continue;
+    byBranch.set(head, {
+      state: classifyPrState(record.state, record.mergedAt),
+      baseRefName: record.baseRefName ?? null,
+    });
+  }
+
+  // Use the raw response length, not byBranch.size: when the list is truncated,
+  // some branches may be entirely absent (all their PRs were older than the
+  // limit). Sizing on unique branches would create false negatives — fallback
+  // would never fire for those missing branches.
+  return { byBranch, truncated: parsed.length >= BATCH_PR_LIST_LIMIT };
+}
+
+function classifyPrState(
+  state: string | undefined,
+  mergedAt: string | null | undefined,
+): BranchPrLifecycleState {
+  if (mergedAt) return 'MERGED';
+  if (state === 'CLOSED') return 'CLOSED';
+  if (state === 'OPEN') return 'OPEN';
+  return 'NONE';
 }
 
 /**
