@@ -9,6 +9,7 @@ export type BranchSyncStatus =
   | 'needs-remote-sync'
   | 'reconcile-needed'
   | 'local-ahead'
+  | 'fresh'
   | 'error';
 
 export interface SyncOptions {
@@ -16,12 +17,20 @@ export interface SyncOptions {
   restack: boolean;
   all: boolean;
   interactive: boolean;
+  fresh: boolean;
 }
 
 export interface BranchSyncOutcome {
   branch: string;
   status: BranchSyncStatus;
-  action: 'synced' | 'kept-local' | 'skipped' | 'deleted' | 'none' | 'error';
+  action:
+    | 'synced'
+    | 'kept-local'
+    | 'skipped'
+    | 'deleted'
+    | 'none'
+    | 'cached'
+    | 'error';
   message: string;
   recovery?: string[];
 }
