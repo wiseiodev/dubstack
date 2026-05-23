@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-1 - Universal recovery hints in DubError</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-1</div>
+        <h1>DUB-1 - Universal recovery hints in DubError</h1>
+        <div class="meta"><span><strong>58</strong> files</span>
+<span><span class="add">+1188</span> / <span class="del">-345</span></span>
+<span>branch <strong>feature/dub-1-universal-recovery-hints-in-duberror</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Refactor DubError to require a recovery: string[] second parameter and update the top-level error handler so it prints the recovery block in a consistent format across every command. Update existing throws across sync, submit, restack, merge-next, post-merge, doctor, modify, create, and ai-resolve to provide meaningful recovery steps.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>DubError now accepts a recovery: string[] second arg; the CLI&#39;s top-level handler prints a numbered &quot;What you can do:&quot; block under every user-facing error. All ~214 throw sites carry actionable recovery hints where one exists; programmer-invariant errors default to []. Format is locked by unit and snapshot tests; existing tests that asserted on inline recovery substrings now assert on error.recovery.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Every DubStack command threw user-facing errors with bespoke remediation text inlined into the message — inconsistent voice, inconsistent shape, and impossible to render uniformly in IDEs, support bundles, or future renderers.</p>
+<p class="lede">Tier 0 (Sync Magic) needs a stable, structured surface for recovery hints so future surfaces (TUI, AI assistant, support bundle) can consume them.</p>
+<p class="lede">Centralizing recovery turns &#39;try X, then Y, then Z&#39; guidance into machine-readable steps.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>throw new DubError(`Sync paused: conflict while restacking &#39;${branch}&#39;.\n` + &#39;Recovery:\n&#39; + &#39;  1. Resolve...\n&#39; + &#39;  2. ...&#39;);</li>
+<li>Tests asserted on inline &#39;dub continue&#39; / &#39;dub abort&#39; substrings inside the message.</li>
+<li>Top-level handler in index.ts just printed `✖ ${error.message}` with no structure.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>throw new DubError(&quot;Sync paused: conflict while restacking &#39;feat/auth-ui&#39;.&quot;, [&#39;Resolve conflicts and stage the resolved files.&#39;, &quot;Run &#39;dub continue --ai&#39; to let DubStack try the resolution.&quot;, &quot;Run &#39;dub continue&#39; after resolving manually.&quot;, &quot;Run &#39;dub abort&#39; to roll back to the pre-sync state.&quot;]);</li>
+<li>Top-level handler prints the message in red, then &#39;What you can do:&#39; followed by a numbered list of recovery steps.</li>
+<li>Tests now assert on error.recovery (an array) rather than inline message text.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/errors.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+30</span> <span class="del">-10</span></span>
+  </summary>
+  <div class="file-body">
+    <p>DubError gains a `recovery: string[]` field with a default of []. New formatDubError() helper renders the canonical message + &#39;What you can do:&#39; block. This is the single source of truth for the on-screen format.</p>
+    <div class="code"><pre>export class DubError extends Error {
+  readonly recovery: string[];
+
+  constructor(message: string, recovery: string[] = []) {
+    super(message);
+    this.name = &#39;DubError&#39;;
+    this.recovery = recovery;
+  }
+}
+
+export function formatDubError(error: DubError): string {
+  if (error.recovery.length === 0) {
+    return error.message;
+  }
+  const steps = error.recovery
+    .map((step, idx) =&gt; `  ${idx + 1}. ${step}`)
+    .join(&#39;\n&#39;);
+  return `${error.message}\n\nWhat you can do:\n${steps}`;
+}</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+12</span> <span class="del">-4</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Top-level catch now calls formatDubError(), prints the first line in red (preserving the legacy ✖ chrome) and emits each recovery line verbatim. Arg-validation throws (parseSteps, parseSubmitPath, parsePositiveInt, parseMergeMethod) also get recovery hints.</p>
+    <div class="code"><pre>if (error instanceof DubError) {
+  const [firstLine, ...rest] = formatDubError(error).split(&#39;\n&#39;);
+  console.error(chalk.red(`✖ ${firstLine}`));
+  for (const line of rest) {
+    console.error(line);
+  }
+  await finalizeHistoryCapture(&#39;error&#39;, error.message);
+  process.exit(1);
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+38</span> <span class="del">-17</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Lifts the previously inlined Recovery block out of the conflict message and into the recovery array. wrapSyncError() now propagates an existing recovery rather than re-inlining the same hint text.</p>
+    <div class="code"><pre>throw new DubError(
+  `Sync paused: conflict while restacking &#39;${restackResult.conflictBranch ?? &#39;unknown&#39;}&#39;.`,
+  [
+    &#39;Resolve conflicts and stage the resolved files.&#39;,
+    &quot;Run &#39;dub continue --ai&#39; to let DubStack try the resolution.&quot;,
+    &quot;Run &#39;dub continue&#39; after resolving manually.&quot;,
+    &quot;Run &#39;dub abort&#39; to cancel recovery and roll back progress.&quot;,
+  ],
+);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/submit.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+47</span> <span class="del">-21</span></span>
+  </summary>
+  <div class="file-body">
+    <p>The branching-stack error keeps its multi-line summary in the message but lifts the three Fix options into the recovery array. buildBranchingErrorMessage() became buildBranchingError() returning { message, recovery }.</p>
+    <div class="code"><pre>function buildBranchingError(
+  blockers: SubmitBranchingBlocker[],
+  currentBranch: string,
+): { message: string; recovery: string[] } {
+  ...
+  return {
+    message,
+    recovery: [
+      &quot;Run &#39;dub submit --path current&#39; to submit only your current linear path.&quot;,
+      &quot;Run &#39;dub submit --path stack --fix&#39; to retry with safe auto-fix.&quot;,
+      &quot;Run &#39;dub track &lt;child&gt; --parent &lt;branch&gt;&#39; to re-parent and linearize manually.&quot;,
+    ],
+  };
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+152</span> <span class="del">-43</span></span>
+  </summary>
+  <div class="file-body">
+    <p>The largest single-file change. Every git-failure throw (checkout, push, rebase, fetch, merge-base, ref read, hard reset, stage, commit, amend, etc.) gains a recovery array pointing at the underlying git command the user can run manually plus relevant `dub` follow-ups.</p>
+    <div class="code"><pre>throw new DubError(`Conflict while restacking &#39;${branch}&#39;.`, [
+  &#39;Resolve conflicts and stage the resolved files.&#39;,
+  &quot;Run &#39;dub continue --ai&#39; to let DubStack try the resolution.&quot;,
+  &quot;Run &#39;dub continue&#39; (or &#39;dub restack --continue&#39;) after resolving manually.&quot;,
+  &quot;Run &#39;dub abort&#39; to cancel and roll back progress.&quot;,
+]);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+95</span> <span class="del">-26</span></span>
+  </summary>
+  <div class="file-body">
+    <p>gh CLI guardrails (missing CLI, missing auth, missing scopes), PR fetch/parse/create/update/merge/retarget errors, and the GitHub-only repo-URL guard each get a recovery array. Permissions-related throws are consolidated under a single &#39;GitHub token lacks required permissions.&#39; message + recovery via replace_all.</p>
+    <div class="code"><pre>throw new DubError(&#39;Not authenticated with GitHub.&#39;, [
+  &quot;Run &#39;gh auth login&#39; and sign in with the &#39;repo&#39; scope.&quot;,
+  &quot;Run &#39;gh auth status&#39; to confirm authentication, then retry.&quot;,
+]);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/restack.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+24</span> <span class="del">-9</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Dirty-tree, no-stack, missing-tracked-branch, and no-restack-in-progress errors all carry hints that point at the right next step (git stash, dub track, dub untrack, dub restack).</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/errors.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+56</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Unit tests covering the constructor&#39;s default-empty recovery, custom recovery, and the formatDubError() output shape (bare message, numbered block, multi-line message preservation).</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/test/error-formatting.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+86</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Snapshot tests that exercise four real command throw sites end-to-end (create --ai conflicts, abort no-op, restack from a freshly initialised repo, create --ai + -m) and freeze the rendered output via toMatchInlineSnapshot.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+16</span> <span class="del">-6</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Updated the &#39;throws actionable recovery guidance when restack phase conflicts&#39; assertion to check error.recovery contains the expected commands instead of error.message substrings.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/submit.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+12</span> <span class="del">-9</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Same pattern: &#39;Cannot submit from root&#39; and the branching-stack error checks moved from inline-substring assertions to error.recovery array assertions.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/{children,parent,trunk,delete}.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+24</span> <span class="del">-4</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Same pattern applied to the four command tests that previously asserted on inline &#39;dub track&#39; / &#39;--force&#39; substrings.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/{ai,create}.test.ts and packages/cli/src/lib/{ai-metadata,ai-shortcut}.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+14</span> <span class="del">-8</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Existing assertions that grepped for &#39;Enable it with...&#39;, &#39;DUBSTACK_GEMINI_API_KEY&#39;, &#39;DUBSTACK_BEDROCK_AWS_REGION...&#39;, and &#39;Did you mean...&#39; now match against the new shorter messages or the recovery array.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Backwards-compatible substring checks</div>
+    <div class="note"><code>packages/cli/src/commands/restack.ts:197, packages/cli/src/commands/modify.ts:139, packages/cli/src/lib/state.ts:141</code> Three call sites still use error.message.includes(&#39;Conflict&#39; / &#39;not initialized&#39;) to branch on error type. Verified the new messages keep those keywords. Worth a second look to confirm no other callers rely on inline recovery text.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Single source of truth for the rendered format</div>
+    <div class="note"><code>packages/cli/src/lib/errors.ts (formatDubError) and packages/cli/src/index.ts (catch block)</code> The on-screen format lives in formatDubError(). The index.ts handler must continue to feed every DubError through it. Any future renderer (TUI, support bundle, AI assistant) should reuse formatDubError rather than re-implementing.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Recovery voice consistency</div>
+    <div class="note"><code>packages/cli/src/commands/*.ts, packages/cli/src/lib/*.ts</code> Recovery items follow &#39;Run X&#39; / &#39;Rerun X&#39; / &#39;Pass X&#39; imperative voice, backtick-wrapped CLI commands, and end with a period. A reviewer may want to spot-check a few less-frequented files for drift.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">Programmer-invariant errors keep empty recovery</div>
+    <div class="note"><code>packages/cli/src/lib/invariants.ts, packages/cli/src/lib/graph.ts, packages/cli/src/lib/conflict-ui.ts (Refusing-to-write guards)</code> These throw on stack-state corruption or safety violations. They all point users at &#39;dub doctor&#39; as the universal fallback — confirm that matches your support stance.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">DubError constructor + formatDubError</div>
+      <div class="note">packages/cli/src/lib/errors.test.ts (5 tests)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Snapshot of four real command error outputs</div>
+      <div class="note">packages/cli/test/error-formatting.test.ts (4 tests, inline snapshots)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Updated 10 pre-existing test files to check error.recovery</div>
+      <div class="note">sync.test.ts, submit.test.ts, children.test.ts, parent.test.ts, trunk.test.ts, delete.test.ts, ai.test.ts, create.test.ts, ai-metadata.test.ts, ai-shortcut.test.ts</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Direct render of the issue&#39;s spec example</div>
+      <div class="note">.reports/dub-1-qa.md §1 — output matches the issue&#39;s &#39;Output format users will see&#39; byte for byte.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 186 files in 28ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. turbo cache hit on both dubstack and docs packages.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest</div>
+      <div class="note">Command: pnpm test. 68 test files, 499 tests passing (up from 486 before adding errors.test.ts and error-formatting.test.ts).</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Direct render of the issue&#39;s spec example matches byte-for-byte; gates pass.</div>
+      <div class="note">Pure CLI refactor with no .tsx files in the diff and no browser/UI surface — see .reports/dub-1-qa.md §&#39;Why no video&#39;.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-1-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>DubError() with empty recovery renders bare message (errors.test.ts).</li>
+<li>DubError() with recovery renders &#39;What you can do:&#39; numbered block (errors.test.ts).</li>
+<li>create(&#39;feat/x&#39;, cwd, { ai: true, noAi: true }) throws with the documented flag-conflict recovery (error-formatting.test.ts).</li>
+<li>abortCommand() on an initialized repo with no active op throws the &#39;No operation in progress.&#39; message with two recovery steps (error-formatting.test.ts).</li>
+<li>restack() on a freshly-initialised repo throws the dirty-tree error because init writes .gitignore (error-formatting.test.ts).</li>
+<li>Direct invocation of formatDubError() against the spec example yields the exact format from the issue description (.reports/dub-1-qa.md §1).</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">DubError constructor accepts recovery: string[] as the second argument</div>
+      <div class="note">packages/cli/src/lib/errors.ts:21 — constructor signature exactly matches the issue spec.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Top-level error handler in packages/cli/src/index.ts prints message + recovery block in the documented format</div>
+      <div class="note">packages/cli/src/index.ts:main catch block; output matches the issue&#39;s &#39;Output format users will see&#39; verbatim (see .reports/dub-1-qa.md §1).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">All existing `throw new DubError(...)` sites updated with sensible recovery steps</div>
+      <div class="note">All throw sites across packages/cli/src/{commands,lib,index.ts} updated. Sites with meaningful next steps get a recovery array; pure programmer-invariant errors (invariants.ts) point at &#39;dub doctor&#39;; arg-validation throws point at the correct flag usage.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Unit tests for DubError formatting</div>
+      <div class="note">packages/cli/src/lib/errors.test.ts — 5 tests covering default recovery, supplied recovery, bare formatting, numbered block, multi-line message.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Snapshot tests on a few command error outputs to lock the format</div>
+      <div class="note">packages/cli/test/error-formatting.test.ts — 4 inline snapshots on create, abort, restack command throws.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">All existing tests still pass</div>
+      <div class="note">pnpm test → 499 / 499 passing. Updated 10 pre-existing test files that asserted on inline recovery substrings.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>feature-dev:code-reviewer claimed the restack snapshot was wrong. Verified false: init() writes .gitignore, which dirties the worktree before restack reaches the not-tracked check. Renamed the test to &#39;locks the restack dirty-worktree error format (init dirties .gitignore)&#39; to make the flow explicit.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">External dependencies</div>
+  <div class="note">No external dependencies detected. Pure refactor inside packages/cli.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Library refactor with backwards-compatible default. Ships when merged.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Standard release pipeline</div>
+  <div class="note">Picked up by the next semantic-release on main. No feature flag needed because DubError&#39;s second arg defaults to [].</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-merge</div>
+  <div class="label">Downstream surfaces can adopt</div>
+  <div class="note">TUI, support bundle, AI assistant, and any future renderer should call formatDubError() (or read error.recovery) instead of re-implementing the format.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>80704c2</strong> <code>80704c2e9cea6913dd0153a7578fa3fef7550fb0</code></div>
+  <pre>feat(cli): universal recovery hints in DubError</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">errors.ts</a>
+<a href="#tour" class="sub">index.ts</a>
+<a href="#tour" class="sub">sync.ts</a>
+<a href="#tour" class="sub">submit.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
