@@ -29,9 +29,12 @@ import {
   isGitRepo,
   isValidBranchName,
   isWorkingTreeClean,
+  lastPushedRef,
   listNamespacedFetchRefs,
   namespacedFetchRef,
   pruneRemote,
+  pushBranch,
+  readLastPushedSha,
   rebaseOnto,
   stageAll,
 } from './git';
@@ -361,6 +364,107 @@ describe('commitStaged', () => {
 
   it('throws when nothing is staged', async () => {
     await expect(commitStaged('empty commit', dir)).rejects.toThrow(DubError);
+  });
+});
+
+describe('pushBranch', () => {
+  let remoteDir: string;
+  let otherDir: string;
+
+  beforeEach(async () => {
+    remoteDir = await fs.promises.mkdtemp('/tmp/dubstack-remote-');
+    await gitInRepo(remoteDir, ['init', '--bare', '-b', 'main']);
+    await gitInRepo(dir, ['remote', 'add', 'origin', remoteDir]);
+
+    fs.writeFileSync(path.join(dir, 'seed.txt'), 'seed');
+    await gitInRepo(dir, ['add', 'seed.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'seed']);
+    await gitInRepo(dir, ['push', 'origin', 'main']);
+
+    await createBranch('feat/lease', dir);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+    await gitInRepo(dir, ['add', 'a.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: a']);
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(remoteDir, { recursive: true, force: true });
+    if (otherDir) {
+      await fs.promises.rm(otherDir, { recursive: true, force: true });
+      otherDir = '';
+    }
+  });
+
+  it('pushes and records the last-pushed SHA on first push', async () => {
+    expect(await readLastPushedSha('feat/lease', dir)).toBeNull();
+
+    await pushBranch('feat/lease', dir);
+
+    const head = await getBranchTip('feat/lease', dir);
+    expect(await readLastPushedSha('feat/lease', dir)).toBe(head);
+
+    const { stdout } = await gitInRepo(remoteDir, [
+      'rev-parse',
+      'refs/heads/feat/lease',
+    ]);
+    expect(stdout.trim()).toBe(head);
+  });
+
+  it('lease succeeds when our tracked SHA matches reality on remote', async () => {
+    await pushBranch('feat/lease', dir);
+    const firstSha = await getBranchTip('feat/lease', dir);
+
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+    await gitInRepo(dir, ['add', 'b.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: b']);
+
+    await expect(pushBranch('feat/lease', dir)).resolves.toBeUndefined();
+
+    const newSha = await getBranchTip('feat/lease', dir);
+    expect(newSha).not.toBe(firstSha);
+    expect(await readLastPushedSha('feat/lease', dir)).toBe(newSha);
+
+    const { stdout } = await gitInRepo(remoteDir, [
+      'rev-parse',
+      'refs/heads/feat/lease',
+    ]);
+    expect(stdout.trim()).toBe(newSha);
+  });
+
+  it('refuses with a lease error when a third party pushed concurrently', async () => {
+    await pushBranch('feat/lease', dir);
+    const trackedSha = await readLastPushedSha('feat/lease', dir);
+
+    otherDir = await fs.promises.mkdtemp('/tmp/dubstack-other-');
+    await gitInRepo(otherDir, ['clone', remoteDir, '.']);
+    await gitInRepo(otherDir, ['config', 'user.name', 'Other User']);
+    await gitInRepo(otherDir, ['config', 'user.email', 'other@dubstack.test']);
+    await gitInRepo(otherDir, ['checkout', 'feat/lease']);
+    fs.writeFileSync(path.join(otherDir, 'third-party.txt'), 'tp');
+    await gitInRepo(otherDir, ['add', 'third-party.txt']);
+    await gitInRepo(otherDir, ['commit', '-m', 'third party push']);
+    await gitInRepo(otherDir, ['push', 'origin', 'feat/lease']);
+
+    fs.writeFileSync(path.join(dir, 'c.txt'), 'c');
+    await gitInRepo(dir, ['add', 'c.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: c']);
+
+    await gitInRepo(dir, ['fetch', 'origin', 'feat/lease']);
+
+    const err = await pushBranch('feat/lease', dir).catch((e) => e);
+    expect(err).toBeInstanceOf(DubError);
+    expect(err.message).toMatch(
+      /refused: remote has updates not reflected in our last-pushed ref/,
+    );
+    expect((err as DubError).recovery.join('\n')).toMatch(/dub sync/);
+
+    expect(await readLastPushedSha('feat/lease', dir)).toBe(trackedSha);
+  });
+});
+
+describe('lastPushedRef', () => {
+  it('returns the dubstack ref path for a branch', () => {
+    expect(lastPushedRef('feat/x')).toBe('refs/dubstack/last-pushed/feat/x');
   });
 });
 

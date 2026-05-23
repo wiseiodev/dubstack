@@ -347,20 +347,117 @@ export async function getLastCommitMessage(
 }
 
 /**
- * Pushes a branch to origin with `--force-with-lease`.
- * @throws {DubError} If the push fails.
+ * Returns the local ref path used to track the last SHA we successfully
+ * pushed to `origin/<branch>`. We maintain this ourselves rather than
+ * trusting `refs/remotes/origin/<branch>`, which can be silently updated
+ * by background fetches (IDEs, watchers) and defeat `--force-with-lease`.
+ */
+export function lastPushedRef(branch: string): string {
+  return `refs/dubstack/last-pushed/${branch}`;
+}
+
+/**
+ * Reads our locally-tracked last-pushed SHA for a branch, or null if we
+ * have never recorded one.
+ */
+export async function readLastPushedSha(
+  branch: string,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-parse', '--verify', '--quiet', lastPushedRef(branch)],
+      { cwd },
+    );
+    const sha = stdout.trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Writes our locally-tracked last-pushed SHA for a branch. Only `dub submit`
+ * and `dub sync` should update this ref; never background processes.
+ * @throws {DubError} If the ref update fails.
+ */
+export async function writeLastPushedSha(
+  branch: string,
+  sha: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['update-ref', lastPushedRef(branch), sha], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to record last-pushed SHA for '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git update-ref ${lastPushedRef(branch)} ${sha}' manually to inspect the underlying error.`,
+        `Run 'dub sync' to reconcile state before the next push.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Pushes a branch to origin with `--force-with-lease`, scoped to our
+ * locally-tracked last-pushed SHA (`refs/dubstack/last-pushed/<branch>`).
+ *
+ * Using the tracked ref instead of git's default lease target avoids the
+ * race where a background fetch updates `refs/remotes/origin/<branch>`
+ * and silently makes the lease succeed against stale-on-disk state, which
+ * would let us overwrite work pushed by a teammate.
+ *
+ * On success, updates the tracked ref to the freshly-pushed SHA.
+ *
+ * On a first push (no tracked SHA recorded yet), falls back to bare
+ * `--force-with-lease`. Race protection kicks in for all subsequent pushes
+ * once the tracking ref is established.
+ *
+ * @throws {DubError} If the push fails. Lease rejection gets a specific
+ * recovery hint to run `dub sync` and retry.
  */
 export async function pushBranch(branch: string, cwd: string): Promise<void> {
+  const trackedSha = await readLastPushedSha(branch, cwd);
+  const leaseArg = trackedSha
+    ? `--force-with-lease=refs/heads/${branch}:${trackedSha}`
+    : '--force-with-lease';
+
   try {
-    await execa('git', ['push', '--force-with-lease', 'origin', branch], {
-      cwd,
-    });
-  } catch {
-    throw new DubError(`Failed to push '${branch}'.`, [
-      `Run 'dub sync' to reconcile remote updates, then retry the push.`,
-      `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
-    ]);
+    await execa('git', ['push', leaseArg, 'origin', branch], { cwd });
+  } catch (error) {
+    const details = readGitCommandOutput(error);
+    if (isLeaseRejectionError(details)) {
+      throw new DubError(
+        formatGitFailure(
+          `Push of '${branch}' refused: remote has updates not reflected in our last-pushed ref.`,
+          details,
+        ),
+        [
+          `Run 'dub sync' to reconcile remote updates, then retry 'dub submit'.`,
+          `Run 'git fetch origin ${branch}' and inspect 'origin/${branch}' to see the third-party changes.`,
+        ],
+      );
+    }
+    throw new DubError(
+      formatGitFailure(`Failed to push '${branch}'.`, details),
+      [
+        `Run 'dub sync' to reconcile remote updates, then retry the push.`,
+        `Run 'git push --force-with-lease origin ${branch}' manually to see the underlying error.`,
+      ],
+    );
   }
+
+  const newSha = await getBranchTip(branch, cwd);
+  await writeLastPushedSha(branch, newSha, cwd);
+}
+
+function isLeaseRejectionError(output: string): boolean {
+  return output.toLowerCase().includes('stale info');
 }
 
 /**
