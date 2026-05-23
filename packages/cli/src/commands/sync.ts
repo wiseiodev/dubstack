@@ -748,17 +748,13 @@ export async function sync(
           interactive: options.interactive,
           promptChoice: () =>
             choose(
-              `Branch '${branch}' diverged from remote. How should sync proceed?`,
+              `Branch '${branch}' diverged from remote and an auto-rebase trial had conflicts. How should sync proceed?`,
               [
                 {
                   label: 'Take remote version (discard local divergence)',
                   value: 'take-remote',
                 },
                 { label: 'Keep local version', value: 'keep-local' },
-                {
-                  label: 'Attempt reconciliation and keep local commits',
-                  value: 'reconcile',
-                },
                 { label: 'Skip this branch', value: 'skip' },
               ],
             ),
@@ -784,17 +780,6 @@ export async function sync(
             status: 'reconcile-needed',
             action: 'kept-local',
             message: `• Kept local '${branch}' (remote divergence ignored).`,
-            reconcileSource: 'sync-keep-local',
-          };
-          recordSource(result.reconcileSources, 'sync-keep-local');
-        } else if (decision === 'reconcile') {
-          // Auto-rebase already happened above; reaching this branch means the
-          // rebase failed. We surface the kept-local state to the user.
-          outcome = {
-            branch,
-            status: 'reconcile-needed',
-            action: 'kept-local',
-            message: `⚠ Could not auto-reconcile '${branch}'. Kept local state; reconcile manually.`,
             reconcileSource: 'sync-keep-local',
           };
           recordSource(result.reconcileSources, 'sync-keep-local');

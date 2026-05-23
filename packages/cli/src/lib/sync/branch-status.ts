@@ -31,19 +31,21 @@ export function classifyBranchSyncStatus(
   if (!input.hasRemote) return 'missing-remote';
   if (!input.hasLocal) return 'missing-local';
 
+  // These flags trump SHA equality: a squash-merged branch with trailing
+  // local commits still needs cleanup, and a parent-merged orphan still needs
+  // reparenting even when the child happens to match its remote tip.
+  if (input.squashMergedWithTrailingCommits) {
+    return 'squash-merged-with-trailing-commits';
+  }
+  if (input.parentPrMerged) {
+    return 'parent-merged-orphan';
+  }
+
   if (input.localSha && input.remoteSha && input.localSha === input.remoteSha) {
     if (!input.hasSubmittedBaseline) {
       return 'updated-outside-dubstack-but-up-to-date';
     }
     return 'up-to-date';
-  }
-
-  if (input.squashMergedWithTrailingCommits) {
-    return 'squash-merged-with-trailing-commits';
-  }
-
-  if (input.parentPrMerged) {
-    return 'parent-merged-orphan';
   }
 
   if (!input.hasSubmittedBaseline) return 'unsubmitted';

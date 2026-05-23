@@ -3,7 +3,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
-import type { ReconcileSource, ReconcileSourceHistogram } from './sync/types';
+import {
+  RECONCILE_SOURCES,
+  type ReconcileSource,
+  type ReconcileSourceHistogram,
+} from './sync/types';
+
+const VALID_RECONCILE_SOURCES = new Set<string>(RECONCILE_SOURCES);
 
 /** A branch within a stack. */
 export interface Branch {
@@ -271,7 +277,12 @@ function migrateReconcileSource(
   source: string | null | undefined,
 ): ReconcileSource | null {
   if (!source) return null;
-  return LEGACY_RECONCILE_SOURCE_MAP[source] ?? (source as ReconcileSource);
+  const mapped = LEGACY_RECONCILE_SOURCE_MAP[source];
+  if (mapped) return mapped;
+  if (VALID_RECONCILE_SOURCES.has(source)) return source as ReconcileSource;
+  // Unknown / corrupted value — fall back to 'imported' so downstream logic
+  // (e.g. isAdoptRemoteSource) treats it as untrusted provenance.
+  return 'imported';
 }
 
 function normalizeBranch(branch: Branch): Branch {
