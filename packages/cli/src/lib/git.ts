@@ -1514,6 +1514,42 @@ export async function interactivePatchCheckout(
 }
 
 /**
+ * Creates a new branch starting at a specific commit/ref and switches to it.
+ * Use this when you need the new branch anchored to a captured SHA rather
+ * than a possibly-moving branch tip (e.g. so a background fetch updating
+ * the parent ref cannot relocate the new branch's starting point).
+ *
+ * @throws {DubError} If a branch with that name already exists or `ref` is unknown.
+ */
+export async function createBranchFrom(
+  name: string,
+  ref: string,
+  cwd: string,
+): Promise<void> {
+  if (await branchExists(name, cwd)) {
+    throw new DubError(`Branch '${name}' already exists.`, [
+      `Run 'dub checkout ${name}' to switch to the existing branch.`,
+      'Pick a different branch name and retry.',
+      `Run 'dub delete ${name}' to remove the existing branch first.`,
+    ]);
+  }
+  try {
+    await execa('git', ['checkout', '-b', name, ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to create branch '${name}' from '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git rev-parse ${ref}' to confirm the ref exists.`,
+        `Run 'git checkout -b ${name} ${ref}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
+/**
  * Soft-resets the currently checked-out branch to a ref. Leaves the index
  * holding the difference between the old tip and `ref`, and the working tree
  * untouched.
@@ -1533,9 +1569,25 @@ export async function softResetTo(ref: string, cwd: string): Promise<void> {
 }
 
 /**
+ * Sentinel thrown by {@link interactiveResetPatch} when the user quits the
+ * interactive prompt (presses `q`). Callers can branch on this to emit a
+ * "split aborted by user" message instead of a generic git-failure error.
+ */
+export class InteractivePatchQuitError extends Error {
+  constructor() {
+    super('Interactive hunk session quit by user.');
+    this.name = 'InteractivePatchQuitError';
+  }
+}
+
+/**
  * Runs `git reset --patch HEAD` interactively so the user can selectively
  * unstage hunks. Hunks the user answers `y` to are unstaged into the working
  * tree; hunks answered `n` to remain in the index.
+ *
+ * @throws {InteractivePatchQuitError} If the user quit the prompt (exit code 1
+ *   with no stderr — git's signal for a clean `q`).
+ * @throws {DubError} For any other failure.
  */
 export async function interactiveResetPatch(cwd: string): Promise<void> {
   try {
@@ -1544,11 +1596,14 @@ export async function interactiveResetPatch(cwd: string): Promise<void> {
       stdio: 'inherit',
     });
   } catch (error) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    const stderr = readGitCommandOutput(error).trim();
+    if (exitCode === 1 && stderr.length === 0) {
+      // `git reset --patch` exits 1 with no stderr when the user presses `q`.
+      throw new InteractivePatchQuitError();
+    }
     throw new DubError(
-      formatGitFailure(
-        'Interactive hunk reset failed.',
-        readGitCommandOutput(error),
-      ),
+      formatGitFailure('Interactive hunk reset failed.', stderr),
       [
         "Run 'git reset --patch HEAD' manually to inspect the error.",
         "Run 'git status' to confirm the working tree state.",

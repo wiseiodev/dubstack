@@ -16,13 +16,13 @@ import {
   cherryPick,
   cherryPickAbort,
   commitStaged,
-  createBranch,
+  createBranchFrom,
   getBranchTip,
   getCurrentBranch,
-  getDiff,
   getDiffBetween,
   getDiffFileNamesBetween,
   hasStagedChanges,
+  InteractivePatchQuitError,
   interactiveResetPatch,
   isValidBranchName,
   isWorkingTreeClean,
@@ -65,6 +65,12 @@ export interface SplitOptions {
    * When supplied, skips the interactive prompt. Useful for scripted runs and tests.
    */
   commitPicks?: number[];
+  /**
+   * For `--by-commit`: raw string from the CLI (`"1,3-4"` style) to be parsed
+   * + validated against the actual commit count. Prefer this over `commitPicks`
+   * when wiring from the CLI so the user gets a meaningful out-of-range error.
+   */
+  commitPicksRaw?: string;
   /** Close any existing PR on the source branch instead of leaving it for `dub submit` to force-push. */
   closeOldPr?: boolean;
   /** Skip the auto-restack after the split completes. */
@@ -120,7 +126,7 @@ const DEFAULT_DEPS: SplitDependencies = {
  *
  * - `--by-commit`: interactive numbered checklist of commits to extract.
  * - `--by-file <files...>`: non-interactive; the listed files move to the new branch.
- * - `--by-hunk`: interactive `git checkout -p` style hunk picker.
+ * - `--by-hunk`: interactive `git reset --patch` hunk picker.
  * - `--ai`: model proposes a semantic split; user approves before any branch changes.
  *
  * After the split, the existing restack flow runs so descendants follow the
@@ -269,10 +275,16 @@ export async function split(
         ],
       );
     }
-    const picks =
-      options.commitPicks && options.commitPicks.length > 0
-        ? validateCommitPicks(options.commitPicks, commits.length)
-        : await pickCommitsInteractive(commits, options);
+    let picks: number[];
+    if (options.commitPicksRaw && options.commitPicksRaw.trim().length > 0) {
+      // CLI path — parse the raw string against the real commit count so the
+      // user gets a "pick numbers between 1 and N" message on a bad input.
+      picks = parseIndexSelection(options.commitPicksRaw, commits.length);
+    } else if (options.commitPicks && options.commitPicks.length > 0) {
+      picks = validateCommitPicks(options.commitPicks, commits.length);
+    } else {
+      picks = await pickCommitsInteractive(commits, options);
+    }
     if (picks.length === 0 || picks.length === commits.length) {
       throw new DubError(
         'Commit selection must move at least one and leave at least one.',
@@ -399,11 +411,11 @@ async function extractByFiles(
 
   const sourceTip = await getBranchTip(sourceBranch, cwd);
 
-  // 1) Create the new sibling branch off the parent tip.
-  await checkoutBranch(parentBranch, cwd);
-  // Detach onto parentTip explicitly so we are not influenced by drift.
-  await checkoutBranch(parentBranch, cwd);
-  await createBranch(newBranchName, cwd);
+  // 1) Create the new sibling branch anchored to the captured `parentTip` SHA
+  //    rather than the `parentBranch` ref. This guarantees the new branch
+  //    starts where we expect even if a concurrent fetch updates the parent
+  //    ref between the snapshot in split() and this point.
+  await createBranchFrom(newBranchName, parentTip, cwd);
 
   // 2) Apply the source-tip contents of the selected files onto the new branch.
   //    Files that exist at the source tip get checked out; files that exist
@@ -536,8 +548,9 @@ async function extractByCommits(
     .map((c) => c.sha);
   const sourceTipBefore = await getBranchTip(sourceBranch, cwd);
 
-  await checkoutBranch(parentBranch, cwd);
-  await createBranch(newBranchName, cwd);
+  // Anchor to the captured parentTip SHA so a concurrent fetch can't relocate
+  // the new branch's starting commit.
+  await createBranchFrom(newBranchName, parentTip, cwd);
   for (const sha of movedCommits) {
     try {
       await cherryPick(sha, cwd);
@@ -630,9 +643,9 @@ async function extractByHunks(
   }
 
   // Create the new branch from sourceTip so we can soft-reset it back to
-  // parent without moving the source branch pointer.
-  await checkoutBranch(sourceBranch, cwd);
-  await createBranch(newBranchName, cwd);
+  // parent without moving the source branch pointer. Anchor to the captured
+  // sourceTip SHA so a concurrent fetch can't relocate the starting commit.
+  await createBranchFrom(newBranchName, sourceTip, cwd);
 
   let stashed = false;
   let newBranchTip: string;
@@ -720,6 +733,17 @@ async function extractByHunks(
     await checkoutBranch(sourceBranch, cwd).catch(() => {});
     await resetHard(sourceTip, cwd).catch(() => {});
     await safeDeleteBranch(newBranchName, cwd);
+    if (error instanceof InteractivePatchQuitError) {
+      // Translate the quit signal into a clear user-facing message; the
+      // rollback above already restored both branches.
+      throw new DubError(
+        `Hunk split aborted by user — '${sourceBranch}' restored to its pre-split tip.`,
+        [
+          "Run 'dub split --by-hunk' again when ready to pick hunks.",
+          "Run 'dub split --by-file <files...>' to split by file instead.",
+        ],
+      );
+    }
     throw error;
   }
 
@@ -734,9 +758,6 @@ async function extractByHunks(
     commits: [newBranchTip],
   };
 }
-
-// `getDiff` import is kept for future use (e.g. dry-run hunk previews).
-void getDiff;
 
 interface ProposeAiSplitInput {
   cwd: string;
@@ -911,9 +932,18 @@ function buildExtractCommitMessage(input: {
   files: string[];
   summary?: string;
 }): string {
+  // Strip any leading Conventional Commit prefix the AI may have included in
+  // its summary (e.g. "feat: add auth files") so we don't end up with
+  // "split: feat: add auth files".
+  const cleanedSummary = input.summary
+    ?.trim()
+    .replace(
+      /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?:\s*/i,
+      '',
+    );
   const subjectBase =
-    input.summary && input.summary.length > 0
-      ? input.summary
+    cleanedSummary && cleanedSummary.length > 0
+      ? cleanedSummary
       : `extract ${input.files.length} file(s) from '${input.sourceBranch}'`;
   const subject = `split: ${subjectBase}`;
   const body = [

@@ -1527,7 +1527,7 @@ program
   )
   .option(
     '--by-hunk',
-    'Interactively pick hunks to extract via `git checkout -p`',
+    "Interactively pick hunks via `git reset --patch` (answer 'y' to move a hunk back to source, 'n' to keep it on the new branch)",
   )
   .option('--ai', 'Ask the AI assistant to propose a semantic split')
   .option('--name <branch>', 'New branch name for the extracted slice')
@@ -1551,7 +1551,7 @@ program
 Examples:
   $ dub split --by-file packages/cli/src/lib/foo.ts --name feat/foo
   $ dub split --by-commit                          Interactive numbered checklist
-  $ dub split --by-hunk                            Interactive 'git checkout -p' style
+  $ dub split --by-hunk                            Interactive 'git reset --patch' style
   $ dub split --ai                                 AI-propose a semantic split
 
 PR handling:
@@ -1663,21 +1663,13 @@ async function runSplit(options: {
   }
 
   const mode = selectedModes[0];
-  let commitPicks: number[] | undefined;
-  if (options.commitPicks) {
-    const { parseIndexSelection } = await import('./lib/split');
-    // parseIndexSelection returns 0-indexed positions; convert to 1-indexed
-    // because the split() API takes 1-indexed picks.
-    commitPicks = parseIndexSelection(options.commitPicks, 1_000_000).map(
-      (i) => i + 1,
-    );
-  }
-
+  // Pass the raw string straight through; split() parses + validates it
+  // against the real commit count so error messages are meaningful.
   const result = await split(process.cwd(), {
     mode,
     files: options.byFile,
     name: options.name,
-    commitPicks,
+    commitPicksRaw: options.commitPicks,
     closeOldPr: options.closeOldPr,
     noRestack: options.restack === false,
     dryRun: options.dryRun,
