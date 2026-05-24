@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-24 - Submit scope flags (--upstack / --downstack / --branch / --stack) + --path deprecation</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-24</div>
+        <h1>DUB-24 - Submit scope flags (--upstack / --downstack / --branch / --stack) + --path deprecation</h1>
+        <div class="meta"><span><strong>22</strong> files</span>
+<span><span class="add">+452</span> / <span class="del">-95</span></span>
+<span>branch <strong>feature/dub-24-submit-scope-flags-upstack-downstack-branch-stack-path</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Replace `dub submit --path current|stack` with Graphite-style scope flags (--upstack, --downstack, --stack, --branch &lt;name&gt;). Two-release deprecation: v1.x emits a warning, v2 removes --path entirely.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Adds four mutually-exclusive scope flags to `dub submit` and `dub ss`, keeps `--path current|stack` working in v1.x with a deprecation warning, refactors the submit plan around a `SubmitScope` discriminated union, and updates every caller, the MCP schema, and the docs to match.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Today&#39;s two-mode `--path current|stack` doesn&#39;t express the most common stack operations: upstack (current + descendants) and single-branch submit.</p>
+<p class="lede">Graphite&#39;s `--upstack`/`--downstack`/`--stack`/`--branch` vocabulary is the de-facto standard users already think in.</p>
+<p class="lede">DUB-20 made tree-shaped submits the default — flags need to follow.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`dub submit --path current` (default) submits ancestors + current.</li>
+<li>`dub submit --path stack` submits the full stack from trunk.</li>
+<li>No way to submit only descendants of the current branch, and no way to submit a single named branch without checking it out first.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`dub submit` (default) and `--downstack` both submit current + ancestors.</li>
+<li>`--upstack` submits current + all descendants (new BFS walker).</li>
+<li>`--stack` submits the full tree from trunk.</li>
+<li>`--branch &lt;name&gt;` submits exactly one named branch from any tracked stack.</li>
+<li>Scope flags are mutually exclusive; `--path` still works but warns on stderr and will be removed in v2.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/submit.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+159</span> <span class="del">-13</span></span>
+  </summary>
+  <div class="file-body">
+    <p>New `SubmitScope` discriminated union and `resolveScope(options)` helper. `getSubmitPlan` dispatches by scope kind. New `getUpstackBranches` walks descendants in BFS with deterministic sibling order, `getDownstackBranches` is the renamed `getCurrentPathBranches`. `--branch &lt;name&gt;` resolves the stack from the named branch (not the current branch).</p>
+    <div class="code"><pre>export type SubmitScope =
+  | { kind: &#39;downstack&#39; }
+  | { kind: &#39;upstack&#39; }
+  | { kind: &#39;stack&#39; }
+  | { kind: &#39;branch&#39;; branch: string };
+
+export function resolveScope(options: SubmitOptions): SubmitScope {
+  // Throws on &gt;1 active scope flag; emits deprecation warning for --path.
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+48</span> <span class="del">-12</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Wires --upstack/--downstack/--stack/--branch on both `submit` and `ss`. Keeps --path with no default value so we can detect explicit use and warn. Help text + examples updated. `describeScopeLabel` formats the scope for terminal output.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/mcp.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+33</span> <span class="del">-7</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Mirrors the CLI scope flags in the MCP `dubstack.submit` tool schema and dispatches them through `submit()`. History capture key list includes the new properties.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/ready.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+6</span> <span class="del">-6</span></span>
+  </summary>
+  <div class="file-body">
+    <p>`ReadyResult.submitPath: &#39;current&#39;|&#39;stack&#39;|null` renamed to `submitScope: SubmitScope | null` to mirror the new shape. Calls `getSubmitPlan(..., { downstack: true })`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/merge-next.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+2</span> <span class="del">-2</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Switches to `{ downstack: true }` and replaces a `dub ss --path current` hint with the new default `dub ss`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/doctor.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+2</span> <span class="del">-2</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Remediation hints now print the simpler `dub submit` instead of `dub submit --path current`.</p>
+    
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/test/commands/submit-tree.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+95</span> <span class="del">-4</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds seven tests covering each scope (default, --upstack, --downstack, --stack, --branch &lt;name&gt;), --branch validation against untracked names, mutex flag rejection, and both --path deprecation warnings.</p>
+    <div class="code"><pre>it(&#39;rejects passing more than one scope flag&#39;, async () =&gt; {
+  await expect(
+    getSubmitPlan(dir, { upstack: true, downstack: true }),
+  ).rejects.toThrow(&#39;mutually exclusive&#39;);
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/commands/submit.mdx</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+34</span> <span class="del">-7</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Documents the four new flags, the mutex rule, and adds a v1-&gt;v2 migration table mapping `--path current` to `--downstack` and `--path stack` to `--stack`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">README.md</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+13</span> <span class="del">-12</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Top-level submit examples replaced with the new flags; deprecation notice added.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-24-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+29</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback for a CLI-only change. Captures the three gate runs, the four built-CLI smoke scenarios, and the adversarial-review summary.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Mutual-exclusion accounting in resolveScope</div>
+    <div class="note"><code>packages/cli/src/commands/submit.ts: resolveScope</code> All five flags (--upstack, --downstack, --stack, --branch, --path) participate in the same mutex tally so `--path current --upstack` is rejected with a single coherent error. Verify the flag set is what you expect.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">--branch &lt;name&gt; scope resolution</div>
+    <div class="note"><code>packages/cli/src/commands/submit.ts: getSubmitPlan (target branch lookup)</code> Unlike the other scopes, `--branch &lt;name&gt;` does not require the current branch to be tracked — it resolves the stack from the named branch. Root branches are rejected via the existing guard with a tailored message.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Upstack BFS determinism</div>
+    <div class="note"><code>packages/cli/src/commands/submit.ts: getUpstackBranches</code> Sibling order is alphabetical via `localeCompare` so push order is stable across runs and matches the BFS used by `topologicalOrder`.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">Deprecation warning stream</div>
+    <div class="note"><code>packages/cli/src/commands/submit.ts: resolveScope (console.warn calls)</code> Warnings go to stderr (Node&#39;s default for `console.warn`) so they don&#39;t contaminate stdout for scripts piping submit output, but still surface in interactive sessions.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest suite covering scope dispatch + mutex + deprecation warnings</div>
+      <div class="note">696 tests across 84 files green (`pnpm test`). Seven new tests in submit-tree.test.ts target every new path.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Built CLI smoke: help text, mutex rejection, deprecation warning</div>
+      <div class="note">`node packages/cli/dist/index.js submit --help` shows new flags; `submit --upstack --downstack` exits with the mutex error; `submit --path current` emits the expected warning.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tsup bundle for the CLI</div>
+      <div class="note">`pnpm --filter dubstack build` -&gt; `dist/index.js` 393 KB, clean build.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome (lint + format)</div>
+      <div class="note">Command: pnpm checks. Checked 246 files, no fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. tsc --noEmit clean across `dubstack` and `docs` packages.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest</div>
+      <div class="note">Command: pnpm test. 84 files, 696 tests passed; new tests in submit-tree.test.ts included.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Evals</div>
+      <div class="note">Command: pnpm evals. AI metadata generation prompts unchanged; evals require provider credentials and are out of scope per AGENTS.md.</div>
+    </div>
+    <span class="status skipped">skipped</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Deterministic CLI evidence: gate runs + built-binary smoke tests for help text, mutex enforcement, and deprecation warning.</div>
+      <div class="note">CLI-only change with no browser surface — no .tsx files modified.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-24-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>`dub submit --help` shows all four new flags + deprecated --path.</li>
+<li>`dub submit --upstack --downstack` errors with mutex message.</li>
+<li>`dub submit --path current` warns on stderr then continues with downstack behaviour.</li>
+<li>Vitest covers all five scope kinds plus both --path warning paths.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Four new flags implemented with mutual exclusion</div>
+      <div class="note">Flags declared on submit/ss in index.ts; resolveScope() rejects multi-flag combinations; unit test `rejects passing more than one scope flag` covers it.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`--path current` / `--path stack` emit deprecation warning and still work</div>
+      <div class="note">console.warn in resolveScope() with the exact wording from the issue; two unit tests verify warning + behavioural equivalence.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`getSubmitPlan` accepts the new scope and returns correct branch sets</div>
+      <div class="note">selectScopedBranches dispatches per kind; integration tests over a tree stack assert each branch set.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">CLI help text updated</div>
+      <div class="note">Help block under `dub submit --help` lists --upstack/--downstack/--stack/--branch with descriptions and updated Examples section.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">README and migration docs updated</div>
+      <div class="note">README.md, QUICKSTART.md, AGENTS.md, apps/docs/content/docs/commands/submit.mdx (with migration table), stack-graph.mdx, doctor.mdx, conflict-resolution.mdx, dubstack skill files all updated.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests for each scope and the deprecation warning</div>
+      <div class="note">Seven new tests in `packages/cli/test/commands/submit-tree.test.ts` cover default, --upstack, --downstack, --stack, --branch, mutex, and both --path warnings.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer (feature-dev:code-reviewer) flagged one wording nit on the root-branch error path when `--branch &lt;root&gt;` is passed; resolved by replacing the recovery hint with &#39;Choose a non-root tracked branch name.&#39; before commit.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-20 (tree-walking submit)</div>
+  <div class="note">completed (merged into main)</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Ship as a v1 feature: new flags are additive, existing scripts keep working with a one-time deprecation warning on stderr. v2 will remove `--path` and the `--fix` alias.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Ship to v1.x</div>
+  <div class="note">New flags become available immediately; existing `--path` users see a stderr warning per invocation but no behaviour change.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Before v2</div>
+  <div class="label">Remove --path and --fix</div>
+  <div class="note">Strip the deprecated `--path` option, the `SubmitPathMode` type, and the `--fix` no-op alias. Update docs to remove the migration table once v2 ships.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>0d9ed8b</strong> <code>0d9ed8b6961a7bf2d982c926ba6e38aa13aa8728</code></div>
+  <pre>feat(submit): scope flags --upstack/--downstack/--branch/--stack [DUB-24]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">submit.ts</a>
+<a href="#tour" class="sub">index.ts</a>
+<a href="#tour" class="sub">mcp.ts</a>
+<a href="#tour" class="sub">ready.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

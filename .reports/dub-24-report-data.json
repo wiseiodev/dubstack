@@ -1,0 +1,295 @@
+{
+  "meta": {
+    "workId": "DUB-24",
+    "title": "Submit scope flags (--upstack / --downstack / --branch / --stack) + --path deprecation",
+    "artifactId": "dub-24",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-24-submit-scope-flags-upstack-downstack-branch-stack-path",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-24",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 22,
+    "additions": 452,
+    "deletions": 95,
+    "diffStat": "22 files changed, 452 insertions(+), 95 deletions(-)"
+  },
+  "prompt": "Replace `dub submit --path current|stack` with Graphite-style scope flags (--upstack, --downstack, --stack, --branch <name>). Two-release deprecation: v1.x emits a warning, v2 removes --path entirely.",
+  "tldr": "Adds four mutually-exclusive scope flags to `dub submit` and `dub ss`, keeps `--path current|stack` working in v1.x with a deprecation warning, refactors the submit plan around a `SubmitScope` discriminated union, and updates every caller, the MCP schema, and the docs to match.",
+  "why": {
+    "motivation": [
+      "Today's two-mode `--path current|stack` doesn't express the most common stack operations: upstack (current + descendants) and single-branch submit.",
+      "Graphite's `--upstack`/`--downstack`/`--stack`/`--branch` vocabulary is the de-facto standard users already think in.",
+      "DUB-20 made tree-shaped submits the default — flags need to follow."
+    ],
+    "before": [
+      "`dub submit --path current` (default) submits ancestors + current.",
+      "`dub submit --path stack` submits the full stack from trunk.",
+      "No way to submit only descendants of the current branch, and no way to submit a single named branch without checking it out first."
+    ],
+    "after": [
+      "`dub submit` (default) and `--downstack` both submit current + ancestors.",
+      "`--upstack` submits current + all descendants (new BFS walker).",
+      "`--stack` submits the full tree from trunk.",
+      "`--branch <name>` submits exactly one named branch from any tracked stack.",
+      "Scope flags are mutually exclusive; `--path` still works but warns on stderr and will be removed in v2."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/submit.ts",
+      "changeType": "mod",
+      "additions": 159,
+      "deletions": 13,
+      "explanation": "New `SubmitScope` discriminated union and `resolveScope(options)` helper. `getSubmitPlan` dispatches by scope kind. New `getUpstackBranches` walks descendants in BFS with deterministic sibling order, `getDownstackBranches` is the renamed `getCurrentPathBranches`. `--branch <name>` resolves the stack from the named branch (not the current branch).",
+      "snippet": "export type SubmitScope =\n  | { kind: 'downstack' }\n  | { kind: 'upstack' }\n  | { kind: 'stack' }\n  | { kind: 'branch'; branch: string };\n\nexport function resolveScope(options: SubmitOptions): SubmitScope {\n  // Throws on >1 active scope flag; emits deprecation warning for --path.\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 48,
+      "deletions": 12,
+      "explanation": "Wires --upstack/--downstack/--stack/--branch on both `submit` and `ss`. Keeps --path with no default value so we can detect explicit use and warn. Help text + examples updated. `describeScopeLabel` formats the scope for terminal output.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 33,
+      "deletions": 7,
+      "explanation": "Mirrors the CLI scope flags in the MCP `dubstack.submit` tool schema and dispatches them through `submit()`. History capture key list includes the new properties.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/ready.ts",
+      "changeType": "mod",
+      "additions": 6,
+      "deletions": 6,
+      "explanation": "`ReadyResult.submitPath: 'current'|'stack'|null` renamed to `submitScope: SubmitScope | null` to mirror the new shape. Calls `getSubmitPlan(..., { downstack: true })`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/merge-next.ts",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 2,
+      "explanation": "Switches to `{ downstack: true }` and replaces a `dub ss --path current` hint with the new default `dub ss`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/doctor.ts",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 2,
+      "explanation": "Remediation hints now print the simpler `dub submit` instead of `dub submit --path current`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/submit-tree.test.ts",
+      "changeType": "mod",
+      "additions": 95,
+      "deletions": 4,
+      "explanation": "Adds seven tests covering each scope (default, --upstack, --downstack, --stack, --branch <name>), --branch validation against untracked names, mutex flag rejection, and both --path deprecation warnings.",
+      "snippet": "it('rejects passing more than one scope flag', async () => {\n  await expect(\n    getSubmitPlan(dir, { upstack: true, downstack: true }),\n  ).rejects.toThrow('mutually exclusive');\n});",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "apps/docs/content/docs/commands/submit.mdx",
+      "changeType": "mod",
+      "additions": 34,
+      "deletions": 7,
+      "explanation": "Documents the four new flags, the mutex rule, and adds a v1->v2 migration table mapping `--path current` to `--downstack` and `--path stack` to `--stack`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "README.md",
+      "changeType": "mod",
+      "additions": 13,
+      "deletions": 12,
+      "explanation": "Top-level submit examples replaced with the new flags; deprecation notice added.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-24-qa.md",
+      "changeType": "new",
+      "additions": 29,
+      "deletions": 0,
+      "explanation": "Self-QA fallback for a CLI-only change. Captures the three gate runs, the four built-CLI smoke scenarios, and the adversarial-review summary.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Mutual-exclusion accounting in resolveScope",
+      "location": "packages/cli/src/commands/submit.ts: resolveScope",
+      "rationale": "All five flags (--upstack, --downstack, --stack, --branch, --path) participate in the same mutex tally so `--path current --upstack` is rejected with a single coherent error. Verify the flag set is what you expect."
+    },
+    {
+      "title": "--branch <name> scope resolution",
+      "location": "packages/cli/src/commands/submit.ts: getSubmitPlan (target branch lookup)",
+      "rationale": "Unlike the other scopes, `--branch <name>` does not require the current branch to be tracked — it resolves the stack from the named branch. Root branches are rejected via the existing guard with a tailored message."
+    },
+    {
+      "title": "Upstack BFS determinism",
+      "location": "packages/cli/src/commands/submit.ts: getUpstackBranches",
+      "rationale": "Sibling order is alphabetical via `localeCompare` so push order is stable across runs and matches the BFS used by `topologicalOrder`."
+    },
+    {
+      "title": "Deprecation warning stream",
+      "location": "packages/cli/src/commands/submit.ts: resolveScope (console.warn calls)",
+      "rationale": "Warnings go to stderr (Node's default for `console.warn`) so they don't contaminate stdout for scripts piping submit output, but still surface in interactive sessions."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "Vitest suite covering scope dispatch + mutex + deprecation warnings",
+      "status": "done",
+      "evidence": "696 tests across 84 files green (`pnpm test`). Seven new tests in submit-tree.test.ts target every new path."
+    },
+    {
+      "kind": "manual",
+      "label": "Built CLI smoke: help text, mutex rejection, deprecation warning",
+      "status": "done",
+      "evidence": "`node packages/cli/dist/index.js submit --help` shows new flags; `submit --upstack --downstack` exits with the mutex error; `submit --path current` emits the expected warning."
+    },
+    {
+      "kind": "build",
+      "label": "Tsup bundle for the CLI",
+      "status": "done",
+      "evidence": "`pnpm --filter dubstack build` -> `dist/index.js` 393 KB, clean build."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome (lint + format)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 246 files, no fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit clean across `dubstack` and `docs` packages."
+    },
+    {
+      "name": "Vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "84 files, 696 tests passed; new tests in submit-tree.test.ts included."
+    },
+    {
+      "name": "Evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "AI metadata generation prompts unchanged; evals require provider credentials and are out of scope per AGENTS.md."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "CLI-only change with no browser surface — no .tsx files modified.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-24-qa.md",
+    "caption": "Deterministic CLI evidence: gate runs + built-binary smoke tests for help text, mutex enforcement, and deprecation warning.",
+    "scenarios": [
+      "`dub submit --help` shows all four new flags + deprecated --path.",
+      "`dub submit --upstack --downstack` errors with mutex message.",
+      "`dub submit --path current` warns on stderr then continues with downstack behaviour.",
+      "Vitest covers all five scope kinds plus both --path warning paths."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "Four new flags implemented with mutual exclusion",
+      "status": "satisfied",
+      "evidence": "Flags declared on submit/ss in index.ts; resolveScope() rejects multi-flag combinations; unit test `rejects passing more than one scope flag` covers it."
+    },
+    {
+      "criterion": "`--path current` / `--path stack` emit deprecation warning and still work",
+      "status": "satisfied",
+      "evidence": "console.warn in resolveScope() with the exact wording from the issue; two unit tests verify warning + behavioural equivalence."
+    },
+    {
+      "criterion": "`getSubmitPlan` accepts the new scope and returns correct branch sets",
+      "status": "satisfied",
+      "evidence": "selectScopedBranches dispatches per kind; integration tests over a tree stack assert each branch set."
+    },
+    {
+      "criterion": "CLI help text updated",
+      "status": "satisfied",
+      "evidence": "Help block under `dub submit --help` lists --upstack/--downstack/--stack/--branch with descriptions and updated Examples section."
+    },
+    {
+      "criterion": "README and migration docs updated",
+      "status": "satisfied",
+      "evidence": "README.md, QUICKSTART.md, AGENTS.md, apps/docs/content/docs/commands/submit.mdx (with migration table), stack-graph.mdx, doctor.mdx, conflict-resolution.mdx, dubstack skill files all updated."
+    },
+    {
+      "criterion": "Tests for each scope and the deprecation warning",
+      "status": "satisfied",
+      "evidence": "Seven new tests in `packages/cli/test/commands/submit-tree.test.ts` cover default, --upstack, --downstack, --stack, --branch, mutex, and both --path warnings."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer (feature-dev:code-reviewer) flagged one wording nit on the root-branch error path when `--branch <root>` is passed; resolved by replacing the recovery hint with 'Choose a non-root tracked branch name.' before commit."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 (tree-walking submit)",
+      "status": "completed (merged into main)"
+    }
+  ],
+  "rollout": {
+    "summary": "Ship as a v1 feature: new flags are additive, existing scripts keep working with a one-time deprecation warning on stderr. v2 will remove `--path` and the `--fix` alias.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship to v1.x",
+        "details": "New flags become available immediately; existing `--path` users see a stderr warning per invocation but no behaviour change."
+      },
+      {
+        "when": "Before v2",
+        "label": "Remove --path and --fix",
+        "details": "Strip the deprecated `--path` option, the `SubmitPathMode` type, and the `--fix` no-op alias. Update docs to remove the migration table once v2 ships."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "0d9ed8b6961a7bf2d982c926ba6e38aa13aa8728",
+    "shortSha": "0d9ed8b",
+    "message": "feat(submit): scope flags --upstack/--downstack/--branch/--stack [DUB-24]"
+  }
+}
