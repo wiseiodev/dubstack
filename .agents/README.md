@@ -7,6 +7,7 @@ This folder holds guidance aimed at coding agents and contributors collaborating
 - `skills/`: task-oriented skills with runnable workflows and references.
 - `styleguide.md`: project-wide coding and testing conventions for day-to-day edits.
 - `patterns/`: focused implementation patterns used across commands and libraries.
+- `templates/`: copy-paste scaffolds for new commands and similar shells.
 
 ## Suggested Future Additions
 
@@ -20,5 +21,7 @@ Current pattern docs:
 - `patterns/testing.md`
 - `patterns/error-messages.md`
 - `patterns/git-safety.md`
+- `patterns/tier-3-commands.md`
+- `templates/tier-3-command.md`
 
 Keep these docs short, practical, and example-driven so both humans and agents can apply them quickly.

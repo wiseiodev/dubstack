@@ -1,0 +1,15 @@
+// no-bare-DubError
+//
+// Every `new DubError(message)` must also pass a non-empty `recovery: string[]`
+// so users get actionable next steps instead of a bare failure line.
+//
+// Allowed in: errors.ts (definition + reasonable smoke usage), *.test.ts
+// (fixtures construct bare DubErrors to exercise the formatter).
+language js
+
+`new DubError($args)` where {
+  $args <: [$msg],
+  $filename <: not r".*/lib/errors\.ts$",
+  $filename <: not r".*\.test\.ts$",
+  register_diagnostic(span=$msg, message="DubError requires a recovery hint array. Pass `recovery: string[]` as the 2nd argument (see .agents/patterns/tier-3-commands.md).")
+}

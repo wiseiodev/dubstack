@@ -1,0 +1,15 @@
+// no-direct-execa-gh
+//
+// All `gh` invocations must go through the `runGh` wrapper in lib/github.ts,
+// which adds retry + permanent-error classification. Calling `execa('gh', ...)`
+// directly skips retries and silently degrades reliability under flaky API
+// conditions.
+//
+// Allowed in: lib/github.ts (the wrapper itself).
+language js
+
+`execa($cmd, $rest)` where {
+  $cmd <: `'gh'`,
+  $filename <: not r".*/lib/github\.ts$",
+  register_diagnostic(span=$cmd, message="Use the runGh wrapper (lib/github.ts) instead of execa('gh', …) — direct calls skip retry + permanent-error classification (see .agents/patterns/tier-3-commands.md).")
+}
