@@ -1,3 +1,8 @@
+import {
+  appendCleanupOperation,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   checkoutBranch,
@@ -88,6 +93,11 @@ export async function postMerge(
   let preferredBranch: string | null = null;
   const reparentedBranchNames = new Set<string>();
 
+  // The journal lets `dub continue` replay an interrupted cleanup. In dry-run
+  // we mutate a clone and never persist anything, so there's nothing to recover
+  // and starting a journal would just leave a stray file on disk.
+  const journal = dryRun ? null : await startCleanupJournal(cwd);
+
   for (const stack of workingStacks) {
     const mergedBottom = await getMergedBottomBranches(stack, cwd);
     for (const branchName of mergedBottom) {
@@ -105,7 +115,23 @@ export async function postMerge(
       }
 
       result.cleaned.push(branchName);
-      const reparented = removeBranchFromStack(stack, branchName);
+      const reparented = planReparents(stack, branchName);
+      if (journal) {
+        for (const entry of reparented) {
+          await appendCleanupOperation(cwd, journal, {
+            type: 'reparent',
+            branch: entry.branch,
+            oldParent: branchName,
+            newParent: entry.parent,
+          });
+        }
+        await appendCleanupOperation(cwd, journal, {
+          type: 'delete',
+          branch: branchName,
+          reason: 'merged-pr',
+        });
+      }
+      removeBranchFromStack(stack, branchName, reparented);
       result.reparented.push(...reparented);
       for (const entry of reparented) {
         reparentedBranchNames.add(entry.branch);
@@ -115,10 +141,12 @@ export async function postMerge(
   result.retargeted = await retargetOpenPrBranches(workingStacks, cwd, {
     dryRun,
     branches: [...reparentedBranchNames],
+    journal: journal ?? undefined,
   });
 
   if (!dryRun) {
     await writeState(state, cwd);
+    await clearCleanupJournal(cwd);
   }
 
   if (!dryRun && shouldRestack && workingStacks.some(hasNonRootBranches)) {
@@ -230,22 +258,32 @@ async function getMergedBottomBranches(
   return [...merged];
 }
 
-function removeBranchFromStack(
+function planReparents(
   stack: Stack,
   branchName: string,
 ): Array<{ branch: string; parent: string | null }> {
   const deleted = stack.branches.find((branch) => branch.name === branchName);
   if (!deleted) return [];
   const newParent = deleted.parent;
-
   const reparented: Array<{ branch: string; parent: string | null }> = [];
   for (const branch of stack.branches) {
     if (branch.parent !== branchName) continue;
-    branch.parent = newParent;
-    reparented.push({ branch: branch.name, parent: branch.parent });
+    reparented.push({ branch: branch.name, parent: newParent });
+  }
+  return reparented;
+}
+
+function removeBranchFromStack(
+  stack: Stack,
+  branchName: string,
+  reparented: Array<{ branch: string; parent: string | null }>,
+): void {
+  const reparentMap = new Map(reparented.map((r) => [r.branch, r.parent]));
+  for (const branch of stack.branches) {
+    if (!reparentMap.has(branch.name)) continue;
+    branch.parent = reparentMap.get(branch.name) ?? null;
   }
   stack.branches = stack.branches.filter(
     (branch) => branch.name !== branchName,
   );
-  return reparented;
 }

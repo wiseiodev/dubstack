@@ -1,3 +1,8 @@
+import {
+  appendCleanupOperation,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   type AllPrSyncInfoBatch,
@@ -120,8 +125,20 @@ export async function mergeNext(
     };
   }
 
-  for (const childBranch of childBranchesWithOpenPr) {
-    await retargetPrBase(childBranch, nextParent, cwd);
+  // Journal the pre-merge retargets so a crash mid-loop can be replayed by
+  // `dub continue` — without it, half-retargeted child PRs would be left
+  // pointing at a branch that's about to be merged and deleted.
+  if (childBranchesWithOpenPr.length > 0) {
+    const journal = await startCleanupJournal(cwd);
+    for (const childBranch of childBranchesWithOpenPr) {
+      await appendCleanupOperation(cwd, journal, {
+        type: 'retarget',
+        branch: childBranch,
+        newBase: nextParent,
+      });
+      await retargetPrBase(childBranch, nextParent, cwd);
+    }
+    await clearCleanupJournal(cwd);
   }
   await mergePr(chosenPr.number, cwd, {
     method: options.method ?? 'squash',
