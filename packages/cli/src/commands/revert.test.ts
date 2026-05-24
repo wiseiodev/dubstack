@@ -119,33 +119,39 @@ describe('revert', () => {
     });
 
     it('surfaces an ambiguous-short-SHA error when the prefix matches multiple commits', async () => {
-      // Hand-craft two commits whose short SHAs share a 4-char prefix is
-      // impractical with random commits, so simulate the git error directly
-      // via a stubbed execa. We mock at the module boundary so the failure
-      // is indistinguishable from a real ambiguous-argument response.
+      // Crafting two commits whose short SHAs share a prefix is impractical
+      // with random data, so simulate git's error directly via a stubbed
+      // execa. The cast through `unknown` is necessary because execa's
+      // overload set is broader than our narrow stub signature.
       const exec = await import('../lib/exec');
-      const realExeca = exec.execa;
-      const spy = vi.spyOn(exec, 'execa').mockImplementation((async (
-        cmd: string,
-        args: readonly string[],
+      type ExecaPassthrough = (
+        cmd: unknown,
+        args: unknown,
         opts?: unknown,
-      ) => {
+      ) => unknown;
+      const realExeca = exec.execa as unknown as ExecaPassthrough;
+      const stub = (cmd: unknown, args: unknown, opts?: unknown): unknown => {
         if (
           cmd === 'git' &&
+          Array.isArray(args) &&
           args[0] === 'rev-parse' &&
           args[1] === '--verify' &&
           typeof args[2] === 'string' &&
           args[2].includes('^{commit}')
         ) {
-          const err = Object.assign(new Error('git rev-parse exited 128'), {
-            stderr:
-              "fatal: ambiguous argument 'abc1234^{commit}': short SHA1 abc1234 is ambiguous",
-            exitCode: 128,
-          });
-          throw err;
+          return Promise.reject(
+            Object.assign(new Error('git rev-parse exited 128'), {
+              stderr:
+                "fatal: ambiguous argument 'abc1234^{commit}': short SHA1 abc1234 is ambiguous",
+              exitCode: 128,
+            }),
+          );
         }
         return realExeca(cmd, args, opts);
-      }) as typeof exec.execa);
+      };
+      const spy = vi
+        .spyOn(exec, 'execa')
+        .mockImplementation(stub as unknown as typeof exec.execa);
 
       try {
         await expect(revert(dir, 'abc1234')).rejects.toThrow(
