@@ -36,6 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
+import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
@@ -133,6 +134,92 @@ Examples:
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
   });
+
+program
+  .command('install')
+  .argument('<recipe>', 'Recipe to install (e.g. retarget-action)')
+  .option('--dry-run', 'Print the planned write without touching disk')
+  .option(
+    '--force',
+    'Overwrite an existing file with different content without confirming',
+  )
+  .description(
+    'Install a Dubstack recipe (workflow templates, etc.) into the current repo',
+  )
+  .addHelpText(
+    'after',
+    `
+Recipes:
+  retarget-action    GitHub Action that retargets dependent PRs when a stack PR merges
+
+Examples:
+  $ dub install retarget-action             Write .github/workflows/dubstack-retarget.yml
+  $ dub install retarget-action --dry-run   Preview the planned write
+  $ dub install retarget-action --force     Overwrite an existing file without confirming`,
+  )
+  .action(
+    async (recipe: string, options: { dryRun?: boolean; force?: boolean }) => {
+      const result = await install(process.cwd(), recipe as InstallRecipe, {
+        dryRun: options.dryRun,
+        force: options.force,
+        confirm: async (message) => {
+          // Non-interactive shells (piped stdin, CI scripts) would hang
+          // forever on rl.question. Treat as "no" and let the caller surface
+          // a 'cancelled' result; the user can pass --force for scripted
+          // overwrites.
+          if (!process.stdin.isTTY) {
+            console.log(
+              chalk.yellow(
+                '⚠ Refusing to prompt for confirmation in a non-interactive shell. Re-run with --force to overwrite, or --dry-run to preview.',
+              ),
+            );
+            return false;
+          }
+          const readline = await import('node:readline/promises');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          try {
+            const answer = await rl.question(`${message} [y/N] `);
+            const normalized = answer.trim().toLowerCase();
+            return normalized === 'y' || normalized === 'yes';
+          } finally {
+            rl.close();
+          }
+        },
+      });
+
+      switch (result.status) {
+        case 'installed':
+          console.log(chalk.green(`✔ Installed at ${result.path}`));
+          console.log(
+            chalk.dim(
+              '  Commit and push the workflow file. The Action runs on the next merge.',
+            ),
+          );
+          break;
+        case 'overwritten':
+          console.log(chalk.green(`✔ Overwrote ${result.path}`));
+          console.log(
+            chalk.dim('  Commit and push to pick up the new content.'),
+          );
+          break;
+        case 'already-installed':
+          console.log(
+            chalk.yellow(`⚠ Already installed at ${result.path} (no change)`),
+          );
+          break;
+        case 'preview':
+          console.log(chalk.dim(`# Would write to ${result.path}:`));
+          console.log(result.content);
+          break;
+        case 'cancelled':
+          console.log(chalk.yellow('⚠ Cancelled. No changes written.'));
+          break;
+      }
+    },
+  );
 
 program
   .command('docs')
