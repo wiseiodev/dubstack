@@ -719,7 +719,7 @@ program
     parseSubmitPath,
     'current',
   )
-  .option('--fix', 'Apply safe remediation for common submit blockers')
+  .option('--fix', '[deprecated] No-op alias kept for script compatibility')
   .addHelpText(
     'after',
     `
@@ -727,7 +727,7 @@ Examples:
   $ dub submit           Push and create/update PRs
   $ dub submit --dry-run Preview what would happen
   $ dub submit --ai      Generate a PR description before updating the PR body
-  $ dub submit --path stack --fix Submit full stack with safe auto-remediation`,
+  $ dub submit --path stack Submit every branch in the stack (trees supported)`,
   )
   .action(runSubmit);
 
@@ -743,7 +743,7 @@ program
     parseSubmitPath,
     'current',
   )
-  .option('--fix', 'Apply safe remediation for common submit blockers')
+  .option('--fix', '[deprecated] No-op alias kept for script compatibility')
   .action(runSubmit);
 
 program

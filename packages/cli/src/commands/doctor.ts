@@ -14,13 +14,11 @@ import {
   findStackForBranch,
   readState,
   type Stack,
-  topologicalOrder,
 } from '../lib/state';
 
 export type DoctorIssueCode =
   | 'operation-in-progress'
   | 'untracked-current-branch'
-  | 'submit-branching-blocker'
   | 'parent-mismatch'
   | 'remote-base-mismatch'
   | 'missing-local'
@@ -81,23 +79,6 @@ export async function doctor(
     return result;
   }
 
-  const orderedPerStack = scopedStacks.map((stack) => topologicalOrder(stack));
-  for (const ordered of orderedPerStack) {
-    const blockers = findBranchingBlockers(ordered);
-    for (const blocker of blockers) {
-      result.issues.push({
-        code: 'submit-branching-blocker',
-        summary: `Submit is blocked by branching children under '${blocker.parent}'.`,
-        details: `${blocker.parent} -> ${blocker.children.join(', ')}`,
-        fixes: [
-          'dub submit --path current',
-          'dub submit --path stack --fix',
-          'dub track <child> --parent <branch>',
-        ],
-      });
-    }
-  }
-
   const trackedNames = Array.from(
     new Set(allBranches.map((branch) => branch.name)),
   );
@@ -133,28 +114,6 @@ function resolveScopedStacks(
   const stack = findStackForBranch({ stacks }, currentBranch);
   if (!stack) return [];
   return [stack];
-}
-
-function findBranchingBlockers(
-  ordered: Branch[],
-): Array<{ parent: string; children: string[] }> {
-  const branchSet = new Set(ordered.map((branch) => branch.name));
-  const childMap = new Map<string, string[]>();
-
-  for (const branch of ordered) {
-    if (!branch.parent || !branchSet.has(branch.parent)) continue;
-    const children = childMap.get(branch.parent) ?? [];
-    children.push(branch.name);
-    childMap.set(branch.parent, children);
-  }
-
-  return Array.from(childMap.entries())
-    .filter(([, children]) => children.length > 1)
-    .map(([parent, children]) => ({
-      parent,
-      children: [...children].sort(),
-    }))
-    .sort((a, b) => a.parent.localeCompare(b.parent));
 }
 
 async function appendBranchHealthIssues(

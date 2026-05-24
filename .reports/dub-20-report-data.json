@@ -1,0 +1,340 @@
+{
+  "meta": {
+    "workId": "DUB-20",
+    "title": "Tree-walking submit (remove branching-blocker rejection)",
+    "artifactId": "dub-20",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-20-tree-walking-submit-remove-branching-blocker-rejection",
+    "baseBranch": "main",
+    "author": "Daniel Wise <daniel@wiseio.dev>",
+    "contextLabel": "Linear",
+    "contextId": "DUB-20",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 14,
+    "additions": 195,
+    "deletions": 162,
+    "diffStat": "14 files changed, 195 insertions(+), 162 deletions(-)"
+  },
+  "prompt": "DUB-20 removes the findBranchingBlockers rejection in dub submit --path stack and the matching submit-branching-blocker doctor issue so tree-shaped stacks (a parent with multiple children) walk natively. This is the foundational Tier 1 change other stacked-tree features depend on. Reviewers should confirm parent-before-children ordering, deterministic sibling order by branch name, --fix preserved as a no-op alias with a deprecation warning, and no other commands regress on linear stacks.",
+  "tldr": "Drops the submit branching-blocker rejection, sorts siblings deterministically, keeps --fix as a deprecated no-op, and adds a 3-sibling tree integration test.",
+  "why": {
+    "motivation": [
+      "Tier 1 — Branching Stack Support depends on submit walking trees instead of rejecting them.",
+      "doctor was duplicating the same blocker as a user-visible issue, which would have outlived the submit rejection if not removed together."
+    ],
+    "before": [
+      "dub submit --path stack threw 'Branching stacks are not supported by submit' on any tree.",
+      "dub doctor surfaced a submit-branching-blocker issue for tree stacks, contradicting the new design.",
+      "topologicalOrder preserved insertion order for siblings, so sibling order was non-deterministic across runs."
+    ],
+    "after": [
+      "dub submit --path stack walks tree stacks natively in BFS order (parent first, siblings sorted by branch name).",
+      "dub doctor no longer reports submit-branching-blocker; the issue code is removed from DoctorIssueCode.",
+      "--fix prints a one-line deprecation warning and otherwise behaves identically, so existing scripts keep working."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/submit.ts",
+      "changeType": "mod",
+      "additions": 10,
+      "deletions": 82,
+      "explanation": "Removes SubmitBranchingBlocker, findBranchingBlockers, buildBranchingError, fallbackApplied, and the blocker throw in getSubmitPlan. Adds a deprecation log line when --fix is passed. SubmitPlan/SubmitResult shed the fallbackApplied field.",
+      "snippet": "if (options.fix) {\n  console.log(\n    \"⚠ '--fix' is deprecated and is now a no-op; submit handles branching stacks natively.\",\n  );\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/doctor.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 41,
+      "explanation": "Drops 'submit-branching-blocker' from DoctorIssueCode, removes the blocker loop in doctor(), and deletes the local findBranchingBlockers helper. doctor no longer flags tree stacks as unhealthy.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/state.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 1,
+      "explanation": "topologicalOrder now sorts each parent's children alphabetically before BFS enqueue so submit/restack walk trees deterministically.",
+      "snippet": "for (const children of childMap.values()) {\n  children.sort((a, b) => a.name.localeCompare(b.name));\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 3,
+      "explanation": "Updates --fix option text to '[deprecated] No-op alias kept for script compatibility' on both submit and ss aliases; rewrites the stale example referencing 'safe auto-remediation'.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/submit-tree.test.ts",
+      "changeType": "new",
+      "additions": 98,
+      "deletions": 0,
+      "explanation": "New integration test: 3-sibling tree (main → feat/alpha, feat/bravo, feat/charlie). Asserts deterministic ordering, parent-first BFS, --path current isolation, and that the legacy branching-blocker error is no longer thrown.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/submit.test.ts",
+      "changeType": "mod",
+      "additions": 12,
+      "deletions": 18,
+      "explanation": "Replaces the 'throws when stack has branching children' and 'falls back with --fix' assertions with positive tree-submit coverage and a --fix deprecation-warning assertion.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/doctor.test.ts",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 5,
+      "explanation": "Swaps the 'detects submit branching blockers' case for a positive 'does not flag branching stacks' assertion.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/flow.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 2,
+      "explanation": "Drops obsolete fallbackApplied: false fields from SubmitResult mocks.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/merge-next.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 1,
+      "explanation": "Drops obsolete fallbackApplied: false from SubmitResult mock.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/post-merge.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 3,
+      "explanation": "Drops obsolete fallbackApplied: false from SubmitResult mocks.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/ready.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 2,
+      "explanation": "Drops obsolete fallbackApplied: false from SubmitResult mocks.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 3,
+      "explanation": "Drops obsolete fallbackApplied: false from SubmitResult mocks.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/flow.test.ts",
+      "changeType": "mod",
+      "additions": 0,
+      "deletions": 1,
+      "explanation": "Drops obsolete fallbackApplied: false from SubmitResult mock.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-20-qa.md",
+      "changeType": "new",
+      "additions": 64,
+      "deletions": 0,
+      "explanation": "Self-QA fallback: explains why no video, what was verified per AC, and pastes the real CLI smoke transcript.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "getSubmitPlan no longer rejects tree stacks",
+      "location": "packages/cli/src/commands/submit.ts (getSubmitPlan)",
+      "rationale": "Confirm the function returns branches from topologicalOrder(stack) directly for --path stack and exposes no remaining blocker-throwing branch."
+    },
+    {
+      "title": "Deterministic sibling order via topologicalOrder",
+      "location": "packages/cli/src/lib/state.ts:topologicalOrder",
+      "rationale": "New alphabetical sort runs once per parent's children. Confirm restack and stack-maintenance, which share this helper, do not depend on prior insertion order semantics."
+    },
+    {
+      "title": "doctor no longer emits submit-branching-blocker",
+      "location": "packages/cli/src/commands/doctor.ts (DoctorIssueCode + doctor body)",
+      "rationale": "Verify the union literal is gone, the local helper is removed, and no other doctor branch produces the obsolete code."
+    },
+    {
+      "title": "--fix preserved as deprecated no-op",
+      "location": "packages/cli/src/index.ts (submit + ss option) and packages/cli/src/commands/submit.ts (deprecation log)",
+      "rationale": "Existing scripts must still parse --fix without error; the option text and submit() warning should make the deprecation explicit."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "submit.test.ts and doctor.test.ts updates",
+      "status": "done",
+      "evidence": "vitest run as part of pnpm test (84 files / 689 tests passing) — includes tree-submit, --fix deprecation, and the new doctor 'does not flag branching stacks' case."
+    },
+    {
+      "kind": "integration",
+      "label": "submit-tree.test.ts (3-sibling tree)",
+      "status": "done",
+      "evidence": "vitest 'submit tree integration' run inside pnpm test (3 tests passing)."
+    },
+    {
+      "kind": "manual",
+      "label": "CLI smoke: tree stack submit + --fix deprecation",
+      "status": "done",
+      "evidence": ".reports/dub-20-qa.md contains the full real-CLI transcript (dub init, three siblings, dub log, dub doctor --no-fetch, dub submit --path stack --dry-run, dub submit --path stack --fix --dry-run)."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . → 244 files, 0 errors."
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo run typecheck → 2 packages successful (dubstack + docs)."
+    },
+    {
+      "name": "Tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "vitest → 84 files, 689 tests passing including new submit-tree integration test."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files modified; the change is CLI-only and has no browser-demoable surface.",
+    "fallbackApprovedByUser": true,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-20-qa.md",
+    "caption": "CLI smoke transcript and per-AC verification in lieu of video.",
+    "scenarios": [
+      "dub submit --path stack on a 3-sibling tree (parent + alpha/bravo/charlie) succeeds in dry-run with parent-first BFS ordering.",
+      "dub submit --path stack --fix prints the deprecation warning and otherwise behaves identically.",
+      "dub doctor --no-fetch on the same tree no longer surfaces submit-branching-blocker."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "findBranchingBlockers and buildBranchingError removed from submit.ts",
+      "status": "satisfied",
+      "evidence": "submit.ts diff removes both helpers and the SubmitBranchingBlocker interface; rg in packages/cli/src confirms no remaining references."
+    },
+    {
+      "criterion": "dub submit --path stack succeeds on a stack with a parent that has 2+ children",
+      "status": "satisfied",
+      "evidence": "submit-tree.test.ts 'plans submit for a 3-sibling tree' + real CLI smoke transcript in qa file."
+    },
+    {
+      "criterion": "PR creation order: parent PR exists before child PR; sibling order deterministic by branch name",
+      "status": "satisfied",
+      "evidence": "topologicalOrder now sorts children alphabetically; integration test asserts feat/alpha → feat/bravo → feat/charlie after randomized insertion."
+    },
+    {
+      "criterion": "All child PRs have the correct --base",
+      "status": "satisfied",
+      "evidence": "submit() loop uses const base = branch.parent as string and calls createPr(branch.name, base, ...). Smoke output shows feat/alpha→main, feat/bravo→main, feat/charlie→main."
+    },
+    {
+      "criterion": "Existing --path current behavior unchanged",
+      "status": "satisfied",
+      "evidence": "getCurrentPathBranches untouched. submit-tree.test.ts 'limits --path current to the linear path even when siblings exist' pins it. Prior --path current tests still pass."
+    },
+    {
+      "criterion": "--fix becomes a no-op with deprecation warning",
+      "status": "satisfied",
+      "evidence": "submit.ts emits the deprecation log when options.fix is true; submit.test.ts 'treats --fix as a deprecated no-op alias' asserts both the warning and the success path. CLI smoke captured the warning."
+    },
+    {
+      "criterion": "doctor no longer reports submit-branching-blocker",
+      "status": "satisfied",
+      "evidence": "DoctorIssueCode removed the union member; doctor.test.ts 'does not flag branching stacks as a doctor issue' asserts result.healthy === true on a tree stack."
+    },
+    {
+      "criterion": "New integration test in packages/cli/test/commands/: 3-sibling tree submit",
+      "status": "satisfied",
+      "evidence": "packages/cli/test/commands/submit-tree.test.ts (3 cases) checked into this commit."
+    },
+    {
+      "criterion": "submit.test.ts updated; branching-blocker assertions deleted",
+      "status": "satisfied",
+      "evidence": "Removed 'throws when stack has branching children' and the --fix-fallback case; replaced with positive tree + deprecated --fix cases."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged a stale help-text fragment '--path stack --fix Submit full stack with safe auto-remediation' — resolved by updating both --fix option descriptions and the example in index.ts."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "Linear blockers / dependencies on DUB-20",
+      "status": "None — issue description states 'Blocked by: None — can start immediately.' Restack tree coverage is tracked separately as DUB-76 and intentionally out of scope here."
+    }
+  ],
+  "rollout": {
+    "summary": "Standard merge to main. No data migration, no flag, no env change. --fix scripts keep working but will emit one deprecation line per invocation.",
+    "steps": [
+      {
+        "when": "merge",
+        "label": "Land PR",
+        "details": "Squash-merge once CI is green; CLI ships in the next dub release."
+      },
+      {
+        "when": "next-major",
+        "label": "Remove --fix",
+        "details": "Track a future major version (out of scope here) to drop the deprecated --fix alias entirely."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "fe84793d10c8d722bb10ab237faec6be58321697",
+    "shortSha": "fe84793",
+    "message": "feat(submit): walk tree-shaped stacks without rejection [DUB-20]"
+  }
+}

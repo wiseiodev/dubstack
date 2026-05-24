@@ -238,7 +238,6 @@ beforeEach(() => {
     updated: ['feat/a'],
     path: 'current',
     dryRun: false,
-    fallbackApplied: false,
   });
 });
 
@@ -759,7 +758,6 @@ describe('sync', () => {
         updated: ['feat/b', 'feat/c'],
         path: 'stack',
         dryRun: false,
-        fallbackApplied: false,
       };
     });
 
@@ -2033,7 +2031,6 @@ describe('sync', () => {
         updated: [],
         path: 'current',
         dryRun: false,
-        fallbackApplied: false,
       });
 
       let captured: DubError | null = null;

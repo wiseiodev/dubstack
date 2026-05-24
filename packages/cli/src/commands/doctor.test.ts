@@ -125,7 +125,7 @@ describe('doctor', () => {
     expect(result.healthy).toBe(false);
   });
 
-  it('detects submit branching blockers with explicit parent and children', async () => {
+  it('does not flag branching stacks as a doctor issue', async () => {
     mockReadState.mockResolvedValue(
       makeState([
         { name: 'main', parent: null, type: 'root' },
@@ -136,10 +136,8 @@ describe('doctor', () => {
     mockGetRefSha.mockResolvedValue('same-sha');
 
     const result = await doctor('/repo');
-    const branching = result.issues.find(
-      (issue) => issue.code === 'submit-branching-blocker',
-    );
-    expect(branching?.details).toContain('main -> feat/a, feat/b');
+    expect(result.issues).toEqual([]);
+    expect(result.healthy).toBe(true);
   });
 
   it('reports a child branch that matches remote but is no longer based on its parent', async () => {
