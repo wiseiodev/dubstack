@@ -10,7 +10,7 @@ import { getDubDir } from './state';
  */
 export interface UndoEntry {
   /** Which command created this snapshot. */
-  operation: 'create' | 'restack';
+  operation: 'create' | 'restack' | 'move';
   /** ISO timestamp of when the snapshot was taken. */
   timestamp: string;
   /** The branch user was on before the operation. */

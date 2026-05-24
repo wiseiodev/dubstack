@@ -1,0 +1,69 @@
+---
+title: dub move
+description: Insert a tracked branch between two existing branches and cascade the restack + PR retargeting.
+---
+
+`dub move` reorganizes a stack by relocating a tracked branch to a new position
+relative to another tracked branch in the same stack. DubStack updates the
+state, retargets any open PRs, and restacks descendants in one step.
+
+## Usage
+
+```bash
+dub move <branch> --before <target>
+dub move <branch> --after  <target>
+```
+
+| Flag | Description |
+|---|---|
+| `--before <target>` | Insert `<branch>` as the new parent of `<target>`. `<branch>` inherits `<target>`'s previous parent. |
+| `--after <target>` | Insert `<branch>` as a child of `<target>`. Any existing children of `<target>` (other than `<branch>` itself) become children of `<branch>`. |
+
+`--before` and `--after` are mutually exclusive.
+
+## Example
+
+```
+Before:                           After (dub move feat/inserted --before feat/auth-login):
+main                              main
+└─ feat/auth-base                 └─ feat/auth-base
+   └─ feat/auth-login                └─ feat/inserted
+                                        └─ feat/auth-login (restacked)
+```
+
+## What it does
+
+1. Validates both branches exist locally and are tracked in the same stack.
+2. Detects cycles up front (a branch can't be moved underneath one of its own
+   descendants) and surfaces a clean error.
+3. Records every parent update and PR retarget in the cleanup journal before
+   touching disk so a crash mid-flow is resumable via `dub continue`.
+4. Updates `state.json` and runs `gh pr edit --base <new-parent>` for any open
+   PR whose base no longer matches its branch's new parent.
+5. Runs the standard restack to rebase descendants onto their new parents.
+6. Writes an undo log entry so `dub undo` rolls the entire move back.
+
+## Crash safety
+
+If `dub move` is interrupted between writing state and applying PR retargets,
+`dub continue` replays the cleanup journal idempotently. The journal records
+each reparent and retarget; reapplying is a no-op when the desired change is
+already in place.
+
+## Errors
+
+| Situation | Behavior |
+|---|---|
+| `<branch>` or `<target>` not tracked | Fail with a hint to run `dub track`. |
+| Branches in different stacks | Fail with a hint to re-track first. |
+| Move would create a cycle | Fail with a hint to pick a different `<target>`. |
+| Working tree has uncommitted changes | Fail with a hint to commit or stash. |
+| Branch is already in the requested position | Report a no-op; no mutations. |
+
+## Related
+
+- `dub track <branch> --parent <branch>` — change a single branch's parent
+  without restacking siblings or retargeting PRs.
+- `dub restack` — rebase descendants onto updated parents (run separately if
+  you only edited state manually).
+- `dub undo` — roll back the most recent move, restoring state and branch tips.

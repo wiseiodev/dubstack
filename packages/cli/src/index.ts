@@ -40,6 +40,7 @@ import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
+import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
 import { postMerge } from './commands/post-merge';
@@ -523,6 +524,66 @@ Examples:
             `  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? '(none)'}'`,
           ),
         );
+      }
+    },
+  );
+
+program
+  .command('move')
+  .argument('<branch>', 'Branch to move within the stack')
+  .option('--before <target>', 'Insert <branch> as the new parent of <target>')
+  .option('--after <target>', 'Insert <branch> as the new child of <target>')
+  .description(
+    'Reorder a tracked branch within its stack (insert before or after another branch)',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub move feat/inserted --before feat/auth-login    Insert before <target>
+  $ dub move feat/inserted --after feat/auth-base      Insert after <target>`,
+  )
+  .action(
+    async (branch: string, options: { before?: string; after?: string }) => {
+      const result = await move(process.cwd(), branch, options);
+      if (result.noOp) {
+        console.log(
+          chalk.yellow(
+            `⚠ Nothing to do: ${result.noOpReason ?? 'branch already in requested position'}.`,
+          ),
+        );
+        return;
+      }
+      if (result.conflictBranch) {
+        console.log(
+          chalk.green(
+            `✔ Moved '${result.branch}' ${result.position} '${result.target}'`,
+          ),
+        );
+        console.log(
+          chalk.yellow(
+            `⚠ Conflict while restacking '${result.conflictBranch}'`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub restack --continue)',
+          ),
+        );
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Moved '${result.branch}' ${result.position} '${result.target}' (new parent: '${result.newParent}')`,
+        ),
+      );
+      if (result.retargeted.length > 0) {
+        console.log(
+          chalk.dim(`  ↳ retargeted PRs: ${result.retargeted.join(', ')}`),
+        );
+      }
+      if (result.rebased.length > 0) {
+        console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
       }
     },
   );
