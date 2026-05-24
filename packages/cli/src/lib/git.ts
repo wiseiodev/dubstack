@@ -296,6 +296,159 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Records the current working tree (staged + unstaged + untracked) as a new
+ * stash entry. Returns the commit SHA of the created stash, or `null` when
+ * there was nothing to stash.
+ */
+export async function gitStashPushIncludeUntracked(
+  message: string,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['stash', 'push', '--include-untracked', '-m', message],
+      { cwd },
+    );
+    if (/^No local changes to save/m.test(stdout)) return null;
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure('Failed to create stash.', readGitCommandOutput(error)),
+      [
+        "Run 'git status' to inspect the working tree.",
+        "Run 'git stash push --include-untracked' manually to see the underlying error.",
+      ],
+    );
+  }
+  try {
+    const { stdout } = await execa('git', ['rev-parse', 'stash@{0}'], { cwd });
+    return stdout.trim();
+  } catch (error) {
+    // The stash exists on disk (push above succeeded), we just can't identify
+    // it. This is distinct from "nothing to stash" — surface it as a DubError
+    // so callers can give the user an actionable next step instead of silently
+    // pretending the stash wasn't created.
+    throw new DubError(
+      formatGitFailure(
+        'Created a stash but failed to resolve its SHA via `git rev-parse stash@{0}`.',
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git stash list' to confirm the stash exists at stash@{0}.",
+        "Run 'git stash pop' manually to recover the working tree if needed.",
+        "Re-run after investigating; the stash is still present in git's stack.",
+      ],
+    );
+  }
+}
+
+/** A stash entry as reported by `git stash list`. */
+export interface GitStashEntry {
+  /** Ref name, e.g. `stash@{0}`. Volatile across `pop`/`drop`. */
+  ref: string;
+  /** Commit SHA of the stash. Stable until the stash is dropped. */
+  sha: string;
+}
+
+/**
+ * Returns the current `git stash list` entries with their commit SHAs.
+ */
+export async function listGitStashes(cwd: string): Promise<GitStashEntry[]> {
+  const { stdout } = await execa('git', ['stash', 'list', '--format=%gd %H'], {
+    cwd,
+  });
+  const entries: GitStashEntry[] = [];
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx === -1) continue;
+    entries.push({
+      ref: trimmed.slice(0, spaceIdx),
+      sha: trimmed.slice(spaceIdx + 1).trim(),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Pops the stash identified by `ref` (e.g. `stash@{0}`). On conflict, the
+ * stash is kept and the working tree carries the conflict markers — match
+ * `git stash pop` behavior so the user can resolve and re-pop.
+ */
+export async function gitStashPop(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['stash', 'pop', ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to pop stash '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git status' to inspect any conflict markers from the pop.",
+        `Run 'git stash pop ${ref}' manually to see the underlying error.`,
+        `Run 'git stash drop ${ref}' to discard the stash if you no longer need it.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Counts the number of commits reachable from `tip` that are not reachable from `base`.
+ *
+ * Used to validate that a soft-reset stays within branch boundaries.
+ *
+ * @throws {DubError} If git rev-list fails (e.g. ref not found).
+ */
+export async function countCommitsAhead(
+  tip: string,
+  base: string,
+  cwd: string,
+): Promise<number> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-list', '--count', `${base}..${tip}`],
+      { cwd },
+    );
+    return Number.parseInt(stdout.trim(), 10);
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Could not count commits between '${base}' and '${tip}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git log --oneline ${base}..${tip}' to inspect the range manually.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Performs `git reset --soft HEAD~N`, leaving the popped commits' changes staged.
+ *
+ * @throws {DubError} If the reset fails (e.g. ambiguous ref).
+ */
+export async function softResetHead(steps: number, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--soft', `HEAD~${steps}`], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to soft-reset HEAD by ${steps} commit(s).`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git status' to confirm the branch is in a state where 'git reset --soft HEAD~${steps}' is valid.`,
+        `Run 'git log --oneline -n ${steps + 1}' to verify there are at least ${steps} commit(s) above the reset target.`,
+      ],
+    );
+  }
+}
+
+/**
  * Performs `git rebase --onto` to move a branch from one base to another.
  *
  * @param newBase - The commit/branch to rebase onto
@@ -682,6 +835,25 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
       "Run 'git diff --cached' manually to inspect the underlying error.",
     ]);
   }
+}
+
+/**
+ * Returns true when there are unstaged modifications to tracked files
+ * (column 2 of `git status --porcelain` is not space). Runs with
+ * `--untracked-files=no` so untracked files are never reported; they are
+ * intentionally ignored because `git reset --hard` does not touch them.
+ */
+export async function hasUnstagedTrackedChanges(cwd: string): Promise<boolean> {
+  const { stdout } = await execa(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no'],
+    { cwd },
+  );
+  for (const line of stdout.split('\n')) {
+    if (line.length < 2) continue;
+    if (line[1] !== ' ') return true;
+  }
+  return false;
 }
 
 /**

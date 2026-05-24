@@ -7,6 +7,8 @@ import {
   deleteRef,
   forceBranchTo,
   getCurrentBranch,
+  hardResetBranchToRef,
+  hasUnstagedTrackedChanges,
   isWorkingTreeClean,
   lastPushedRef,
   readLastPushedSha,
@@ -17,13 +19,13 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'unlink';
+  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'unlink';
   details: string;
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, or
- * `dub unlink` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
+ * `dub pop`, or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -34,6 +36,8 @@ interface UndoResult {
  *   branch with the original name has been re-created in the meantime. Any push that
  *   happened during the rename is NOT reverted — the local branch is restored, but the
  *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
+ * - **pop**: Hard-resets the popped branch to its pre-pop tip, discarding the staged
+ *   changes left behind by the pop and restoring the popped commits.
  * - **unlink**: Restores the previous stack split via `writeState` (no branch tips
  *   change). Additionally discards any pending cleanup journal so a subsequent
  *   `dub continue` doesn't fire a stale retarget against the now-restored stack.
@@ -46,6 +50,40 @@ interface UndoResult {
  */
 export async function undo(cwd: string): Promise<UndoResult> {
   const entry = await readUndoEntry(cwd);
+
+  if (entry.operation === 'pop') {
+    const branch = entry.previousBranch;
+    const sha = entry.branchTips[branch];
+    if (!sha) {
+      throw new DubError('Undo entry for pop is missing branch tip.', [
+        "Re-run the prior 'dub pop' if you still need to roll it back.",
+      ]);
+    }
+    const current = await getCurrentBranch(cwd);
+    if (current !== branch) {
+      throw new DubError(
+        `Cannot undo pop: currently on '${current}', expected '${branch}'.`,
+        [`Run 'dub co ${branch}' to switch back, then rerun 'dub undo'.`],
+      );
+    }
+    // Pop leaves the popped commits' changes staged on purpose; only refuse
+    // when the user has new unstaged tracked-file edits that hard-reset
+    // would discard. Untracked files survive `git reset --hard`.
+    if (await hasUnstagedTrackedChanges(cwd)) {
+      throw new DubError('Working tree has uncommitted changes.', [
+        "Run 'git status' to see the uncommitted changes.",
+        "Run 'git stash' to set the changes aside, then rerun 'dub undo'.",
+        'Run \'dub modify -am "<message>"\' to commit the changes first.',
+      ]);
+    }
+    await hardResetBranchToRef(branch, sha, cwd);
+    await writeState(entry.previousState, cwd);
+    await clearUndoEntry(cwd);
+    return {
+      undone: 'pop',
+      details: `Restored '${branch}' to pre-pop state`,
+    };
+  }
 
   if (!(await isWorkingTreeClean(cwd))) {
     throw new DubError('Working tree has uncommitted changes.', [

@@ -1,0 +1,336 @@
+{
+  "meta": {
+    "workId": "DUB-27",
+    "title": "Interactive dub co with fuzzy search and rich branch metadata",
+    "artifactId": "dub-27",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-27-interactive-dub-co-with-fuzzy-search-and-rich-branch",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-27",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 12,
+    "additions": 1255,
+    "deletions": 77,
+    "diffStat": "12 files changed, 1255 insertions(+), 77 deletions(-)"
+  },
+  "prompt": "Enhance the existing `dub co` interactive picker with rich PR/CI/age metadata, region-aware styling, and keyboard shortcuts (Enter, p, d, c, Esc).",
+  "tldr": "Rebuilt `dub co`'s interactive picker on a custom @inquirer/core prompt. Each row now shows PR #, review status, CI rollup, and last-commit age sourced from the 30s overview cache, with branch names colored by stack region. New shortcuts: `p` opens the PR, `d` diffs against parent, `c` copies the branch name; side-effect actions re-launch the picker so users can chain them. New `--refresh` flag busts the cache; `--no-color` opts out of ANSI styling.",
+  "why": {
+    "motivation": [
+      "Picker entries previously showed only the branch name — users had to leave `dub co` to look up PR/CI status or copy a branch name.",
+      "Tier 1 already exposed `computeRegions` (DUB-77) and Tier 2 already exposed `getStackOverviewBatch` (DUB-25); this issue wires both into the picker."
+    ],
+    "before": [
+      "`interactiveCheckout` rendered `name + (current)` and nothing else.",
+      "Esc was the only non-Enter key handled — no `p`/`d`/`c` shortcuts."
+    ],
+    "after": [
+      "Rows show region-colored branch name + `#PR · review · CI · age` metadata.",
+      "5 shortcuts wired: Enter, p (open PR), d (git diff vs parent), c (clipboard copy, best-effort), Esc/q/Ctrl-C (cancel).",
+      "Cache hit renders instantly; `--refresh` forces a fresh `gh pr list` round-trip."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/branch-picker.ts",
+      "changeType": "new",
+      "additions": 236,
+      "deletions": 0,
+      "explanation": "Custom @inquirer/core prompt. Returns a tagged outcome (`checkout`/`cancel`/`pr`/`diff`/`copy`) so the caller can dispatch side-effects and re-launch the picker. Shortcuts only fire when the search input is empty so typing branch names that contain `p`/`d`/`c` keeps filtering. Includes an explicit `bounds.first === -1` guard to prevent the navigation loop from spinning when the filter narrows to only the disabled current branch.",
+      "snippet": "if (\n  !rl.line &&\n  selected &&\n  isSelectable(selected) &&\n  (key.name === 'p' || key.name === 'd' || key.name === 'c')\n) {\n  rl.clearLine(0);\n  setStatus('done');\n  const type =\n    key.name === 'p' ? 'pr' : key.name === 'd' ? 'diff' : 'copy';\n  done({ type, branch: selected.value });\n  return;\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/branch-picker-format.ts",
+      "changeType": "new",
+      "additions": 90,
+      "deletions": 0,
+      "explanation": "Label formatting helpers. `buildBranchMetaText` renders `#101 · ✔ Approved · CI ✔ · 2h ago`; `formatBranchLabel` pads the branch column, colors the name by region, and dims the metadata. Honors `noColor` for the `--no-color` flag, `NO_COLOR=1`, and non-TTY stdout.",
+      "snippet": "function regionColor(region: LogRegion): (text: string) => string {\n  switch (region) {\n    case 'root':\n      return (t) => chalk.bold(t);\n    case 'ancestor':\n      return (t) => chalk.cyan(t);\n    case 'sibling-subtree':\n      return (t) => chalk.dim(t);\n    case 'current':\n    case 'descendant':\n      return (t) => t;\n  }\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/clipboard.ts",
+      "changeType": "new",
+      "additions": 29,
+      "deletions": 0,
+      "explanation": "Best-effort clipboard copy. Tries `pbcopy` on darwin, `clip` on win32, `wl-copy` → `xclip` → `xsel` on linux. Never throws — returns the tool name on success or `null` so the caller can print `(copy unavailable)`.",
+      "snippet": "for (const { cmd, args } of candidates) {\n  try {\n    await execa(cmd, args, { input: text });\n    return cmd;\n  } catch {\n    // Try the next candidate.\n  }\n}\nreturn null;",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/checkout.ts",
+      "changeType": "mod",
+      "additions": 250,
+      "deletions": 53,
+      "explanation": "`interactiveCheckout` rewritten around the new picker. Loops on side-effect outcomes (re-rendering the picker after `p`/`d`/`c`), exits on `checkout`/`cancel`. Adds `computeAllRegions` (merges per-stack `computeRegions` with a rank function so the same root branch in multiple stacks picks the most specific region) and `buildBranchChoices` (split out so tests can exercise it without the prompt). Overview fetch is wrapped in `safeOverview` so a `gh` failure degrades to no metadata instead of erroring the picker.",
+      "snippet": "while (true) {\n  const choices = buildBranchChoices({\n    validBranches, currentBranch, regions, overview, noColor,\n  });\n  const outcome = await branchPickerPrompt({\n    message: 'Checkout a branch (autocomplete or arrow keys)',\n    choices, defaultBranch,\n    footer: footerParts.join('\\n') || undefined,\n  });\n  const next = await handlePickerOutcome(outcome, state, cwd);\n  if ('done' in next) return next.done;\n  defaultBranch = next.continueWith;\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 9,
+      "deletions": 0,
+      "explanation": "Adds `--refresh` and `--no-color` options to the `checkout`/`co` command and threads them into `interactiveCheckout`.",
+      "snippet": ".option('--refresh', 'Bypass the 30s PR/CI overview cache and refetch from GitHub')\n.option('--no-color', 'Disable ANSI colors in the picker')",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/branch-picker.test.ts",
+      "changeType": "new",
+      "additions": 169,
+      "deletions": 0,
+      "explanation": "11 tests against `@inquirer/testing`'s `render()` harness — Enter checkout, fuzzy filter, `p`/`d`/`c`/Esc dispatch, the 'typing into search input shadows shortcuts' guard, footer rendering, empty-match state, and a regression test for the disabled-only-row navigation guard.",
+      "snippet": "it('treats `p` typed into search input as text, not a shortcut', async () => {\n  // Typing characters that would otherwise be shortcuts must filter the\n  // list (e.g. `feat/auth-signup` contains `p`) instead of opening a PR.\n  events.type('signup');\n  events.keypress({ name: 'return' });\n  await expect(answer).resolves.toEqual({\n    type: 'checkout', branch: 'feat/auth-signup',\n  });\n});",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/branch-picker-format.test.ts",
+      "changeType": "new",
+      "additions": 139,
+      "deletions": 0,
+      "explanation": "8 tests for the label formatter — PR + draft + CI + age, APPROVED+SUCCESS, MERGED lifecycle fallback, age-only when no PR, and `noColor` plain-text mode.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/clipboard.test.ts",
+      "changeType": "new",
+      "additions": 70,
+      "deletions": 0,
+      "explanation": "5 tests for the clipboard helper. Mocks `execa` and asserts platform-specific candidate order, fallthrough on ENOENT, and that it never throws even when every candidate rejects.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/checkout.test.ts",
+      "changeType": "mod",
+      "additions": 119,
+      "deletions": 0,
+      "explanation": "Adds tests for `computeAllRegions` (current/ancestor/sibling-subtree classification) and `buildBranchChoices` (current-branch disabling, fuzzy-search key, PR metadata rendering, plain-name fallback).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/checkout.mdx",
+      "changeType": "mod",
+      "additions": 50,
+      "deletions": 2,
+      "explanation": "Documents the new picker — sample rendered rows, region-color table, shortcut table, `--refresh` and `--no-color` flags, and the `(copy unavailable)` fallback behavior.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/package.json",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 0,
+      "explanation": "Adds `@inquirer/core` as a direct dependency (custom prompt needs `createPrompt`, hooks, and `usePagination`) and `@inquirer/testing` as a dev dependency for the prompt-interaction tests.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "changeType": "mod",
+      "additions": 92,
+      "deletions": 22,
+      "explanation": "Lockfile update for `@inquirer/core` and `@inquirer/testing`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Search input shadows shortcuts",
+      "location": "packages/cli/src/lib/branch-picker.ts:164",
+      "rationale": "`p`/`d`/`c` only fire when `rl.line` is empty. Verify the test at branch-picker.test.ts:93 that types 'signup' and presses Enter still checks out `feat/auth-signup` rather than dispatching a `pr` action on the `p`."
+    },
+    {
+      "title": "Disabled-only-row navigation guard",
+      "location": "packages/cli/src/lib/branch-picker.ts:148",
+      "rationale": "When the filter narrows to only the disabled current row, `bounds.first === -1`. Without the early-return guard, arrow keys spin forever. The regression test at branch-picker.test.ts:155 types `main` and presses up/down to cover this."
+    },
+    {
+      "title": "Region merging across stacks",
+      "location": "packages/cli/src/commands/checkout.ts:113",
+      "rationale": "When the same root branch appears in multiple stacks (e.g. `main`), `computeAllRegions` keeps the most specific region via `regionRank`. Confirm `current`/`ancestor` win over `root` so the current branch isn't accidentally re-tagged as `root`."
+    },
+    {
+      "title": "Overview fetch failure is non-fatal",
+      "location": "packages/cli/src/commands/checkout.ts:199",
+      "rationale": "`safeOverview` swallows errors and prints a yellow `PR metadata unavailable: …` line so the picker still works with just branch names + region styling when `gh` is misconfigured."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "branch-picker prompt — 11 tests via @inquirer/testing",
+      "status": "done",
+      "evidence": "pnpm test src/lib/branch-picker.test.ts → 11 passed"
+    },
+    {
+      "kind": "unit",
+      "label": "branch-picker-format — 8 tests for meta + region styling",
+      "status": "done",
+      "evidence": "pnpm test src/lib/branch-picker-format.test.ts → 8 passed"
+    },
+    {
+      "kind": "unit",
+      "label": "clipboard — 5 tests for platform candidate order + silent failure",
+      "status": "done",
+      "evidence": "pnpm test src/lib/clipboard.test.ts → 5 passed"
+    },
+    {
+      "kind": "unit",
+      "label": "checkout — computeAllRegions + buildBranchChoices coverage",
+      "status": "done",
+      "evidence": "pnpm test src/commands/checkout.test.ts → 17 passed (+5 new)"
+    },
+    {
+      "kind": "manual",
+      "label": "`dub co --help` smoke",
+      "status": "done",
+      "evidence": "pnpm cli:dev co --help shows --refresh and --no-color flags wired correctly"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "biome",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 281 files in 56ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit clean across the monorepo (turbo cache hit after first run)."
+    },
+    {
+      "name": "tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "93 test files / 859 tests passing (was 90/830 pre-change)."
+    },
+    {
+      "name": "evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "AGENTS.md only requires evals when AI metadata or prompts change. This change touches neither."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx file was changed; the surface is a TTY CLI prompt with no headless capture path.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-27-qa.md",
+    "caption": "Self-QA via @inquirer/testing harness (simulates real TTY keypresses) plus full local gate.",
+    "scenarios": [
+      "Enter checks out the highlighted branch",
+      "Fuzzy filter narrows the list and Enter checks out the match",
+      "p / d / c dispatch correctly on the highlighted branch when the search input is empty",
+      "Typing a branch substring that contains `p` filters instead of opening a PR",
+      "Esc / q / Ctrl-C cancels without switching branches",
+      "Arrow keys do not spin when the filter narrows to only the disabled current row"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "Picker entries show PR/CI/age metadata from getStackOverviewBatch when available",
+      "status": "satisfied",
+      "evidence": "branch-picker-format.ts:33 + checkout.ts:182; tests at branch-picker-format.test.ts:24, checkout.test.ts:226."
+    },
+    {
+      "criterion": "Region styling applied via computeRegions (or promoted helper)",
+      "status": "satisfied",
+      "evidence": "checkout.ts:113 `computeAllRegions` re-uses `computeRegions` from commands/log.ts and merges across stacks; tests at checkout.test.ts:148."
+    },
+    {
+      "criterion": "Cached data renders instantly; --refresh forces fresh fetch",
+      "status": "satisfied",
+      "evidence": "`getStackOverviewBatch({ refresh })` already implements the 30s TTL; CLI wired at index.ts:1078; smoke-tested via `dub co --help`."
+    },
+    {
+      "criterion": "All 5 shortcuts (ENTER, p, d, c, Esc) work",
+      "status": "satisfied",
+      "evidence": "branch-picker.test.ts cases at lines 27, 54, 67, 80, 108."
+    },
+    {
+      "criterion": "Clipboard copy fails silently when no clipboard tool exists; prints '(copy unavailable)' instead of erroring",
+      "status": "satisfied",
+      "evidence": "clipboard.ts returns null on total failure; checkout.ts:282 prints `(copy unavailable)`; clipboard.test.ts:58 asserts no-throw."
+    },
+    {
+      "criterion": "Tests for fuzzy match, shortcut dispatch, region rendering, cancellation",
+      "status": "satisfied",
+      "evidence": "29 new tests across 4 files cover all four areas."
+    },
+    {
+      "criterion": "Docs at apps/docs/content/docs/commands/checkout.mdx",
+      "status": "satisfied",
+      "evidence": "Rewritten with picker sample, region table, shortcut table, --refresh/--no-color flags."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged an infinite-loop risk in arrow-key navigation when the filter narrowed to only the disabled current row → fixed via explicit `bounds.first === -1` guard (branch-picker.ts:148) and regression test (branch-picker.test.ts:155).",
+      "Reviewer flagged that `rl.write(searchTerm)` on Enter with no selectable row doubled the visible text → fixed by making that path a no-op.",
+      "Reviewer flagged that `disabled?: false | string` allowed a misleading explicit `false` → narrowed type to `disabled?: string` and updated caller to use `undefined`."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-25 (batched PR/CI overview)",
+      "status": "Done — consumed via `getStackOverviewBatch`."
+    },
+    {
+      "name": "DUB-77 (tree-aware log regions)",
+      "status": "Done — `computeRegions` imported from commands/log.ts."
+    }
+  ],
+  "rollout": {
+    "summary": "Drop-in enhancement to the existing `dub co` interactive picker. No state schema change, no migration, no flag gating — opt-in only when the user already invokes `dub co` without a branch argument.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Pipeline build",
+        "details": "Release pipeline builds dubstack@<next> with the new picker."
+      },
+      {
+        "when": "Post-release smoke",
+        "label": "Run `dub co` in a stacked repo",
+        "details": "Verify PR/CI/age rows render and `p`/`d`/`c` work end-to-end against a real `gh` install."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "2fc24d1b80e447188d26adef9bfc7926fa3ea808",
+    "shortSha": "2fc24d1",
+    "message": "feat(checkout): interactive picker w/ PR metadata + p/d/c shortcuts [DUB-27]"
+  }
+}

@@ -6,6 +6,7 @@ import { DubError, formatDubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
+import { getStackOverviewBatch } from '../lib/stack-overview';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
@@ -15,6 +16,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
+import { stashList, stashPop, stashPush } from './stash';
 import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
@@ -73,7 +75,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-11-25', '2025-06-18']);
 const MAX_HISTORY_ARGS_LENGTH = 500;
 
 const HISTORY_ARG_KEYS: Record<string, string[]> = {
-  'dubstack.log': ['stack', 'all', 'reverse'],
+  'dubstack.log': ['stack', 'all', 'reverse', 'prs', 'ci', 'refresh'],
   'dubstack.doctor': ['all', 'fetch'],
   'dubstack.status': ['live', 'pr'],
   'dubstack.parent': ['branch'],
@@ -95,6 +97,9 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
+  'dubstack.stash': ['message'],
+  'dubstack.stash-pop': ['on', 'force'],
+  'dubstack.stash-list': [],
 };
 
 const BRANCH_SCHEMA = {
@@ -111,7 +116,8 @@ const BRANCH_SCHEMA = {
 const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.log',
-    description: 'Return the tracked DubStack stack tree as structured JSON.',
+    description:
+      'Return the tracked DubStack stack tree as structured JSON, with optional PR/CI/commit annotations per branch.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -126,6 +132,20 @@ const TOOLS: ToolDefinition[] = [
         reverse: {
           type: 'boolean',
           description: 'Reverse stack and child ordering.',
+        },
+        prs: {
+          type: 'boolean',
+          description:
+            'Include PR-state annotations (prState, prTitle, reviewDecision, draft) when overview data is available. Defaults to true.',
+        },
+        ci: {
+          type: 'boolean',
+          description:
+            'Include CI rollup (ciState) when overview data is available. Defaults to true.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Bust the 30-second overview cache before fetching.',
         },
       },
       additionalProperties: false,
@@ -383,6 +403,54 @@ const TOOLS: ToolDefinition[] = [
           description: 'Delete branches even when not fully merged.',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash',
+    description:
+      'Capture the working tree (staged + unstaged + untracked) as a branch-aware stash recorded in .git/dubstack/stash-log.json.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description:
+            'Override the default stash message (default: branch + timestamp).',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash-pop',
+    description:
+      'Pop the most recent dub stash. Refuses if the recorded source branch differs from the current branch unless `on` or `force` is given.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        on: {
+          type: 'string',
+          description: 'Checkout this branch first, then pop the stash.',
+        },
+        force: {
+          type: 'boolean',
+          description:
+            "Pop onto the current branch even if it doesn't match the recorded branch.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash-list',
+    description:
+      'List recorded dub stashes with branch context and presence in `git stash list`.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -657,14 +725,27 @@ async function callTool(
   args: Record<string, unknown>,
 ): Promise<ToolCallResult> {
   switch (name) {
-    case 'dubstack.log':
+    case 'dubstack.log': {
+      const refresh = optionalBoolean(args.refresh);
+      // Fail-soft on gh auth / network errors: the structured response should
+      // still surface the tracked tree when the overview can't be fetched.
+      let overview = null;
+      try {
+        overview = await getStackOverviewBatch(cwd, { refresh });
+      } catch {
+        overview = null;
+      }
       return jsonToolResult(
         await logJson(cwd, {
           stack: optionalBoolean(args.stack),
           all: optionalBoolean(args.all),
           reverse: optionalBoolean(args.reverse),
+          prs: optionalBoolean(args.prs),
+          ci: optionalBoolean(args.ci),
+          overview,
         }),
       );
+    }
     case 'dubstack.doctor':
       return jsonToolResult(
         await doctor(cwd, {
@@ -761,6 +842,19 @@ async function callTool(
         }),
       );
     }
+    case 'dubstack.stash':
+      return mutatingToolResult(() =>
+        stashPush(cwd, { message: optionalString(args.message) }),
+      );
+    case 'dubstack.stash-pop':
+      return mutatingToolResult(() =>
+        stashPop(cwd, {
+          on: optionalString(args.on),
+          force: optionalBoolean(args.force),
+        }),
+      );
+    case 'dubstack.stash-list':
+      return jsonToolResult(await stashList(cwd));
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`, [
         'Call tools/list to discover the available dubstack.* tool names.',

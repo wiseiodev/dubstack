@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { getCurrentBranch } from '../lib/git';
+import type { StackOverview } from '../lib/stack-overview';
 import { type DubState, readState } from '../lib/state';
 import {
+  buildBranchChoices,
   checkout,
+  computeAllRegions,
   getStackRelativeBranches,
   getTrackedBranches,
   getValidBranches,
@@ -139,5 +142,121 @@ describe('getStackRelativeBranches', () => {
   it('returns empty list for untracked branch', async () => {
     const state = await readState(dir);
     expect(getStackRelativeBranches(state, 'rogue')).toEqual([]);
+  });
+});
+
+describe('computeAllRegions', () => {
+  it('marks the current branch and its ancestor; root stays root', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+    const state = await readState(dir);
+
+    const regions = computeAllRegions(state, 'feat/b');
+    expect(regions.get('main')).toBe('root');
+    expect(regions.get('feat/a')).toBe('ancestor');
+    expect(regions.get('feat/b')).toBe('current');
+  });
+
+  it('classifies non-stack siblings as sibling-subtree from a sibling branch', async () => {
+    await create('feat/a', dir);
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    await create('feat/b', dir);
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    await create('feat/c', dir);
+    const state = await readState(dir);
+
+    const regions = computeAllRegions(state, 'feat/b');
+    expect(regions.get('feat/c')).toBe('sibling-subtree');
+  });
+});
+
+describe('buildBranchChoices', () => {
+  function emptyOverview(): StackOverview {
+    return {
+      branches: [],
+      truncated: false,
+      cachedAt: new Date(0).toISOString(),
+    };
+  }
+
+  it('disables the current branch with (current)', () => {
+    const choices = buildBranchChoices({
+      validBranches: ['main', 'feat/a'],
+      currentBranch: 'feat/a',
+      regions: new Map([
+        ['main', 'root'],
+        ['feat/a', 'current'],
+      ]),
+      overview: emptyOverview(),
+      noColor: true,
+    });
+    const featA = choices.find((c) => c.value === 'feat/a');
+    expect(featA?.disabled).toBe('(current)');
+  });
+
+  it('exposes the branch name as the fuzzy-search key', () => {
+    const choices = buildBranchChoices({
+      validBranches: ['feat/auth-login', 'feat/billing'],
+      currentBranch: null,
+      regions: new Map(),
+      overview: null,
+      noColor: true,
+    });
+    expect(choices[0].searchKey).toBe('feat/auth-login');
+    expect(choices[1].searchKey).toBe('feat/billing');
+  });
+
+  it('renders PR metadata in the label when overview has a PR row', () => {
+    const overview: StackOverview = {
+      branches: [
+        {
+          branch: 'feat/a',
+          parent: 'main',
+          isRoot: false,
+          pr: {
+            number: 101,
+            title: 'feat/a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '2 hours ago',
+            authorEmail: 'a@b.com',
+            shortSha: 'abcdef12',
+          },
+          prLink: null,
+          lastSyncedAt: null,
+          syncSource: null,
+        },
+      ],
+      truncated: false,
+      cachedAt: new Date(0).toISOString(),
+    };
+    const choices = buildBranchChoices({
+      validBranches: ['feat/a'],
+      currentBranch: null,
+      regions: new Map([['feat/a', 'descendant']]),
+      overview,
+      noColor: true,
+    });
+    expect(choices[0].label).toContain('#101');
+    expect(choices[0].label).toContain('Approved');
+    expect(choices[0].label).toContain('CI ✔');
+    expect(choices[0].label).toContain('2 hours ago');
+  });
+
+  it('renders just the branch name when no metadata is available', () => {
+    const choices = buildBranchChoices({
+      validBranches: ['feat/a'],
+      currentBranch: null,
+      regions: new Map([['feat/a', 'descendant']]),
+      overview: null,
+      noColor: true,
+    });
+    expect(choices[0].label).toBe('feat/a');
   });
 });

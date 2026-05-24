@@ -1,3 +1,4 @@
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import {
   appendCleanupOperation,
   type CleanupJournal,
@@ -103,6 +104,10 @@ export async function submitRefreshedStacks(
       .filter((branchName): branchName is string => Boolean(branchName));
     for (const branchName of submitTargets) {
       await checkoutBranch(branchName, cwd);
+      await appendCheckoutHistory(cwd, branchName, {
+        via: 'submit-refresh',
+        transient: true,
+      });
       const result = await submit(cwd, false, {
         stack: true,
       });

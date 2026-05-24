@@ -1,0 +1,28 @@
+{
+  "description": "Sibling tree on top of trunk `main`. Root PR #1 (feat/a) has two children: feat/b (#2) and feat/d (#4). feat/b has its own child feat/c (#3). PR #2 (feat/b) merges. PR #3 (feat/c) must retarget from feat/b to feat/a; PR #4 (feat/d) is a sibling unrelated to the merge and must be untouched.",
+  "stack_id": "stk_tree",
+  "trunk": "main",
+  "merged": {
+    "number": 2,
+    "branch": "feat/b",
+    "parent": "feat/a",
+    "depth": 2
+  },
+  "dependents": [
+    {
+      "number": 3,
+      "branch": "feat/c",
+      "parent": "feat/b",
+      "depth": 3,
+      "expectedNewBase": "feat/a"
+    },
+    {
+      "number": 4,
+      "branch": "feat/d",
+      "parent": "feat/a",
+      "depth": 2,
+      "expectedNoChange": true,
+      "note": "Sibling of merged PR. Parent is feat/a (the root), not feat/b. Must be ignored."
+    }
+  ]
+}

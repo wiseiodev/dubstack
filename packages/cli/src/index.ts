@@ -19,7 +19,7 @@
  */
 
 import { createRequire } from 'node:module';
-import chalk from 'chalk';
+import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { branchInfoOutput } from './commands/branch';
@@ -36,6 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
+import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
@@ -43,6 +44,7 @@ import { mergeNext } from './commands/merge-next';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
+import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
@@ -50,6 +52,7 @@ import { ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
@@ -83,6 +86,7 @@ import {
 } from './lib/restack-conflict-prompt';
 import { rollbackRestack } from './lib/restack-rollback';
 import { parseScope, type ScopeMode } from './lib/scope';
+import { getStackOverviewBatch } from './lib/stack-overview';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -131,6 +135,92 @@ Examples:
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
   });
+
+program
+  .command('install')
+  .argument('<recipe>', 'Recipe to install (e.g. retarget-action)')
+  .option('--dry-run', 'Print the planned write without touching disk')
+  .option(
+    '--force',
+    'Overwrite an existing file with different content without confirming',
+  )
+  .description(
+    'Install a Dubstack recipe (workflow templates, etc.) into the current repo',
+  )
+  .addHelpText(
+    'after',
+    `
+Recipes:
+  retarget-action    GitHub Action that retargets dependent PRs when a stack PR merges
+
+Examples:
+  $ dub install retarget-action             Write .github/workflows/dubstack-retarget.yml
+  $ dub install retarget-action --dry-run   Preview the planned write
+  $ dub install retarget-action --force     Overwrite an existing file without confirming`,
+  )
+  .action(
+    async (recipe: string, options: { dryRun?: boolean; force?: boolean }) => {
+      const result = await install(process.cwd(), recipe as InstallRecipe, {
+        dryRun: options.dryRun,
+        force: options.force,
+        confirm: async (message) => {
+          // Non-interactive shells (piped stdin, CI scripts) would hang
+          // forever on rl.question. Treat as "no" and let the caller surface
+          // a 'cancelled' result; the user can pass --force for scripted
+          // overwrites.
+          if (!process.stdin.isTTY) {
+            console.log(
+              chalk.yellow(
+                '⚠ Refusing to prompt for confirmation in a non-interactive shell. Re-run with --force to overwrite, or --dry-run to preview.',
+              ),
+            );
+            return false;
+          }
+          const readline = await import('node:readline/promises');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          try {
+            const answer = await rl.question(`${message} [y/N] `);
+            const normalized = answer.trim().toLowerCase();
+            return normalized === 'y' || normalized === 'yes';
+          } finally {
+            rl.close();
+          }
+        },
+      });
+
+      switch (result.status) {
+        case 'installed':
+          console.log(chalk.green(`✔ Installed at ${result.path}`));
+          console.log(
+            chalk.dim(
+              '  Commit and push the workflow file. The Action runs on the next merge.',
+            ),
+          );
+          break;
+        case 'overwritten':
+          console.log(chalk.green(`✔ Overwrote ${result.path}`));
+          console.log(
+            chalk.dim('  Commit and push to pick up the new content.'),
+          );
+          break;
+        case 'already-installed':
+          console.log(
+            chalk.yellow(`⚠ Already installed at ${result.path} (no change)`),
+          );
+          break;
+        case 'preview':
+          console.log(chalk.dim(`# Would write to ${result.path}:`));
+          console.log(result.content);
+          break;
+        case 'cancelled':
+          console.log(chalk.yellow('⚠ Cancelled. No changes written.'));
+          break;
+      }
+    },
+  );
 
 program
   .command('docs')
@@ -263,6 +353,9 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option('--no-prs', 'Hide PR-state annotations in the rich view')
+  .option('--no-ci', 'Hide CI-state annotations in the rich view')
+  .option('--refresh', 'Bust the 30-second overview cache before rendering')
   .option(
     '--no-color',
     'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
@@ -280,6 +373,9 @@ Examples:
       reverse?: boolean;
       json?: boolean;
       color?: boolean;
+      prs?: boolean;
+      ci?: boolean;
+      refresh?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -292,6 +388,9 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option('--no-prs', 'Hide PR-state annotations in the rich view')
+  .option('--no-ci', 'Hide CI-state annotations in the rich view')
+  .option('--refresh', 'Bust the 30-second overview cache before rendering')
   .option(
     '--no-color',
     'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
@@ -303,6 +402,9 @@ program
       reverse?: boolean;
       json?: boolean;
       color?: boolean;
+      prs?: boolean;
+      ci?: boolean;
+      refresh?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -879,7 +981,9 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create, dub restack, or dub rename operation')
+  .description(
+    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+  )
   .addHelpText(
     'after',
     `
@@ -1276,6 +1380,11 @@ program
     '-a, --all',
     'Show branches across all tracked stacks in interactive selection',
   )
+  .option(
+    '--refresh',
+    'Bypass the 30s PR/CI overview cache and refetch from GitHub',
+  )
+  .option('--no-color', 'Disable ANSI colors in the picker')
   .description('Checkout a branch (interactive picker if no name given)')
   .action(
     async (
@@ -1285,6 +1394,8 @@ program
         showUntracked?: boolean;
         stack?: boolean;
         all?: boolean;
+        refresh?: boolean;
+        color?: boolean;
       },
     ) => {
       if (branch) {
@@ -1299,6 +1410,8 @@ program
           showUntracked: options.showUntracked,
           stack: options.stack,
           all: options.all,
+          refresh: options.refresh,
+          noColor: options.color === false,
         });
         if (result) {
           console.log(chalk.green(`✔ Switched to '${result.branch}'`));
@@ -1711,6 +1824,39 @@ program
   });
 
 program
+  .command('pop')
+  .description(
+    'Pop the last commit(s) off the current branch into the staging area',
+  )
+  .option(
+    '-n, --steps <count>',
+    'Number of commits to pop (default: 1)',
+    parsePositiveInt,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub pop                Pop last commit into staged changes
+  $ dub pop --steps 3      Squash last 3 commits into staged changes
+  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)`,
+  )
+  .action(async (options: { steps?: number }) => {
+    const result = await pop(process.cwd(), { steps: options.steps });
+    const noun = result.steps === 1 ? 'commit' : 'commits';
+    console.log(
+      chalk.green(
+        `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
+      ),
+    );
+  });
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
@@ -1769,6 +1915,103 @@ Examples:
       }
     },
   );
+
+const stashCommand = program
+  .command('stash')
+  .description(
+    'Branch-aware stash: capture working tree + record source branch so pop can refuse mismatched branches',
+  )
+  .option(
+    '-m, --message <message>',
+    'Override the default stash message (default: branch + timestamp)',
+  )
+  .option('--list', "Alias for 'dub stash list' — show recorded stashes")
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub stash                                Stash on current branch
+  $ dub stash -m "wip: refactor"             Stash with custom message
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless
+  $ dub stash list                           Show recorded stashes with branch context`,
+  )
+  .action(async (options: { message?: string; list?: boolean }) => {
+    if (options.list) {
+      await runStashList();
+      return;
+    }
+    const result = await stashPush(process.cwd(), { message: options.message });
+    console.log(
+      chalk.green(
+        `✔ Stashed on '${result.branch}' (${result.sha.slice(0, 7)})`,
+      ),
+    );
+    console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    console.log(
+      chalk.dim(
+        `  ↳ run 'dub stash pop' on '${result.branch}' to restore, or 'dub stash pop --on <branch>' to move it.`,
+      ),
+    );
+  });
+
+stashCommand.addCommand(
+  new Command('pop')
+    .description('Pop the most recent dub stash (refuses if branch differs)')
+    .option('--on <branch>', 'Checkout <branch> first, then pop the stash')
+    .option(
+      '--force',
+      "Pop onto the current branch even if it doesn't match the recorded branch",
+    )
+    .addHelpText(
+      'after',
+      `
+Examples:
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless`,
+    )
+    .action(async (options: { on?: string; force?: boolean }) => {
+      const result = await stashPop(process.cwd(), {
+        on: options.on,
+        force: options.force,
+      });
+      if (result.checkedOut) {
+        console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+      }
+      const label =
+        result.sourceBranch === result.branch
+          ? `'${result.branch}'`
+          : `'${result.branch}' (originally on '${result.sourceBranch}')`;
+      console.log(chalk.green(`✔ Popped stash on ${label}`));
+      console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    }),
+);
+
+stashCommand.addCommand(
+  new Command('list')
+    .description('Show recorded dub stashes with branch context')
+    .action(runStashList),
+);
+
+async function runStashList(): Promise<void> {
+  const result = await stashList(process.cwd());
+  if (result.entries.length === 0) {
+    console.log(chalk.dim('No dub stash entries recorded.'));
+    return;
+  }
+  for (let i = 0; i < result.entries.length; i += 1) {
+    const entry = result.entries[i];
+    const prefix = `${i}:`;
+    const refLabel = entry.ref ?? '(dropped)';
+    const presence = entry.present ? chalk.green('●') : chalk.yellow('○');
+    console.log(
+      `${presence} ${chalk.bold(prefix)} ${chalk.cyan(entry.branch)}  ${chalk.dim(refLabel)}  ${chalk.dim(entry.createdAt)}`,
+    );
+    console.log(chalk.dim(`    ↳ ${entry.message}`));
+  }
+}
 
 async function runSubmit(options: {
   dryRun?: boolean;
@@ -1867,15 +2110,49 @@ async function printLog(
     reverse?: boolean;
     json?: boolean;
     color?: boolean;
+    prs?: boolean;
+    ci?: boolean;
+    refresh?: boolean;
   } = {},
 ) {
+  const noColor = options.color === false || chalk.level === 0;
+  // Best-effort: fetch the rich overview, but degrade silently to the plain
+  // region-only tree when gh isn't authed, the network is down, or the
+  // batch returns nothing. Failure here must never break `dub log`.
+  let overview = null;
+  try {
+    overview = await getStackOverviewBatch(cwd, { refresh: options.refresh });
+  } catch {
+    overview = null;
+  }
+
+  const logOptions = {
+    stack: options.stack,
+    all: options.all,
+    reverse: options.reverse,
+    prs: options.prs,
+    ci: options.ci,
+    noColor,
+    overview,
+  };
+
   if (options.json) {
-    console.log(JSON.stringify(await logJson(cwd, options), null, 2));
+    console.log(JSON.stringify(await logJson(cwd, logOptions), null, 2));
     return;
   }
 
-  const output = await log(cwd, options);
-  const noColor = options.color === false || chalk.level === 0;
+  const output = await log(cwd, logOptions);
+  if (overview?.truncated && overview.branches.length > 0) {
+    // Use a scoped Chalk instance keyed off the same noColor decision the
+    // tree renderer honors — `chalk.yellow(...)` would otherwise still emit
+    // ANSI under `--no-color` since noColor only affects styleLogOutput.
+    const bannerChalk = noColor ? new Chalk({ level: 0 }) : chalk;
+    console.log(
+      bannerChalk.yellow(
+        `ℹ Showing ${overview.branches.length}+ branches — some PR data may be stale.`,
+      ),
+    );
+  }
   console.log(styleLogOutput(output, noColor));
 }
 
