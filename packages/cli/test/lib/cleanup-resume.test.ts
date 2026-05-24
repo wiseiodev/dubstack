@@ -1,12 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resumeCleanup } from '../../../src/lib/sync/cleanup-resume';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendCleanupOperation,
   startCleanupJournal,
-} from '../../../src/lib/sync/journal';
-import { createTestRepo, gitInRepo } from '../../helpers';
+} from '../../src/lib/cleanup-journal';
+import { resumeCleanup } from '../../src/lib/cleanup-resume';
+import * as github from '../../src/lib/github';
+import { createTestRepo, gitInRepo } from '../helpers';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -193,5 +194,104 @@ describe('resumeCleanup', () => {
     const second = await resumeCleanup(dir);
     expect(second.applied).toHaveLength(0);
     expect(second.alreadyApplied).toHaveLength(0);
+  });
+
+  it('replays a retarget op only when the current PR base differs', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            { name: 'feat/a', parent: 'main', pr_number: 1, pr_link: null },
+            { name: 'feat/b', parent: 'feat/a', pr_number: 2, pr_link: null },
+          ],
+        },
+      ],
+    });
+    const getInfo = vi
+      .spyOn(github, 'getBranchPrSyncInfo')
+      .mockResolvedValue({ state: 'OPEN', baseRefName: 'feat/a' });
+    const retarget = vi
+      .spyOn(github, 'retargetPrBase')
+      .mockResolvedValue(undefined);
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'retarget',
+      branch: 'feat/b',
+      oldBase: 'feat/a',
+      newBase: 'main',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(1);
+    expect(retarget).toHaveBeenCalledWith('feat/b', 'main', dir);
+    expect(getInfo).toHaveBeenCalledWith('feat/b', dir);
+    getInfo.mockRestore();
+    retarget.mockRestore();
+  });
+
+  it('skips a retarget op when the PR is already on the new base', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            { name: 'feat/b', parent: 'main', pr_number: 2, pr_link: null },
+          ],
+        },
+      ],
+    });
+    const getInfo = vi
+      .spyOn(github, 'getBranchPrSyncInfo')
+      .mockResolvedValue({ state: 'OPEN', baseRefName: 'main' });
+    const retarget = vi
+      .spyOn(github, 'retargetPrBase')
+      .mockResolvedValue(undefined);
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'retarget',
+      branch: 'feat/b',
+      oldBase: 'feat/a',
+      newBase: 'main',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(0);
+    expect(result.alreadyApplied).toHaveLength(1);
+    expect(retarget).not.toHaveBeenCalled();
+    getInfo.mockRestore();
+    retarget.mockRestore();
+  });
+
+  it('skips a retarget op when the PR is not OPEN (closed, merged, or absent)', async () => {
+    writeState({ stacks: [{ id: 'stack-1', branches: [] }] });
+    const getInfo = vi
+      .spyOn(github, 'getBranchPrSyncInfo')
+      .mockResolvedValue({ state: 'CLOSED', baseRefName: 'feat/a' });
+    const retarget = vi
+      .spyOn(github, 'retargetPrBase')
+      .mockResolvedValue(undefined);
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'retarget',
+      branch: 'feat/b',
+      oldBase: 'feat/a',
+      newBase: 'main',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(0);
+    expect(result.alreadyApplied).toHaveLength(1);
+    expect(retarget).not.toHaveBeenCalled();
+    getInfo.mockRestore();
+    retarget.mockRestore();
   });
 });

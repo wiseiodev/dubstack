@@ -8,8 +8,8 @@ import {
   hasCleanupJournal,
   readCleanupJournal,
   startCleanupJournal,
-} from '../../../src/lib/sync/journal';
-import { createTestRepo } from '../../helpers';
+} from '../../src/lib/cleanup-journal';
+import { createTestRepo } from '../helpers';
 
 let dir: string;
 let cleanup: () => Promise<void>;

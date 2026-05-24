@@ -24,7 +24,7 @@ vi.mock('../lib/git.js', () => ({
   remoteBranchExists: vi.fn(),
 }));
 
-vi.mock('../lib/sync/journal.js', () => ({
+vi.mock('../lib/cleanup-journal.js', () => ({
   startCleanupJournal: vi.fn().mockResolvedValue({
     version: 1,
     started_at: 'mock',

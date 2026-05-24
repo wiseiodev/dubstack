@@ -1,11 +1,12 @@
-import { branchExists, deleteBranch, getCurrentBranch } from '../git';
-import { type Branch, readState, writeState } from '../state';
-import type { CleanupOperation } from './cleanup';
 import {
   type CleanupJournal,
+  type CleanupOperation,
   clearCleanupJournal,
   readCleanupJournal,
-} from './journal';
+} from './cleanup-journal';
+import { branchExists, deleteBranch, getCurrentBranch } from './git';
+import { getBranchPrSyncInfo, retargetPrBase } from './github';
+import { type Branch, readState, writeState } from './state';
 
 export interface CleanupResumeResult {
   /** Operations that actually changed on-disk state during replay. */
@@ -21,6 +22,9 @@ export interface CleanupResumeResult {
  * - `delete`: deletes the local branch if it still exists; otherwise no-op.
  * - `reparent`: updates the parent in DubStack state if it doesn't already
  *   match `newParent`; otherwise no-op.
+ * - `retarget`: updates the PR base via `gh pr edit` only if the current base
+ *   differs from `newBase`; otherwise no-op. Skipped if the PR no longer
+ *   exists.
  *
  * The journal is cleared only after every operation completes without error.
  */
@@ -53,9 +57,9 @@ async function replayJournal(
   for (const op of journal.operations) {
     if (op.type === 'delete') {
       // Always remove the state entry first. A crash between `deleteBranch`
-      // and `writeState` in the original `sync` run can leave a ghost entry
-      // pointing at a now-missing branch ref — replay must clean that up
-      // regardless of whether the git branch is still present.
+      // and `writeState` in the original run can leave a ghost entry pointing
+      // at a now-missing branch ref — replay must clean that up regardless of
+      // whether the git branch is still present.
       const stateChanged = removeBranchFromStacks(state.stacks, op.branch);
       if (stateChanged) stateDirty = true;
 
@@ -78,18 +82,33 @@ async function replayJournal(
       applied.push(op);
       continue;
     }
-    // Reparent.
-    const entry = branchIndex.get(op.branch);
-    if (!entry) {
+    if (op.type === 'reparent') {
+      const entry = branchIndex.get(op.branch);
+      if (!entry) {
+        alreadyApplied.push(op);
+        continue;
+      }
+      if ((entry.parent ?? null) === (op.newParent ?? null)) {
+        alreadyApplied.push(op);
+        continue;
+      }
+      entry.parent = op.newParent;
+      stateDirty = true;
+      applied.push(op);
+      continue;
+    }
+    // Retarget. Only OPEN PRs are retarget-able — CLOSED/MERGED PRs can't
+    // change base, and NONE means the PR was deleted entirely.
+    const info = await getBranchPrSyncInfo(op.branch, cwd);
+    if (info.state !== 'OPEN') {
       alreadyApplied.push(op);
       continue;
     }
-    if ((entry.parent ?? null) === (op.newParent ?? null)) {
+    if ((info.baseRefName ?? null) === op.newBase) {
       alreadyApplied.push(op);
       continue;
     }
-    entry.parent = op.newParent;
-    stateDirty = true;
+    await retargetPrBase(op.branch, op.newBase, cwd);
     applied.push(op);
   }
 

@@ -13,6 +13,16 @@ vi.mock('../lib/git.js', () => ({
   remoteBranchExists: vi.fn(),
 }));
 
+vi.mock('../lib/cleanup-journal.js', () => ({
+  startCleanupJournal: vi.fn().mockResolvedValue({
+    version: 1,
+    started_at: 'mock',
+    operations: [],
+  }),
+  appendCleanupOperation: vi.fn().mockResolvedValue(undefined),
+  clearCleanupJournal: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../lib/state.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/state.js')>();
   return {
@@ -38,6 +48,11 @@ vi.mock('./submit.js', () => ({
   submit: vi.fn(),
 }));
 
+import {
+  appendCleanupOperation,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import {
   checkoutBranch,
   fastForwardBranchToRef,
@@ -80,6 +95,11 @@ const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockRestack = restack as ReturnType<typeof vi.fn>;
 const mockSubmit = submit as ReturnType<typeof vi.fn>;
+const mockStartCleanupJournal = startCleanupJournal as ReturnType<typeof vi.fn>;
+const mockAppendCleanupOperation = appendCleanupOperation as ReturnType<
+  typeof vi.fn
+>;
+const mockClearCleanupJournal = clearCleanupJournal as ReturnType<typeof vi.fn>;
 
 function makeState(): DubState {
   return {
@@ -396,5 +416,86 @@ describe('postMerge', () => {
     expect(mockSubmit).toHaveBeenCalledTimes(2);
     expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/a', '/repo');
     expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/c', '/repo');
+  });
+
+  it('journals reparent + delete ops before mutating state and clears on success', async () => {
+    await postMerge('/repo', {
+      restack: false,
+      submit: false,
+    });
+
+    expect(mockStartCleanupJournal).toHaveBeenCalledWith('/repo');
+    // feat/a is the merged-bottom branch; feat/b is its child that gets
+    // reparented onto main.
+    expect(mockAppendCleanupOperation).toHaveBeenNthCalledWith(
+      1,
+      '/repo',
+      expect.anything(),
+      {
+        type: 'reparent',
+        branch: 'feat/b',
+        oldParent: 'feat/a',
+        newParent: 'main',
+      },
+    );
+    expect(mockAppendCleanupOperation).toHaveBeenNthCalledWith(
+      2,
+      '/repo',
+      expect.anything(),
+      { type: 'delete', branch: 'feat/a', reason: 'merged-pr' },
+    );
+    // Journal cleared after writeState succeeds.
+    expect(mockClearCleanupJournal).toHaveBeenCalledWith('/repo');
+    const writeStateCallOrder = mockWriteState.mock.invocationCallOrder[0];
+    const clearJournalCallOrder =
+      mockClearCleanupJournal.mock.invocationCallOrder[0];
+    expect(writeStateCallOrder).toBeLessThan(clearJournalCallOrder);
+  });
+
+  it('does not start a journal in dry-run', async () => {
+    await postMerge('/repo', { dryRun: true });
+
+    expect(mockStartCleanupJournal).not.toHaveBeenCalled();
+    expect(mockAppendCleanupOperation).not.toHaveBeenCalled();
+    expect(mockClearCleanupJournal).not.toHaveBeenCalled();
+  });
+
+  it('journals each PR retarget alongside the reparent + delete ops', async () => {
+    await postMerge('/repo', {
+      restack: false,
+      submit: false,
+    });
+
+    // The retarget op for feat/b is appended by retargetOpenPrBranches once the
+    // post-merge journal is threaded in. Earlier appends are reparent + delete.
+    const appendCalls = mockAppendCleanupOperation.mock.calls.map(
+      (call) => call[2],
+    );
+    expect(appendCalls).toContainEqual({
+      type: 'retarget',
+      branch: 'feat/b',
+      oldBase: 'feat/a',
+      newBase: 'main',
+    });
+    const retargetAppendIdx = appendCalls.findIndex(
+      (op) => op.type === 'retarget',
+    );
+    const retargetCallOrder =
+      mockRetargetPrBase.mock.invocationCallOrder[0] ?? 0;
+    const appendCallOrder =
+      mockAppendCleanupOperation.mock.invocationCallOrder[retargetAppendIdx];
+    expect(appendCallOrder).toBeLessThan(retargetCallOrder);
+  });
+
+  it('leaves the journal in place when writeState fails so dub continue can resume', async () => {
+    mockWriteState.mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(
+      postMerge('/repo', { restack: false, submit: false }),
+    ).rejects.toThrow('disk full');
+    expect(mockStartCleanupJournal).toHaveBeenCalled();
+    // Journal stays on disk: clearCleanupJournal must not be called when
+    // writeState throws.
+    expect(mockClearCleanupJournal).not.toHaveBeenCalled();
   });
 });

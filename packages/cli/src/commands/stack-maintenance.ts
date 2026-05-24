@@ -1,3 +1,7 @@
+import {
+  appendCleanupOperation,
+  type CleanupJournal,
+} from '../lib/cleanup-journal';
 import { checkoutBranch } from '../lib/git';
 import { getBranchPrSyncInfo, retargetPrBase } from '../lib/github';
 import { findStackForBranch, type Stack, topologicalOrder } from '../lib/state';
@@ -6,7 +10,15 @@ import { submit } from './submit';
 export async function retargetOpenPrBranches(
   stacks: Stack[],
   cwd: string,
-  options: { dryRun?: boolean; branches?: string[] } = {},
+  options: {
+    dryRun?: boolean;
+    branches?: string[];
+    /**
+     * When provided, each planned retarget is appended to the journal before
+     * `gh pr edit` fires, so a crash mid-loop is recoverable by `dub continue`.
+     */
+    journal?: CleanupJournal;
+  } = {},
 ): Promise<string[]> {
   const dryRun = options.dryRun ?? false;
   const targetBranches = options.branches ? new Set(options.branches) : null;
@@ -21,6 +33,14 @@ export async function retargetOpenPrBranches(
       if (prInfo.baseRefName === branch.parent) continue;
       retargeted.push(branch.name);
       if (!dryRun) {
+        if (options.journal) {
+          await appendCleanupOperation(cwd, options.journal, {
+            type: 'retarget',
+            branch: branch.name,
+            oldBase: prInfo.baseRefName ?? null,
+            newBase: branch.parent,
+          });
+        }
         await retargetPrBase(branch.name, branch.parent, cwd);
       }
     }

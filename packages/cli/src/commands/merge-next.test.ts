@@ -8,6 +8,16 @@ vi.mock('../lib/github.js', () => ({
   retargetPrBase: vi.fn(),
 }));
 
+vi.mock('../lib/cleanup-journal.js', () => ({
+  startCleanupJournal: vi.fn().mockResolvedValue({
+    version: 1,
+    started_at: 'mock',
+    operations: [],
+  }),
+  appendCleanupOperation: vi.fn().mockResolvedValue(undefined),
+  clearCleanupJournal: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('./post-merge.js', () => ({
   postMerge: vi.fn(),
 }));
@@ -16,6 +26,11 @@ vi.mock('./submit.js', () => ({
   getSubmitPlan: vi.fn(),
 }));
 
+import {
+  appendCleanupOperation,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -34,6 +49,11 @@ const mockMergePr = mergePr as ReturnType<typeof vi.fn>;
 const mockRetargetPrBase = retargetPrBase as ReturnType<typeof vi.fn>;
 const mockPostMerge = postMerge as ReturnType<typeof vi.fn>;
 const mockGetSubmitPlan = getSubmitPlan as ReturnType<typeof vi.fn>;
+const mockStartCleanupJournal = startCleanupJournal as ReturnType<typeof vi.fn>;
+const mockAppendCleanupOperation = appendCleanupOperation as ReturnType<
+  typeof vi.fn
+>;
+const mockClearCleanupJournal = clearCleanupJournal as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -141,5 +161,61 @@ describe('mergeNext', () => {
 
     await expect(mergeNext('/repo')).rejects.toThrow('retarget failed');
     expect(mockMergePr).not.toHaveBeenCalled();
+  });
+
+  it('journals each pre-retarget op before applying it and clears on success', async () => {
+    await mergeNext('/repo');
+
+    expect(mockStartCleanupJournal).toHaveBeenCalledWith('/repo');
+    expect(mockAppendCleanupOperation).toHaveBeenCalledWith(
+      '/repo',
+      expect.anything(),
+      {
+        type: 'retarget',
+        branch: 'feat/b',
+        oldBase: 'feat/a',
+        newBase: 'main',
+      },
+    );
+    // Journal append must precede the actual retargetPrBase call so a crash
+    // mid-loop leaves the op on disk for replay.
+    const appendOrder = mockAppendCleanupOperation.mock.invocationCallOrder[0];
+    const retargetOrder = mockRetargetPrBase.mock.invocationCallOrder[0];
+    expect(appendOrder).toBeLessThan(retargetOrder);
+    // Journal cleared before mergePr fires so the next operation owns the
+    // crash-safe replay slot.
+    expect(mockClearCleanupJournal).toHaveBeenCalledWith('/repo');
+    const clearOrder = mockClearCleanupJournal.mock.invocationCallOrder[0];
+    const mergeOrder = mockMergePr.mock.invocationCallOrder[0];
+    expect(clearOrder).toBeLessThan(mergeOrder);
+  });
+
+  it('does not start a journal when there are no child PRs to retarget', async () => {
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') {
+        return {
+          number: 101,
+          url: 'https://github.com/o/r/pull/101',
+          title: 'feat: a',
+          body: '',
+        };
+      }
+      return null;
+    });
+
+    await mergeNext('/repo');
+
+    expect(mockStartCleanupJournal).not.toHaveBeenCalled();
+    expect(mockAppendCleanupOperation).not.toHaveBeenCalled();
+    expect(mockClearCleanupJournal).not.toHaveBeenCalled();
+  });
+
+  it('leaves the retarget journal in place when retargetPrBase throws', async () => {
+    mockRetargetPrBase.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(mergeNext('/repo')).rejects.toThrow('boom');
+    expect(mockStartCleanupJournal).toHaveBeenCalled();
+    expect(mockAppendCleanupOperation).toHaveBeenCalled();
+    expect(mockClearCleanupJournal).not.toHaveBeenCalled();
   });
 });
