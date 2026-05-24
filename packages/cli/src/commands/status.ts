@@ -1,5 +1,9 @@
 import { getCurrentBranch } from '../lib/git';
-import type { BranchPrLifecycleState, CiStatusRollup } from '../lib/github';
+import type {
+  BranchPrLifecycleState,
+  CiStatusRollup,
+  StackOverviewPrInfo,
+} from '../lib/github';
 import {
   type ActiveOperation,
   detectActiveOperation,
@@ -20,6 +24,8 @@ export interface BranchSnapshot {
 }
 
 export interface PrSnapshot {
+  // `'UNKNOWN'` is reserved for future caller-supplied failure cases; the
+  // current cached/live/cold paths never produce it.
   state: BranchPrLifecycleState | 'UNKNOWN';
   baseRefName: string | null;
   number: number | null;
@@ -27,7 +33,6 @@ export interface PrSnapshot {
   isDraft: boolean | null;
   ciRollup: CiStatusRollup | null;
   reviewDecision: string | null;
-  error?: string;
 }
 
 export interface DriftSnapshot {
@@ -67,8 +72,9 @@ export interface StatusOptions {
  * - default (`{ live: false }`): read the overview cache if fresh and use it
  *   for PR data. `cached: true`. Falls back to cold local-only when the cache
  *   is missing or stale — no `gh` calls and no drift checks. `cached: false`.
- * - `{ pr: false }`: never call `gh`. Returns `pr: null`. Drift is still
- *   computed when a fresh-enough overview cache is present.
+ * - `{ pr: false }`: never call `gh`, even with `live: true`. Returns
+ *   `pr: null`. Drift is still computed when a fresh-enough overview cache is
+ *   present (drift checks are local-only).
  */
 export async function status(
   cwd: string,
@@ -86,11 +92,12 @@ export async function status(
     children: info.children,
   };
 
-  if (options.live) {
+  // `pr: false` is the no-network contract. It overrides `live: true` so
+  // `dub status --no-pr --live` cannot trigger a `gh pr list` batch fetch —
+  // `--live` only makes sense when the caller actually wants fresh PR data.
+  if (options.live && includePr) {
     const overview = await getStackOverviewBatch(cwd, { refresh: true });
-    const pr = includePr
-      ? buildPrSnapshotFromOverview(overview.branches, currentBranch)
-      : null;
+    const pr = buildPrSnapshotFromOverview(overview.branches, currentBranch);
     const drift = await computeDrift(cwd);
     return {
       schemaVersion: 1,
@@ -147,7 +154,7 @@ async function computeDrift(cwd: string): Promise<DriftSnapshot> {
 }
 
 function buildPrSnapshotFromOverview(
-  branches: { branch: string; pr: PrLike | null }[],
+  branches: { branch: string; pr: StackOverviewPrInfo | null }[],
   currentBranch: string,
 ): PrSnapshot {
   const entry = branches.find((b) => b.branch === currentBranch);
@@ -172,16 +179,6 @@ function buildPrSnapshotFromOverview(
     ciRollup: pr.ciRollup,
     reviewDecision: pr.reviewDecision,
   };
-}
-
-interface PrLike {
-  number: number;
-  title: string;
-  state: BranchPrLifecycleState;
-  baseRefName: string | null;
-  isDraft: boolean;
-  ciRollup: CiStatusRollup;
-  reviewDecision: string | null;
 }
 
 export function isDriftIssue(issue: DoctorIssue): boolean {

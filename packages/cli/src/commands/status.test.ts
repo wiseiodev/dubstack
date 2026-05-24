@@ -239,6 +239,22 @@ describe('status (cold path)', () => {
 });
 
 describe('status (live path)', () => {
+  it('pr: false overrides live: true and never calls gh', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await status('/repo', { live: true, pr: false });
+
+    expect(result.pr).toBeNull();
+    expect(mockGetStackOverviewBatch).not.toHaveBeenCalled();
+    expect(mockGetBranchPrSyncInfo).not.toHaveBeenCalled();
+  });
+
   it('refreshes the overview cache and includes drift', async () => {
     mockReadState.mockResolvedValue(
       makeState([
@@ -271,6 +287,14 @@ describe('status (live path)', () => {
     expect(result.pr?.ciRollup).toBe('PENDING');
     expect(result.drift).toEqual({ healthy: true, issues: [] });
     expect(mockReadStackOverviewCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('status error propagation', () => {
+  it('propagates DubError from getCurrentBranch (detached HEAD)', async () => {
+    mockGetCurrentBranch.mockRejectedValue(new Error('detached HEAD'));
+
+    await expect(status('/repo')).rejects.toThrow('detached HEAD');
   });
 });
 

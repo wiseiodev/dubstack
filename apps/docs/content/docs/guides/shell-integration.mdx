@@ -59,7 +59,7 @@ Add a custom `dubstack` module to `~/.config/starship.toml`:
 [custom.dubstack]
 command = "dub status --no-pr"
 when = "git rev-parse --is-inside-work-tree"
-shell = ["sh", "--noprofile", "--norc"]
+shell = ["bash", "--noprofile", "--norc"]
 format = "[$output]($style) "
 style = "bold cyan"
 ```
@@ -70,7 +70,9 @@ For a richer prompt with PR + CI status, drop `--no-pr` (still cache-first):
 [custom.dubstack]
 command = "dub status"
 when = "git rev-parse --is-inside-work-tree"
+shell = ["bash", "--noprofile", "--norc"]
 format = "[$output]($style) "
+style = "bold cyan"
 ```
 
 ## tmux
