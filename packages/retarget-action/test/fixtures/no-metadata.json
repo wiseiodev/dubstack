@@ -1,0 +1,4 @@
+{
+  "description": "A merged PR whose body has no dubstack-metadata block. The Action must exit 0 silently.",
+  "body": "## Summary\n\nFix typo in README.\n\nNo dubstack tags here — this PR was opened with the GitHub UI in a non-Dubstack repo."
+}

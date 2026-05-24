@@ -1,0 +1,18 @@
+name: Dubstack stack retarget
+description: >-
+  Retargets dependent stacked PRs when a Dubstack PR merges. Reads the
+  hidden `dubstack-metadata` block from PR bodies; no external state.
+author: wiseiodev
+branding:
+  icon: layers
+  color: yellow
+inputs:
+  github-token:
+    description: >-
+      Token used to read PR bodies and update bases. The default
+      ${{ secrets.GITHUB_TOKEN }} works when the workflow has
+      `pull-requests: write` permission.
+    required: true
+runs:
+  using: node24
+  main: dist/index.js
