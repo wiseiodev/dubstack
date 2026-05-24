@@ -50,7 +50,7 @@ describe('log', () => {
 
     // Currently on feat/b
     const output = await log(dir);
-    expect(output).toBe('(main)\n  └─ feat/a\n       └─ *feat/b (Current)*');
+    expect(output).toBe('(main)\n  └─ >feat/a\n       └─ *feat/b (Current)*');
   });
 
   it('returns a JSON tree with the same branch metadata', async () => {
@@ -131,9 +131,9 @@ describe('log', () => {
     };
     await writeState(state, dir);
 
-    // Currently on feat/b
+    // Currently on feat/b — feat/a is a sibling-subtree branch
     const output = await log(dir);
-    expect(output).toContain('├─ feat/a');
+    expect(output).toContain('├─ ~feat/a~');
     expect(output).toContain('└─ *feat/b (Current)*');
   });
 
@@ -327,5 +327,167 @@ describe('log', () => {
 
     const output = await log(dir, { reverse: true });
     expect(output.indexOf('feat/c')).toBeLessThan(output.indexOf('feat/a'));
+  });
+
+  describe('region markers', () => {
+    async function buildTree(d: string) {
+      await gitInRepo(d, ['checkout', '-b', 'feat/auth-base']);
+      await gitInRepo(d, ['checkout', '-b', 'feat/auth-login']);
+      await gitInRepo(d, ['checkout', 'feat/auth-base']);
+      await gitInRepo(d, ['checkout', '-b', 'feat/auth-sibling']);
+      await gitInRepo(d, ['checkout', '-b', 'feat/auth-grandchild']);
+      await gitInRepo(d, ['checkout', '-b', 'feat/auth-tip']);
+      const state: DubState = {
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-base',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-login',
+                parent: 'feat/auth-base',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-sibling',
+                parent: 'feat/auth-base',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-grandchild',
+                parent: 'feat/auth-sibling',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-tip',
+                parent: 'feat/auth-grandchild',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      };
+      await writeState(state, d);
+    }
+
+    it('marks ancestor path with > on the current branch chain', async () => {
+      await buildTree(dir);
+      await gitInRepo(dir, ['checkout', 'feat/auth-login']);
+
+      const output = await log(dir);
+      expect(output).toContain('>feat/auth-base');
+      expect(output).toContain('*feat/auth-login (Current)*');
+    });
+
+    it('wraps sibling sub-tree branches in ~ markers', async () => {
+      await buildTree(dir);
+      await gitInRepo(dir, ['checkout', 'feat/auth-login']);
+
+      const output = await log(dir);
+      expect(output).toContain('~feat/auth-sibling~');
+      expect(output).toContain('~feat/auth-grandchild~');
+      expect(output).toContain('~feat/auth-tip~');
+    });
+
+    it('leaves descendants of the current branch unmarked', async () => {
+      await buildTree(dir);
+      await gitInRepo(dir, ['checkout', 'feat/auth-base']);
+
+      const output = await log(dir);
+      expect(output).toContain('├─ feat/auth-login');
+      expect(output).not.toContain('>feat/auth-login');
+      expect(output).not.toContain('~feat/auth-login~');
+    });
+
+    it('exposes the region per branch in logJson', async () => {
+      await buildTree(dir);
+      await gitInRepo(dir, ['checkout', 'feat/auth-login']);
+
+      const output = await logJson(dir);
+      const stackRoot = output.stacks[0]?.root;
+      expect(stackRoot?.region).toBe('root');
+
+      const base = stackRoot?.children[0];
+      expect(base?.name).toBe('feat/auth-base');
+      expect(base?.region).toBe('ancestor');
+
+      const baseChildren = base?.children ?? [];
+      const login = baseChildren.find((b) => b.name === 'feat/auth-login');
+      const sibling = baseChildren.find((b) => b.name === 'feat/auth-sibling');
+      const grandchild = sibling?.children[0];
+      const tip = grandchild?.children[0];
+
+      expect(login?.region).toBe('current');
+      expect(sibling?.region).toBe('sibling-subtree');
+      expect(grandchild?.region).toBe('sibling-subtree');
+      expect(tip?.region).toBe('sibling-subtree');
+    });
+
+    it('keeps the ancestor marker for ancestors that are missing from git', async () => {
+      await gitInRepo(dir, ['checkout', '-b', 'feat/auth-base']);
+      await gitInRepo(dir, ['checkout', '-b', 'feat/auth-login']);
+      await gitInRepo(dir, ['branch', '-D', 'feat/auth-base']);
+      const state: DubState = {
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-base',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/auth-login',
+                parent: 'feat/auth-base',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      };
+      await writeState(state, dir);
+
+      const output = await log(dir);
+      expect(output).toContain('>feat/auth-base ⚠ (missing)');
+      expect(output).toContain('*feat/auth-login (Current)*');
+    });
+
+    it('reports every non-root branch as descendant when current is not in stack', async () => {
+      await buildTree(dir);
+      await gitInRepo(dir, ['checkout', 'main']);
+      await gitInRepo(dir, ['checkout', '-b', 'feat/outside']);
+
+      const output = await logJson(dir);
+      const stackRoot = output.stacks[0]?.root;
+      expect(stackRoot?.region).toBe('root');
+      const base = stackRoot?.children[0];
+      expect(base?.region).toBe('descendant');
+    });
   });
 });

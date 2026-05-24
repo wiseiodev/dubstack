@@ -258,6 +258,10 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option(
+    '--no-color',
+    'Disable ANSI colors; use text markers (`*` current, `>` ancestor)',
+  )
   .addHelpText(
     'after',
     `
@@ -270,6 +274,7 @@ Examples:
       all?: boolean;
       reverse?: boolean;
       json?: boolean;
+      color?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -282,12 +287,17 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option(
+    '--no-color',
+    'Disable ANSI colors; use text markers (`*` current, `>` ancestor)',
+  )
   .action(
     async (options: {
       stack?: boolean;
       all?: boolean;
       reverse?: boolean;
       json?: boolean;
+      color?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -1600,6 +1610,7 @@ async function printLog(
     all?: boolean;
     reverse?: boolean;
     json?: boolean;
+    color?: boolean;
   } = {},
 ) {
   if (options.json) {
@@ -1608,9 +1619,14 @@ async function printLog(
   }
 
   const output = await log(cwd, options);
-  const styled = output
-    .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
-    .replace(/⚠ \(missing\)/g, chalk.yellow('⚠ (missing)'));
+  const noColor = options.color === false || chalk.level === 0;
+  const styled = noColor
+    ? output.replace(/~([^~]+?)~/g, '$1')
+    : output
+        .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
+        .replace(/(─ )>(\S+)/g, `$1${chalk.bold('$2')}`)
+        .replace(/~([^~]+?)~/g, chalk.dim('$1'))
+        .replace(/⚠ \(missing\)/g, chalk.yellow('⚠ (missing)'));
   console.log(styled);
 }
 
