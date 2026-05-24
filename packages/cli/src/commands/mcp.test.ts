@@ -102,6 +102,9 @@ describe('mcp command', () => {
       'dubstack.sync',
       'dubstack.checkout',
       'dubstack.delete',
+      'dubstack.stash',
+      'dubstack.stash-pop',
+      'dubstack.stash-list',
     ]);
 
     server.send({

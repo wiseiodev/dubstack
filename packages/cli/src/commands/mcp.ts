@@ -15,6 +15,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
+import { stashList, stashPop, stashPush } from './stash';
 import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
@@ -93,6 +94,9 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.stash': ['message'],
+  'dubstack.stash-pop': ['on', 'force'],
+  'dubstack.stash-list': [],
 };
 
 const BRANCH_SCHEMA = {
@@ -354,6 +358,54 @@ const TOOLS: ToolDefinition[] = [
           description: 'Delete branches even when not fully merged.',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash',
+    description:
+      'Capture the working tree (staged + unstaged + untracked) as a branch-aware stash recorded in .git/dubstack/stash-log.json.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description:
+            'Override the default stash message (default: branch + timestamp).',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash-pop',
+    description:
+      'Pop the most recent dub stash. Refuses if the recorded source branch differs from the current branch unless `on` or `force` is given.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        on: {
+          type: 'string',
+          description: 'Checkout this branch first, then pop the stash.',
+        },
+        force: {
+          type: 'boolean',
+          description:
+            "Pop onto the current branch even if it doesn't match the recorded branch.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.stash-list',
+    description:
+      'List recorded dub stashes with branch context and presence in `git stash list`.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -717,6 +769,19 @@ async function callTool(
           interactive: false,
         }),
       );
+    case 'dubstack.stash':
+      return mutatingToolResult(() =>
+        stashPush(cwd, { message: optionalString(args.message) }),
+      );
+    case 'dubstack.stash-pop':
+      return mutatingToolResult(() =>
+        stashPop(cwd, {
+          on: optionalString(args.on),
+          force: optionalBoolean(args.force),
+        }),
+      );
+    case 'dubstack.stash-list':
+      return jsonToolResult(await stashList(cwd));
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`, [
         'Call tools/list to discover the available dubstack.* tool names.',

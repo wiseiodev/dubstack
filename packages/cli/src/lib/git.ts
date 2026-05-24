@@ -296,6 +296,91 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Records the current working tree (staged + unstaged + untracked) as a new
+ * stash entry. Returns the commit SHA of the created stash, or `null` when
+ * there was nothing to stash.
+ */
+export async function gitStashPushIncludeUntracked(
+  message: string,
+  cwd: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['stash', 'push', '--include-untracked', '-m', message],
+      { cwd },
+    );
+    if (/^No local changes to save/m.test(stdout)) return null;
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure('Failed to create stash.', readGitCommandOutput(error)),
+      [
+        "Run 'git status' to inspect the working tree.",
+        "Run 'git stash push --include-untracked' manually to see the underlying error.",
+      ],
+    );
+  }
+  try {
+    const { stdout } = await execa('git', ['rev-parse', 'stash@{0}'], { cwd });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** A stash entry as reported by `git stash list`. */
+export interface GitStashEntry {
+  /** Ref name, e.g. `stash@{0}`. Volatile across `pop`/`drop`. */
+  ref: string;
+  /** Commit SHA of the stash. Stable until the stash is dropped. */
+  sha: string;
+}
+
+/**
+ * Returns the current `git stash list` entries with their commit SHAs.
+ */
+export async function listGitStashes(cwd: string): Promise<GitStashEntry[]> {
+  const { stdout } = await execa('git', ['stash', 'list', '--format=%gd %H'], {
+    cwd,
+  });
+  const entries: GitStashEntry[] = [];
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx === -1) continue;
+    entries.push({
+      ref: trimmed.slice(0, spaceIdx),
+      sha: trimmed.slice(spaceIdx + 1).trim(),
+    });
+  }
+  return entries;
+}
+
+/**
+ * Pops the stash identified by `ref` (e.g. `stash@{0}`). On conflict, the
+ * stash is kept and the working tree carries the conflict markers — match
+ * `git stash pop` behavior so the user can resolve and re-pop.
+ */
+export async function gitStashPop(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['stash', 'pop', ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to pop stash '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git status' to inspect any conflict markers from the pop.",
+        `Run 'git stash pop ${ref}' manually to see the underlying error.`,
+        `Run 'git stash drop ${ref}' to discard the stash if you no longer need it.`,
+      ],
+    );
+  }
+}
+
+/**
  * Performs `git rebase --onto` to move a branch from one base to another.
  *
  * @param newBase - The commit/branch to rebase onto
