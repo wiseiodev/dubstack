@@ -36,7 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
-import { log, logJson } from './commands/log';
+import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
@@ -260,7 +260,7 @@ program
   .option('--json', 'Output the stack tree as JSON')
   .option(
     '--no-color',
-    'Disable ANSI colors; use text markers (`*` current, `>` ancestor)',
+    'Disable ANSI colors; keep text markers (`*` current, `>` ancestor) and drop sibling-subtree dimming',
   )
   .addHelpText(
     'after',
@@ -289,7 +289,7 @@ program
   .option('--json', 'Output the stack tree as JSON')
   .option(
     '--no-color',
-    'Disable ANSI colors; use text markers (`*` current, `>` ancestor)',
+    'Disable ANSI colors; keep text markers (`*` current, `>` ancestor) and drop sibling-subtree dimming',
   )
   .action(
     async (options: {
@@ -1620,14 +1620,7 @@ async function printLog(
 
   const output = await log(cwd, options);
   const noColor = options.color === false || chalk.level === 0;
-  const styled = noColor
-    ? output.replace(/~([^~]+?)~/g, '$1')
-    : output
-        .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
-        .replace(/(─ )>(\S+)/g, `$1${chalk.bold('$2')}`)
-        .replace(/~([^~]+?)~/g, chalk.dim('$1'))
-        .replace(/⚠ \(missing\)/g, chalk.yellow('⚠ (missing)'));
-  console.log(styled);
+  console.log(styleLogOutput(output, noColor));
 }
 
 function parseSteps(positional?: string, option?: string): number {

@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import { DubError } from '../lib/errors';
 import { branchExists, getCurrentBranch } from '../lib/git';
 import type { Branch, Stack } from '../lib/state';
@@ -44,10 +45,14 @@ export interface LogJsonResult {
  * Highlights the current branch, marks branches missing from git,
  * and handles multiple stacks separated by blank lines.
  *
- * Output uses inline markers consumed by the CLI styling layer:
+ * Output uses inline markers consumed by {@link styleLogOutput}:
  *   `*name (Current)*` — current branch
  *   `>name`            — ancestor on the current path
  *   `~name~`           — branch in a sibling sub-tree
+ *   `name ⚠ (missing)` — branch missing from git (composes with the above)
+ *
+ * Branch names cannot contain `*`, `>`, `~`, or whitespace per git refname
+ * rules, so the markers cannot collide with branch text.
  *
  * @param cwd - Working directory (must be inside an initialized dubstack repo)
  * @returns Formatted ASCII tree string (no ANSI colors — caller adds chalk)
@@ -139,13 +144,18 @@ function selectStacksToRender(
  *
  * Regions:
  *   - `root`            — stack trunk (always); takes precedence over other regions
- *   - `current`         — the current branch (when also a root, root still wins)
+ *   - `current`         — the current branch (when also the root, region stays `root`;
+ *                         callers should consult `current: boolean` to identify the
+ *                         current branch on the trunk)
  *   - `ancestor`        — branch on the current branch's parent path (excluding root)
  *   - `descendant`      — any descendant of the current branch
  *   - `sibling-subtree` — everything else (siblings of any ancestor and their descendants)
  *
  * When the current branch is not in this stack, every non-root branch is reported
  * as `descendant` so no region styling is applied.
+ *
+ * The walk is cycle-safe via per-direction visited sets; a malformed parent loop
+ * in state cannot hang the command.
  */
 export function computeRegions(
   stack: Stack,
@@ -183,7 +193,10 @@ export function computeRegions(
   let cursor = parentMap.get(currentBranch) ?? null;
   while (cursor && !visitedAncestors.has(cursor)) {
     visitedAncestors.add(cursor);
-    if (regions.get(cursor) !== 'root') {
+    // Preserve `root` and `current` if a malformed parent cycle leads the walk
+    // back to the current branch itself.
+    const existing = regions.get(cursor);
+    if (existing !== 'root' && existing !== 'current') {
       regions.set(cursor, 'ancestor');
     }
     cursor = parentMap.get(cursor) ?? null;
@@ -195,7 +208,10 @@ export function computeRegions(
     const next = queue.shift();
     if (!next || visitedDescendants.has(next)) continue;
     visitedDescendants.add(next);
-    if (regions.get(next) !== 'root') {
+    // Only overwrite the default `sibling-subtree` classification; preserve
+    // `root`, `current`, and `ancestor` if a malformed parent cycle leads the
+    // BFS back into them.
+    if (regions.get(next) === 'sibling-subtree') {
       regions.set(next, 'descendant');
     }
     queue.push(...(childMap.get(next) ?? []));
@@ -352,4 +368,26 @@ async function renderNode(
       options,
     );
   }
+}
+
+/**
+ * Applies CLI styling to the marker-tagged output produced by {@link log}.
+ *
+ * When `noColor` is true (explicit `--no-color`, `NO_COLOR=1`, or no TTY),
+ * the `~name~` sibling markers are stripped while `*name (Current)*` and
+ * `>name` are kept as plain-text indicators per the DUB-77 spec. When
+ * `noColor` is false, all markers are replaced with chalk-styled output.
+ *
+ * Exported for unit testing — callers should use {@link log} + this helper
+ * rather than rolling their own regex.
+ */
+export function styleLogOutput(output: string, noColor: boolean): string {
+  if (noColor) {
+    return output.replace(/~([^~]+?)~/g, '$1');
+  }
+  return output
+    .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
+    .replace(/(─ )>(\S+)/g, `$1${chalk.bold('$2')}`)
+    .replace(/~([^~]+?)~/g, chalk.dim('$1'))
+    .replace(/⚠ \(missing\)/g, chalk.yellow('⚠ (missing)'));
 }
