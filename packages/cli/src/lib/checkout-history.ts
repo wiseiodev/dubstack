@@ -27,14 +27,27 @@ async function readStored(cwd: string): Promise<StoredCheckoutEntry[]> {
     const raw = fs.readFileSync(target, 'utf-8');
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (entry): entry is StoredCheckoutEntry =>
-        entry !== null &&
-        typeof entry === 'object' &&
-        typeof entry.branch === 'string' &&
-        typeof entry.at === 'string' &&
-        typeof entry.via === 'string',
-    );
+    return parsed
+      .filter(
+        (entry): entry is Record<string, unknown> =>
+          entry !== null &&
+          typeof entry === 'object' &&
+          typeof (entry as Record<string, unknown>).branch === 'string' &&
+          typeof (entry as Record<string, unknown>).at === 'string' &&
+          typeof (entry as Record<string, unknown>).via === 'string',
+      )
+      .map((entry) => {
+        const stored: StoredCheckoutEntry = {
+          branch: entry.branch as string,
+          at: entry.at as string,
+          via: entry.via as string,
+        };
+        // Only treat a strict boolean `true` as transient. Any other value
+        // (string, number, missing) is normalized to a non-transient entry
+        // so corruption can never silently hide history from a default read.
+        if (entry.transient === true) stored.transient = true;
+        return stored;
+      });
   } catch {
     return [];
   }
@@ -49,6 +62,10 @@ async function writeStored(
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  // Atomic write-rename prevents torn writes, but two concurrent dub
+  // processes can still lose an entry via last-writer-wins. DUB-60's
+  // lockfile will close that gap; until then, the loss is acceptable
+  // for a non-critical history log.
   const payload = `${JSON.stringify(entries, null, 2)}\n`;
   const tmpPath = `${target}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpPath, payload);

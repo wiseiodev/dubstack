@@ -236,9 +236,9 @@ export async function create(
 
   const parentRevision = await getBranchTip(parent, cwd);
   await createBranch(branchName, cwd);
-  await appendCheckoutHistory(cwd, branchName, { via: 'create' });
   addBranchToStack(state, branchName, parent, parentRevision);
   await writeState(state, cwd);
+  await appendCheckoutHistory(cwd, branchName, { via: 'create' });
 
   if (commitMessage) {
     try {

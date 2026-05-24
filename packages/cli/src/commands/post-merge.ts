@@ -204,11 +204,10 @@ export async function postMerge(
       scopeStacks,
     );
     if (preferredBranch) {
+      // History is recorded once at the final landing after submit-refresh
+      // (see the trailing `if (!dryRun && preferredBranch)` block) so we
+      // don't burn two ring-buffer slots on the same intermediate move.
       await checkoutBranch(preferredBranch, cwd);
-      await appendCheckoutHistory(cwd, preferredBranch, {
-        via: 'post-merge',
-        transient: true,
-      });
     }
   }
 

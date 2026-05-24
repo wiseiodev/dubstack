@@ -117,6 +117,44 @@ describe('checkout-history', () => {
     expect(tempFiles).toEqual([]);
   });
 
+  it('only treats strict boolean true as transient — corrupt values are visible', async () => {
+    const target = await getCheckoutHistoryPath(dir);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      JSON.stringify([
+        { branch: 'main', at: '2026-05-24T00:00:00Z', via: 'checkout' },
+        {
+          branch: 'string-true',
+          at: '2026-05-24T00:00:01Z',
+          via: 'sync',
+          transient: 'true',
+        },
+        {
+          branch: 'numeric-one',
+          at: '2026-05-24T00:00:02Z',
+          via: 'sync',
+          transient: 1,
+        },
+        {
+          branch: 'real-transient',
+          at: '2026-05-24T00:00:03Z',
+          via: 'sync',
+          transient: true,
+        },
+      ]),
+    );
+
+    const entries = await readCheckoutHistory(dir);
+    // 'real-transient' is the only one filtered; the malformed ones are
+    // normalized to non-transient and remain visible (newest-first).
+    expect(entries.map((e) => e.branch)).toEqual([
+      'numeric-one',
+      'string-true',
+      'main',
+    ]);
+  });
+
   it('keeps transient entries in storage for limit accounting', async () => {
     for (let i = 0; i < 20; i++) {
       await appendCheckoutHistory(dir, `transient-${i}`, {
