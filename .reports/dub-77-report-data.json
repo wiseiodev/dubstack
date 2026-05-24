@@ -1,0 +1,280 @@
+{
+  "meta": {
+    "workId": "DUB-77",
+    "title": "Tree-aware dub log: highlight current sub-tree + parent path",
+    "artifactId": "dub-77",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-77-tree-aware-dub-log-highlight-current-sub-tree-parent-path",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-77",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 7,
+    "additions": 518,
+    "deletions": 14,
+    "diffStat": " .reports/dub-77-qa.md                    |  62 ++++++++++++\n README.md                                |   7 +-\n packages/cli/src/commands/branch.test.ts |  74 ++++++++++++++\n packages/cli/src/commands/branch.ts      |  89 +++++++++++++++-\n packages/cli/src/commands/log.test.ts    | 168 ++++++++++++++++++++++++++++++-\n packages/cli/src/commands/log.ts         | 110 +++++++++++++++++++-\n packages/cli/src/index.ts                |  22 +++-\n 7 files changed, 518 insertions(+), 14 deletions(-)"
+  },
+  "prompt": "DUB-77 — make `dub log` visually distinguish the user's parent path, current branch, and sibling sub-tree on tree-shaped stacks. Add a one-line tree-position summary to `dub info`. JSON output must include a `region` field per branch and a `--no-color` flag must fall back to text markers.",
+  "tldr": "`dub log` now tags every branch with a region relative to the current branch (root / ancestor / current / descendant / sibling-subtree) and renders ancestor in bold, current in bright cyan, and sibling sub-trees in dim. `--no-color` keeps the markers visible as `*name (Current)*` and `>name`. `logJson` exposes the region. `dub info` adds a one-line tree-position summary on tree-shaped stacks.",
+  "why": {
+    "motivation": [
+      "Tier 1 (DUB-20) makes branching common, so users routinely sit inside trees with 3-4 sibling sub-trees under one base. Monochrome rendering forces visual scanning to figure out 'which sub-tree am I in'.",
+      "Adds a fast 'where am I' signal: bold up to trunk, bright at me, dim everywhere else."
+    ],
+    "before": [
+      "Only the current branch was distinguished (asterisks + bright cyan).",
+      "Siblings and ancestors rendered identically to descendants.",
+      "`dub info` showed parent and children but never said 'you are 1 of N siblings'."
+    ],
+    "after": [
+      "`log()` computes a region per branch and emits inline markers (`*…*` current, `>…` ancestor, `~…~` sibling-subtree) that the CLI styling layer turns into chalk colors.",
+      "`--no-color` strips tilde markers but keeps `*` and `>` so the same information survives in non-TTY/CI output.",
+      "`logJson` returns a `region` field per branch (`root | ancestor | current | descendant | sibling-subtree`).",
+      "`dub info` prints `On <branch> (N of M siblings under <parent>, K descendants).` when the stack has any branching node."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/log.ts",
+      "changeType": "mod",
+      "additions": 110,
+      "deletions": 0,
+      "explanation": "Exports `computeRegions` and threads a `Map<branch,region>` through `renderStack` / `renderNode` / `renderStackJson`. Adds defensive visited sets to the ancestor walk and descendant BFS so a malformed parent cycle cannot hang the command. Composes the missing-branch warning with the region marker so a missing ancestor still gets the `>` highlight.",
+      "snippet": "if (isRoot) {\n  label = `(${branch.name})`;\n} else if (branch.name === currentBranch) {\n  label = `*${branch.name} (Current)*`;\n} else {\n  if (region === 'ancestor') label = `>${branch.name}`;\n  else if (region === 'sibling-subtree') label = `~${branch.name}~`;\n  else label = branch.name;\n  if (!exists) label = `${label} ⚠ (missing)`;\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/branch.ts",
+      "changeType": "mod",
+      "additions": 89,
+      "deletions": 0,
+      "explanation": "Adds `TreePosition`, `computeTreePosition`, and `countDescendants` (with cycle protection). `formatBranchInfo` appends the one-line summary when `treePosition` is non-null. Summary is emitted on tree-shaped stacks even if the current branch has no immediate siblings or descendants.",
+      "snippet": "if (info.treePosition) {\n  const { parent, siblingIndex, siblingCount, descendantCount } = info.treePosition;\n  const descendantLabel = descendantCount === 1 ? '1 descendant' : `${descendantCount} descendants`;\n  lines.push(`On ${info.currentBranch} (${siblingIndex} of ${siblingCount} siblings under ${parent}, ${descendantLabel}).`);\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 22,
+      "deletions": 0,
+      "explanation": "Adds `--no-color` to `dub log` and `dub ls`. `printLog` branches on `options.color === false || chalk.level === 0`: in no-color mode it strips `~…~` markers but keeps `*…*` and `>…`; in color mode it bolds ancestors, dims sibling sub-trees, and keeps the existing current/missing styling.",
+      "snippet": "const noColor = options.color === false || chalk.level === 0;\nconst styled = noColor\n  ? output.replace(/~([^~]+?)~/g, '$1')\n  : output\n      .replace(/\\*(.+?) \\(Current\\)\\*/g, chalk.bold.cyan('$1 (Current)'))\n      .replace(/(─ )>(\\S+)/g, `$1${chalk.bold('$2')}`)\n      .replace(/~([^~]+?)~/g, chalk.dim('$1'))\n      .replace(/⚠ \\(missing\\)/g, chalk.yellow('⚠ (missing)'));",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/log.test.ts",
+      "changeType": "mod",
+      "additions": 168,
+      "deletions": 0,
+      "explanation": "Updates two existing snapshots to assert the new markers, then adds a `region markers` describe block covering: ancestor labeling, sibling-subtree tildes, descendant absence of any marker, `logJson` region field per branch, missing-ancestor composition, and the 'current not in stack' fallback.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/branch.test.ts",
+      "changeType": "mod",
+      "additions": 74,
+      "deletions": 0,
+      "explanation": "Adds three new tests: sibling-count summary on a 3-sibling stack, omission of the summary on a linear stack with no siblings or descendants, and a stack that branches elsewhere but where the current branch is a lone leaf.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "README.md",
+      "changeType": "mod",
+      "additions": 7,
+      "deletions": 0,
+      "explanation": "Documents the new region styling and the `--no-color` fallback markers under the `dub log` section.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-77-qa.md",
+      "changeType": "new",
+      "additions": 62,
+      "deletions": 0,
+      "explanation": "QA fallback report. CLI surface, so the evidence is raw `od -c` bytes from the rendered output plus the JSON snapshot rather than a Playwright video.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Marker stripping is purely textual",
+      "location": "packages/cli/src/index.ts:1515-1525",
+      "rationale": "The styling layer relies on regex matches against `*…*`, `>…`, and `~…~` inside the rendered output. Branch names can't contain `*`, `>`, `~`, or whitespace per git ref rules, so collisions aren't possible — but the assumption is worth confirming."
+    },
+    {
+      "title": "Region precedence vs. missing branches",
+      "location": "packages/cli/src/commands/log.ts:303-322",
+      "rationale": "Earlier draft made `!exists` short-circuit the region label and silently dropped the ancestor highlight for a missing ancestor. The fix composes markers — `>name ⚠ (missing)` — and a regression test in `log.test.ts` covers it."
+    },
+    {
+      "title": "Tree-position threshold",
+      "location": "packages/cli/src/commands/branch.ts:74-100",
+      "rationale": "`computeTreePosition` returns null only when (siblings ≤ 1) AND (descendants === 0) AND (stack has no branching anywhere). The middle case — lone leaf in a tree that branches elsewhere — still emits the summary; covered by a new test."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "region marker snapshots (ancestor / current / sibling-subtree / descendant / JSON region)",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/log.test.ts — `region markers` describe (6 tests)"
+    },
+    {
+      "kind": "unit",
+      "label": "missing ancestor still carries `>` marker",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/log.test.ts — `keeps the ancestor marker for ancestors that are missing from git`"
+    },
+    {
+      "kind": "unit",
+      "label": "tree-position summary appears / omits correctly",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/branch.test.ts — 3 new tests covering siblings>1, linear stack, and branching-elsewhere"
+    },
+    {
+      "kind": "manual",
+      "label": "FORCE_COLOR=1 dub log emits expected ANSI codes for each region",
+      "status": "done",
+      "evidence": "/tmp/dub77-log-color.txt + od -c inspection (ESC[1m bold for ancestor, bold cyan for current, ESC[2m dim for siblings)"
+    },
+    {
+      "kind": "manual",
+      "label": "dub log --no-color and NO_COLOR=1 strip ANSI but keep markers",
+      "status": "done",
+      "evidence": "/tmp/dub77-log-nocolor.txt"
+    },
+    {
+      "kind": "manual",
+      "label": "dub info prints sibling/descendant summary",
+      "status": "done",
+      "evidence": "/tmp/dub77-info.txt"
+    },
+    {
+      "kind": "manual",
+      "label": "dub log --json includes region per branch",
+      "status": "done",
+      "evidence": "/tmp/dub77-log-json.txt"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . — Checked 246 files, no fixes applied"
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo run typecheck — 2 successful, 2 total"
+    },
+    {
+      "name": "tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "84 test files, 699 tests passed"
+    },
+    {
+      "name": "evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "AGENTS.md only requires evals when AI metadata/prompts change; this PR touches neither. Local environment also lacks AI provider credentials so evals would fail unrelated to this work."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Pure CLI change; no browser surface or `.tsx` files touched.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-77-qa.md",
+    "caption": "Self-QA fallback with terminal output evidence (raw bytes + JSON snapshot).",
+    "scenarios": [
+      "FORCE_COLOR=1 dub log on a 5-branch tree-shaped stack",
+      "dub log --no-color on the same stack",
+      "NO_COLOR=1 dub log on the same stack",
+      "dub info on the current (login) branch",
+      "dub log --json on the same stack"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`dub log` renders ancestor path, current branch, and sibling sub-tree with distinguishable styling",
+      "status": "satisfied",
+      "evidence": "Verified via FORCE_COLOR=1 od -c inspection (ESC[1m ancestor, bold cyan current, ESC[2m sibling-subtree) and the new `region markers` unit tests."
+    },
+    {
+      "criterion": "`dub log --no-color` falls back to a non-color marker (e.g. `*` for current, `>` for ancestor)",
+      "status": "satisfied",
+      "evidence": "New `--no-color` CLI flag plus `chalk.level === 0` detection; verified manually (`/tmp/dub77-log-nocolor.txt`)."
+    },
+    {
+      "criterion": "`logJson` includes the `region` field per branch",
+      "status": "satisfied",
+      "evidence": "`LogJsonBranch.region: LogRegion` exported; verified in `logJson` unit test and `/tmp/dub77-log-json.txt`."
+    },
+    {
+      "criterion": "`dub info` prints the sibling-count summary on tree-shaped stacks",
+      "status": "satisfied",
+      "evidence": "`formatBranchInfo` appends `On <branch> (N of M siblings under <parent>, K descendants).` when `treePosition` is set; three new unit tests cover the trigger conditions."
+    },
+    {
+      "criterion": "Snapshot tests for ancestor-only, current, and sibling-subtree regions",
+      "status": "satisfied",
+      "evidence": "`packages/cli/src/commands/log.test.ts` adds explicit assertions for ancestor `>` marker, current `*…*` marker, sibling-subtree `~…~` marker, and absence of any marker on descendants, plus a logJson region snapshot."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Critical: missing-ancestor label silently dropped the `>` marker — fixed by composing the missing suffix with the region marker; regression test added.",
+      "Major: marker-stripping regex `[^\\s~]+` would mis-handle branch names with whitespace — tightened to `[^~]+?` for both color and no-color branches.",
+      "Major: missing test coverage for `stackHasBranching=true, siblings=1, descendants=0` — added `reports tree position even when current has no siblings if stack branches elsewhere`."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 (tree-walking submit)",
+      "status": "satisfied — merged (commit 86303e2). The branching-blocker rejection is removed, so trees with sibling sub-trees are now first-class stack shapes that need the new visual treatment."
+    }
+  ],
+  "rollout": {
+    "summary": "Ship behind no flag. Visual change to `dub log` and additive line to `dub info`; both are local, read-only commands.",
+    "steps": [
+      {
+        "when": "Merge",
+        "label": "Land PR on main",
+        "details": "Squash-merge keeps history linear per AGENTS.md."
+      },
+      {
+        "when": "Post-merge",
+        "label": "No further action",
+        "details": "No DB migration, no remote state, no flag. Tier 1 docs already announce the branching-stack focus."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "3ab1c508af696387a1517a58d239bf50689ba325",
+    "shortSha": "3ab1c50",
+    "message": "feat(log): region-aware tree highlight + `dub info` tree position\n\n`dub log` now tags each branch as `root | ancestor | current | descendant |\nsibling-subtree` relative to the current branch and styles them accordingly\n(bold ancestor, bright cyan current, dim sibling sub-tree). `--no-color`\nfalls back to text markers (`*` current, `>` ancestor). `logJson` exposes\n`region` per branch. `dub info` adds a one-line tree-position summary on\ntree-shaped stacks.\n\nCompletes DUB-77"
+  }
+}

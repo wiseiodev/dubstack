@@ -60,7 +60,79 @@ describe('branch info', () => {
       root: null,
       parent: null,
       children: [],
+      treePosition: null,
     });
+  });
+
+  it('computes a tree position when the current branch has siblings', async () => {
+    await create('feat/a', dir);
+    await gitInRepo(dir, ['checkout', 'main']);
+    await create('feat/c', dir);
+    await gitInRepo(dir, ['checkout', 'main']);
+    await create('feat/b', dir);
+
+    const info = await branchInfo(dir);
+    expect(info.treePosition).toEqual({
+      parent: 'main',
+      siblingIndex: 2,
+      siblingCount: 3,
+      descendantCount: 0,
+    });
+
+    const formatted = formatBranchInfo(info);
+    expect(formatted).toContain(
+      'On feat/b (2 of 3 siblings under main, 0 descendants).',
+    );
+  });
+
+  it('omits tree position on linear stacks with no siblings or descendants', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+
+    const info = await branchInfo(dir);
+    expect(info.treePosition).toBeNull();
+    expect(formatBranchInfo(info)).not.toContain('siblings under');
+  });
+
+  it('reports tree position even when current has no siblings if stack branches elsewhere', async () => {
+    // main ─ feat/a ─┬─ feat/b
+    //                └─ feat/c ─ feat/d  (current; only child but tree branches at feat/a)
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    await create('feat/c', dir);
+    await create('feat/d', dir);
+
+    const info = await branchInfo(dir);
+    expect(info.treePosition).toEqual({
+      parent: 'feat/c',
+      siblingIndex: 1,
+      siblingCount: 1,
+      descendantCount: 0,
+    });
+    expect(formatBranchInfo(info)).toContain(
+      'On feat/d (1 of 1 siblings under feat/c, 0 descendants).',
+    );
+  });
+
+  it('counts transitive descendants under the current branch', async () => {
+    await create('feat/base', dir);
+    await create('feat/sibling', dir);
+    await create('feat/grandchild', dir);
+    await gitInRepo(dir, ['checkout', 'feat/base']);
+    await create('feat/login', dir);
+    await gitInRepo(dir, ['checkout', 'feat/base']);
+
+    const info = await branchInfo(dir);
+    expect(info.treePosition).toEqual({
+      parent: 'main',
+      siblingIndex: 1,
+      siblingCount: 1,
+      descendantCount: 3,
+    });
+    expect(formatBranchInfo(info)).toContain(
+      'On feat/base (1 of 1 siblings under main, 3 descendants).',
+    );
   });
 
   it('returns metadata for explicitly requested branch', async () => {
@@ -85,6 +157,7 @@ describe('branch info', () => {
       root: 'main',
       parent: 'main',
       children: ['feat/b'],
+      treePosition: null,
     });
     expect(tracked).toContain('Branch: feat/a');
     expect(tracked).toContain('Tracked: yes');
@@ -97,6 +170,7 @@ describe('branch info', () => {
       root: null,
       parent: null,
       children: [],
+      treePosition: null,
     });
     expect(untracked).toContain('Tracked: no');
     expect(untracked).toContain('not tracked by DubStack');
