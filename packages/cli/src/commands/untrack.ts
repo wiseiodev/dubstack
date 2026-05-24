@@ -44,6 +44,10 @@ export async function untrack(
     if (!interactive) {
       throw new DubError(
         `Branch '${branch}' has descendants (${context.descendants.join(', ')}). Re-run with --downstack or interactive mode.`,
+        [
+          `Re-run with '--downstack' to untrack '${branch}' and its descendants.`,
+          'Re-run interactively to confirm dropping the descendants.',
+        ],
       );
     }
     downstack = await confirmDownstack(branch, context.descendants);

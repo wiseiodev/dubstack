@@ -1294,6 +1294,10 @@ export async function fastForwardBranchToRef(
         `Failed to fast-forward '${branch}' to '${ref}'.`,
         details,
       ),
+      [
+        `Run 'git merge --ff-only ${ref}' from '${branch}' manually to inspect the underlying error.`,
+        "Run 'dub doctor' to confirm the repository is in a healthy state.",
+      ],
     );
   }
 }

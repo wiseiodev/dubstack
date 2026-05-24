@@ -5,6 +5,11 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
+  "plugins": [
+    "./biome-plugins/no-bare-duberror.grit",
+    "./biome-plugins/no-direct-execa-gh.grit",
+    "./biome-plugins/no-direct-force-push.grit"
+  ],
   "files": {
     "ignoreUnknown": false,
     "includes": ["**", "!skills-lock.json"]
