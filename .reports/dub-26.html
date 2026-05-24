@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-26 - Rich dub log with PR + CI status</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-26</div>
+        <h1>DUB-26 - Rich dub log with PR + CI status</h1>
+        <div class="meta"><span><strong>5</strong> files</span>
+<span><span class="add">+834</span> / <span class="del">-14</span></span>
+<span>branch <strong>feature/dub-26-rich-dub-log-with-pr-ci-status</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Augment `dub log` from a name-only tree to a rich view with per-branch PR/CI/last-commit annotations. The region-aware tree (DUB-77) and the batched overview data layer (DUB-25) both exist — this issue wires them together: pull `getStackOverviewBatch`, extend `LogJsonBranch` with optional rich fields, append suffix annotations to the text view, and degrade gracefully when `gh` is unauthed.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>`dub log` now appends per-branch PR-state glyph, CI rollup, last-commit relative time, and short SHA after each label, sourced from `getStackOverviewBatch`. When `gh` is unauthed the rich data is silently dropped and the existing region-only tree renders unchanged. JSON output extends `LogJsonBranch` with optional `prState`, `prTitle`, `reviewDecision`, `ciState`, `draft`, `committedRel`, `shortSha`, and a reserved `frozen` placeholder for DUB-37.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">DUB-77 added region-aware tree highlighting in `dub log` but the row text still showed only branch names — users had to flip to the GitHub UI to learn PR state, CI status, or how stale each branch was.</p>
+<p class="lede">DUB-25 already batches the underlying data into a 30 s cached overview. This issue lights up the first consumer (`dub log` + `dub mcp dubstack.log`) so the work isn&#39;t dead inventory.</p>
+<p class="lede">Failing soft for users without GitHub authentication is a hard requirement — the plain region-only tree must keep working unchanged when `gh` is missing, unauthed, or offline.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`dub log` rendered `(main)\n  └─ &gt;feat/a\n       └─ *feat/b (Current)*` — branch names and regions only.</li>
+<li>`logJson` returned `name, type, parent, current, exists, prNumber, prLink, region, children`. No PR title, CI rollup, or commit metadata.</li>
+<li>MCP `dubstack.log` mirrored the bare JSON shape; LLM consumers had to N+1 over `gh pr view` to enrich it.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`dub log` (text mode) appends `  #42 ✔ approved · ✔ ci · 2 minutes ago · aaaa2222` to each branch label, color-coded per state and dimmed otherwise.</li>
+<li>`logJson` extends `LogJsonBranch` with `prState`, `prTitle`, `reviewDecision`, `ciState`, `draft`, `committedRel`, `shortSha`, and reserved `frozen`. Fields are strictly omitted when no overview was provided — old consumers see the exact prior shape.</li>
+<li>MCP `dubstack.log` schema gains `prs`, `ci`, `refresh` booleans and fail-softly returns the bare tree when the overview fetch errors.</li>
+<li>New CLI flags: `--no-prs`, `--no-ci`, `--refresh`. `--no-color` strips ANSI from suffix tokens via a scoped Chalk instance so the existing `styleLogOutput` marker pipeline stays untouched.</li>
+<li>Truncation banner (`ℹ Showing N+ branches`) surfaces when `gh pr list` hits the page limit.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/log.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+241</span> <span class="del">-14</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `LogOptions.{prs, ci, noColor, overview}`, extends `LogJsonBranch` with optional rich fields, threads `overviewMap` and a scoped `suffixChalk` through both recursive renderers, and implements `formatRichSuffix` / `formatPrToken` / `formatCiToken`. Glyph hierarchy: MERGED → CLOSED → DRAFT → APPROVED → CHANGES_REQUESTED → REVIEW_REQUIRED → open (bare). CI suppresses the `NONE` glyph silently.</p>
+    <div class="code"><pre>function makeSuffixChalk(noColor: boolean): ChalkInstance {
+  // A scoped chalk instance keeps the suffix styling decision local to
+  // `log()` so callers don&#39;t have to mutate the global chalk.level (which
+  // would race with concurrent renders and leak across vitest cases).
+  if (noColor) return new Chalk({ level: 0 });
+  return chalk;
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+49</span> <span class="del">-5</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `--no-prs`, `--no-ci`, `--refresh` flags on both `dub log` and `dub ls`, wraps `getStackOverviewBatch` in try/catch in `printLog`, and emits the truncation banner (guarded against the `branches.length === 0` cosmetic edge case from the adversarial review).</p>
+    <div class="code"><pre>let overview = null;
+try {
+  overview = await getStackOverviewBatch(cwd, { refresh: options.refresh });
+} catch {
+  overview = null;
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/mcp.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+35</span> <span class="del">-6</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Extends the `dubstack.log` tool schema with `prs`, `ci`, `refresh` booleans, lists them in `HISTORY_ARG_KEYS`, and threads the same fail-soft overview fetch into the handler so MCP clients see the rich JSON when `gh` is authed and the plain tree otherwise.</p>
+    <div class="code"><pre>case &#39;dubstack.log&#39;: {
+  const refresh = optionalBoolean(args.refresh);
+  let overview = null;
+  try {
+    overview = await getStackOverviewBatch(cwd, { refresh });
+  } catch {
+    overview = null;
+  }
+  return jsonToolResult(
+    await logJson(cwd, {
+      stack: optionalBoolean(args.stack),
+      all: optionalBoolean(args.all),
+      reverse: optionalBoolean(args.reverse),
+      prs: optionalBoolean(args.prs),
+      ci: optionalBoolean(args.ci),
+      overview,
+    }),
+  );
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/log.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+417</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a `rich overview` suite covering: linear-stack annotation, `--no-prs`, `--no-ci`, the full glyph hierarchy (draft / merged / closed / changes-requested), fallback when `overview: null`, additive JSON contract (fields strictly omitted when overview absent), ANSI styling under `noColor: false`, and a branching tree with sibling-subtree styling combined with rich annotations.</p>
+    <div class="code"><pre>it(&#39;emits the rich JSON fields when overview is provided&#39;, async () =&gt; {
+  // ...
+  const json = await logJson(dir, { overview });
+  const featA = json.stacks[0]?.root?.children[0];
+  expect(featA?.prState).toBe(&#39;OPEN&#39;);
+  expect(featA?.reviewDecision).toBe(&#39;APPROVED&#39;);
+  expect(featA?.ciState).toBe(&#39;SUCCESS&#39;);
+  expect(featA?.draft).toBe(false);
+  expect(featA?.committedRel).toBe(&#39;1 hour ago&#39;);
+  expect(featA?.shortSha).toBe(&#39;aaaa1111&#39;);
+  expect(featA?.frozen).toBeUndefined();
+  // ...
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-26-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+106</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback. No `.tsx` files changed; there is no browser surface to record. Captures unit-test count, manual CLI demo outputs across all four flag combinations, the gh-unauthed fallback, and the JSON shape evidence.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Fail-soft path for gh failures</div>
+    <div class="note"><code>packages/cli/src/index.ts (printLog) + packages/cli/src/commands/mcp.ts (dubstack.log handler)</code> The contract is that `dub log` MUST keep working when `gh` is unauthed, missing, or offline. Both call sites wrap `getStackOverviewBatch` in try/catch and pass `overview: null` on failure; downstream code treats `null` as &#39;render plain region-only tree&#39; via `buildOverviewMap` returning an empty Map.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">JSON additive contract</div>
+    <div class="note"><code>packages/cli/src/commands/log.ts (renderNodeJson) + log.test.ts (`omits rich JSON fields when overview is absent`)</code> Adding rich fields to `LogJsonBranch` cannot break existing MCP consumers reading `prNumber`, `region`, etc. New fields are populated only when the per-branch overview row exists; the &#39;omits&#39; test pins this so future contributors can&#39;t accidentally make them required.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Glyph hierarchy in formatPrToken</div>
+    <div class="note"><code>packages/cli/src/commands/log.ts (formatPrToken)</code> MERGED beats everything; CLOSED beats DRAFT; DRAFT beats reviewDecision (so a stale APPROVED on a now-draft PR doesn&#39;t mislead). The &#39;renders the correct PR-state glyph&#39; test covers all four hierarchies.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">Scoped Chalk avoids polluting styleLogOutput</div>
+    <div class="note"><code>packages/cli/src/commands/log.ts (makeSuffixChalk + formatPrToken/formatCiToken)</code> The suffix is styled inline before `styleLogOutput` runs over the assembled output. The three existing label-marker regexes (`*name (Current)*`, `(─ )&gt;name`, `~name~`) cannot collide with the suffix because branch names cannot contain spaces (per git refname rules) and the suffix begins with two spaces — `\S+` in the ancestor regex stops at the gap. Adversarial review confirmed no collision path with current inputs.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">9 new tests in src/commands/log.test.ts covering rich rendering, flags, glyph hierarchy, fallback, and JSON shape</div>
+      <div class="note">pnpm test → 836 passed (89 files)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">End-to-end demo against a throwaway repo with a hand-crafted overview cache fixture</div>
+      <div class="note">`.reports/dub-26-qa.md` records the four flag-combination outputs plus the gh-unauthed fallback</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">tsup build of `packages/cli` succeeds and the built binary runs</div>
+      <div class="note">`pnpm --filter dubstack build` → `ESM ⚡️ Build success in 180ms`; built binary invoked manually for the demo</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 271 files in 53ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. turbo: 2 successful, 2 total (cached for docs, cache miss + clean for dubstack)</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest</div>
+      <div class="note">Command: pnpm test. 89 files, 836 tests passed (was 827 before; +9 new)</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">AI evals</div>
+      <div class="note">Command: pnpm evals. No AI metadata or prompts changed in this PR; the local eval harness requires an AI provider key which is not configured in this environment. Per CLAUDE.md, evals are only required when AI metadata changes.</div>
+    </div>
+    <span class="status skipped">skipped</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Deterministic proof of the four flag-combination outputs and the gh-unauthed fallback path.</div>
+      <div class="note">dub log is a terminal CLI; no .tsx files or browser surface changed.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-26-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Rich view (no-color) shows PR + CI + commit annotations on every row</li>
+<li>Rich view (FORCE_COLOR=1) wraps each suffix token in the expected ANSI codes</li>
+<li>--no-prs hides PR data, keeps CI + commit</li>
+<li>--no-ci hides CI rollup, keeps PR + commit</li>
+<li>--refresh busts the cache; with unauthed gh, falls back to the plain region-only tree</li>
+<li>--json emits the rich optional fields when an overview is present</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`dub log` defaults to the rich view when `gh` is authed; falls back to region-only tree otherwise</div>
+      <div class="note">printLog (index.ts) fetches overview unconditionally, fails soft to `null`; log() renders rich suffix only when overview is present. Manual demo confirms both paths.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`--no-prs`, `--no-ci`, `--no-color`, `--refresh` flags work</div>
+      <div class="note">All four flags wired in index.ts on both `dub log` and `dub ls`; tests + manual demo cover each.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`--json` extends `LogJsonResult` additively (consumers reading old fields keep working)</div>
+      <div class="note">All new fields are optional; the &#39;omits rich JSON fields&#39; test asserts they are strictly absent when overview is not provided.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`logJson` consumed by `dub mcp`&#39;s `dubstack.log` reflects the new optional fields</div>
+      <div class="note">MCP handler fetches the same overview and passes it into `logJson`. The tool schema also documents the three new flags.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Snapshot tests for several stack shapes (linear, tree, gh-unauthed fallback, --no-color)</div>
+      <div class="note">9 new assertion-style tests in `log.test.ts` cover linear, branching, fallback (overview: null), --no-prs, --no-ci, --no-color via noColor flag, plus the glyph hierarchy.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">No regression in existing `log.test.ts` (DUB-77 tests must still pass)</div>
+      <div class="note">All 27 prior log.test.ts tests still pass; 836 total tests pass.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Advisory (addressed): the truncation banner could read &#39;Showing 0+ branches&#39; in a theoretical edge case where the gh page-limit heuristic trips with an empty branches array. Fixed by guarding the banner with `overview.branches.length &gt; 0`.</li>
+<li>Reviewer confirmed no marker/regex collision is possible: the three styleLogOutput regexes cannot match suffix content because git refnames forbid spaces, and the suffix begins with two spaces.</li>
+<li>Reviewer confirmed glyph hierarchy in formatPrToken (MERGED &gt; CLOSED &gt; DRAFT &gt; APPROVED &gt; CHANGES_REQUESTED &gt; REVIEW_REQUIRED &gt; bare) is correct and consistent with the JSON path.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-25 (batched PR/CI data layer)</div>
+  <div class="note">Done — `getStackOverviewBatch` consumed directly</div>
+</div>
+<div class="dep">
+  <div class="item-title">DUB-77 (region-aware log highlight)</div>
+  <div class="note">Done — `computeRegions` and `styleLogOutput` reused unchanged</div>
+</div>
+<div class="dep">
+  <div class="item-title">DUB-37 (`dub freeze`)</div>
+  <div class="note">Not yet started — `frozen?: boolean` reserved in the JSON shape; renderer will pick it up automatically once `BranchOverview.frozen` is populated.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Pure CLI/MCP additive change; no schema migration or persisted state changes. Merge unblocks Tier 2 follow-ups (`dub co`, `dub status`, `dub watch`).</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Ship via the standard semantic-release flow</div>
+  <div class="note">No additional rollout steps. Users without `gh` see no behavior change; users with `gh` authed see the rich suffix on next `dub log` invocation.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Follow-up</div>
+  <div class="label">Wire `getStackOverviewBatch` into `dub co`, `dub status`, `dub watch`</div>
+  <div class="note">Same overview, same cache — those consumers can fetch once per process tick and share the cached result. Each is its own ticket in Tier 2.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">After DUB-37</div>
+  <div class="label">Populate `frozen` from `BranchOverview.frozen` once `dub freeze` lands</div>
+  <div class="note">No renderer changes needed — `frozen` is already in the JSON contract and the rich suffix can be extended to surface it without touching the data layer.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>80b8116</strong> <code>80b811674c94f24713dabd4e199f03ddd3933b5c</code></div>
+  <pre>feat(log): rich PR/CI/commit annotations on `dub log` tree [DUB-26]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">log.ts</a>
+<a href="#tour" class="sub">index.ts</a>
+<a href="#tour" class="sub">mcp.ts</a>
+<a href="#tour" class="sub">log.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
