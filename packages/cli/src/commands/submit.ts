@@ -125,8 +125,12 @@ export async function submit(
   await ensureGhInstalled();
   await checkGhAuth();
 
+  const scopeLabel =
+    plan.path === 'stack'
+      ? `the stack containing '${plan.currentBranch}'`
+      : `the path from '${plan.currentBranch}'`;
   console.log(
-    `Submitting ${plan.branches.length} branch(es) from '${plan.currentBranch}' onto trunk '${plan.rootBranch}'.`,
+    `Submitting ${plan.branches.length} branch(es) in ${scopeLabel} onto trunk '${plan.rootBranch}'.`,
   );
   if (dryRun) {
     console.log('[dry-run] no branches will be pushed or mutated.');

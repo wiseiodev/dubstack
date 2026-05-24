@@ -446,7 +446,7 @@ describe('submit', () => {
     });
   });
 
-  it('submits a tree stack with multiple sibling children in BFS order', async () => {
+  it('submits a tree stack with multiple sibling children deterministically by branch name', async () => {
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
       makeState([
