@@ -10,7 +10,7 @@ import { getDubDir } from './state';
  */
 export interface UndoEntry {
   /** Which command created this snapshot. */
-  operation: 'create' | 'restack';
+  operation: 'create' | 'restack' | 'rename' | 'move';
   /** ISO timestamp of when the snapshot was taken. */
   timestamp: string;
   /** The branch user was on before the operation. */
@@ -21,6 +21,16 @@ export interface UndoEntry {
   branchTips: Record<string, string>;
   /** Branches created by this operation (to be deleted on undo). */
   createdBranches: string[];
+  /** For `rename`: the original branch name before the rename. */
+  renameFrom?: string;
+  /** For `rename`: the new branch name after the rename. */
+  renameTo?: string;
+  /**
+   * For `rename`: true when the renamed branch had been pushed (PR linked or
+   * `last_submitted_version` set). Lets `dub undo` warn that the remote may
+   * now diverge from the restored local name.
+   */
+  hadRemote?: boolean;
 }
 
 async function getUndoPath(cwd: string): Promise<string> {
@@ -47,7 +57,7 @@ export async function readUndoEntry(cwd: string): Promise<UndoEntry> {
   const undoPath = await getUndoPath(cwd);
   if (!fs.existsSync(undoPath)) {
     throw new DubError('Nothing to undo.', [
-      "DubStack tracks only the last 'create' or 'restack'; perform one to enable undo.",
+      "DubStack tracks only the last 'create', 'restack', 'rename', or 'move'; perform one to enable undo.",
     ]);
   }
   const raw = fs.readFileSync(undoPath, 'utf-8');

@@ -1,0 +1,268 @@
+{
+  "meta": {
+    "workId": "DUB-35",
+    "title": "dub rename — rename a tracked branch (local + state + PR)",
+    "artifactId": "dub-35",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-35-dub-rename-rename-a-tracked-branch-local-state-pr",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-35",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 8,
+    "additions": 617,
+    "deletions": 3,
+    "diffStat": "8 files changed, 617 insertions(+), 3 deletions(-)"
+  },
+  "prompt": "Add `dub rename` so users can rename a tracked branch and have DubStack propagate the change through state, child parent refs, and (when applicable) the remote — with single-level undo coverage.",
+  "tldr": "New `dub rename <new>` (or `dub rename <old> <new>`) command. Renames the branch in git, updates DubStack state and children's parent links, migrates the local `last-pushed` lease ref, pushes the new branch when a PR is linked, and records a single-level undo entry. `dub undo` reverses the rename in full (branch name, state, parent links, lease ref).",
+  "why": {
+    "motivation": [
+      "Users frequently want to rename a stacked branch as the work clarifies (e.g. `feat/auth-spike` → `feat/auth-login`).",
+      "Doing this by hand requires `git branch -m`, manually editing `.git/dubstack/state.json`, fixing every child's `parent`, and rePushing — easy to leave state out of sync."
+    ],
+    "before": [
+      "No `dub rename` command. Users had to `git branch -m` plus hand-edit `state.json` plus manually re-parent children.",
+      "After a rename, `refs/dubstack/last-pushed/<branch>` was orphaned, which would have caused the next push to fall back to a bare `--force-with-lease` (losing race protection)."
+    ],
+    "after": [
+      "`dub rename <new>` (or `dub rename <old> <new>`) updates branch name, state, children, and lease ref atomically.",
+      "When a PR is linked, the renamed branch is pushed automatically (skippable via `--no-push`).",
+      "`dub undo` rolls back the entire operation — name, state, parent links, lease ref — except the remote push itself."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/rename.ts",
+      "changeType": "new",
+      "additions": 173,
+      "deletions": 0,
+      "explanation": "The new command. Validates arguments and collisions (tracked, untracked-local, root branch, invalid ref, self-rename), saves a single undo entry before any mutation, runs `git branch -m`, migrates `refs/dubstack/last-pushed/<branch>`, updates branch.name + every child's parent in state, then pushes when a PR is linked.",
+      "snippet": "await renameBranch(oldName, newName, cwd);\n\nconst trackedSha = await readLastPushedSha(oldName, cwd);\nif (trackedSha) {\n  await writeLastPushedSha(newName, trackedSha, cwd);\n  await deleteRef(lastPushedRef(oldName), cwd);\n}\n\nsourceBranch.name = newName;\nfor (const child of childBranches) {\n  child.parent = newName;\n  reparentedChildren.push(child.name);\n}\nawait writeState(state, cwd);",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/undo.ts",
+      "changeType": "mod",
+      "additions": 50,
+      "deletions": 1,
+      "explanation": "Extends the existing one-level undo machinery to handle the new 'rename' operation. Reverses the git rename, restores the previous state, and reverses the lease-ref migration. Refuses to clobber a pre-existing branch named `renameFrom`.",
+      "snippet": "if (await branchExists(renameFrom, cwd)) {\n  throw new DubError(\n    `Cannot undo rename: branch '${renameFrom}' already exists.`,\n    [...]\n  );\n}\n\nawait renameBranch(renameTo, renameFrom, cwd);\n\nconst trackedSha = await readLastPushedSha(renameTo, cwd);\nif (trackedSha) {\n  await writeLastPushedSha(renameFrom, trackedSha, cwd);\n  await deleteRef(lastPushedRef(renameTo), cwd);\n}",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 26,
+      "deletions": 0,
+      "explanation": "Adds a small `renameBranch(old, new, cwd)` helper that wraps `git branch -m` with DubError + recovery hints. Works for both currently-checked-out and not-checked-out branches.",
+      "snippet": "export async function renameBranch(\n  oldName: string,\n  newName: string,\n  cwd: string,\n): Promise<void> {\n  try {\n    await execa('git', ['branch', '-m', oldName, newName], { cwd });\n  } catch (error) {\n    throw new DubError(\n      formatGitFailure(\n        `Failed to rename branch '${oldName}' to '${newName}'.`,\n        readGitCommandOutput(error),\n      ),\n      [...]\n    );\n  }\n}",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/undo-log.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 1,
+      "explanation": "Extends UndoEntry.operation to include 'rename' and adds optional `renameFrom`/`renameTo` fields. Backwards-compatible because existing 'create'/'restack' entries leave the new fields undefined.",
+      "snippet": "operation: 'create' | 'restack' | 'rename';\n// ...\n/** For `rename`: the original branch name before the rename. */\nrenameFrom?: string;\n/** For `rename`: the new branch name after the rename. */\nrenameTo?: string;",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 54,
+      "deletions": 1,
+      "explanation": "Wires `dub rename` into the Commander program. Accepts `<firstName> [secondName]` plus a `--no-push` flag. Emits a green success line, a re-parent summary if children were touched, and a cleanup hint when the old remote branch may linger.",
+      "snippet": "program\n  .command('rename')\n  .argument('<firstName>', 'New name (current branch) or old name')\n  .argument('[secondName]', 'New name when renaming a specific tracked branch')\n  .option('--no-push', 'Skip pushing the renamed branch even if a PR exists')",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/rename.test.ts",
+      "changeType": "new",
+      "additions": 247,
+      "deletions": 0,
+      "explanation": "16 integration tests covering rename + collision + undo + lease-ref migration. Uses the repo's `createTestRepo()` helper so each test runs against a real isolated git repo.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/rename.mdx",
+      "changeType": "new",
+      "additions": 61,
+      "deletions": 0,
+      "explanation": "Public docs page describing usage, behavior, flags, error conditions, and undo semantics.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Adds `rename` to the Commands nav after `track`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Lease-ref migration on rename + undo",
+      "location": "packages/cli/src/commands/rename.ts and undo.ts",
+      "rationale": "The `refs/dubstack/last-pushed/<branch>` ref protects future pushes from racing third parties. Forgetting to migrate it on rename would silently downgrade the next push to a bare `--force-with-lease`. Worth confirming both the forward migration and the undo reversal cover the edge case where the branch was never previously submitted (no ref to migrate)."
+    },
+    {
+      "title": "PR head handling vs. issue spec step 5",
+      "location": "packages/cli/src/commands/rename.ts (no `gh pr edit --head` call)",
+      "rationale": "The issue spec mentions `gh pr edit <num> --head <new>`, but the gh CLI does NOT support `--head` on `pr edit` and the GitHub REST API does not allow editing a PR's head ref. The implementation pushes the renamed branch and surfaces a cleanup hint instead — the old remote branch is intentionally left alone so the existing PR stays valid. Confirm this is acceptable trade-off."
+    },
+    {
+      "title": "Undo refuses to clobber an existing `renameFrom` branch",
+      "location": "packages/cli/src/commands/undo.ts",
+      "rationale": "If a user renamed `feat/old → feat/new` and then independently created a new `feat/old`, `dub undo` must not silently overwrite that branch. We throw a DubError with recovery hints instead. Worth a second look at the failure message."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "integration",
+      "label": "16 rename tests in packages/cli/src/commands/rename.test.ts",
+      "status": "done",
+      "evidence": "Covers basic rename, two-arg rename, child re-parent, all 5 error paths, undo round-trip, last-pushed migration round-trip, PR-aware push, --no-push."
+    },
+    {
+      "kind": "integration",
+      "label": "Undo tests in packages/cli/src/commands/undo.test.ts",
+      "status": "done",
+      "evidence": "Existing create/restack undo tests still pass after extending UndoEntry."
+    },
+    {
+      "kind": "unit",
+      "label": "Full repo suite (819 tests across 89 files)",
+      "status": "done",
+      "evidence": "pnpm test passes end-to-end."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 269 files in 56ms. No fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 packages, no errors."
+    },
+    {
+      "name": "Vitest (full suite)",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "89 test files, 819 tests passing."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Pure CLI change. No .tsx files modified; no browser-demoable surface.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-35-qa.md",
+    "caption": "Fallback QA covering 15 behavioral scenarios via integration tests against real git repos.",
+    "scenarios": [
+      "Rename current branch",
+      "Rename specific branch (old + new args) from another branch",
+      "Re-parent children",
+      "Reject tracked-name collision",
+      "Reject untracked-local-name collision",
+      "Reject invalid git ref name",
+      "Reject untracked source",
+      "Reject root-branch rename",
+      "Reject self-rename",
+      "Save undo entry with operation='rename' + renameFrom/renameTo",
+      "Undo restores name + state + child parents",
+      "last-pushed ref migrates on rename",
+      "last-pushed ref restored on undo",
+      "Push triggered when PR linked; skipped otherwise",
+      "--no-push skips push even with PR"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New packages/cli/src/commands/rename.ts",
+      "status": "satisfied",
+      "evidence": "Created with full implementation (173 lines)."
+    },
+    {
+      "criterion": "Validation, git branch rename, state update, child re-parenting, PR edit, push",
+      "status": "satisfied",
+      "evidence": "All steps implemented. Note: gh CLI / GitHub API do not allow editing PR head — substituted with push of renamed branch + cleanup hint for the old remote."
+    },
+    {
+      "criterion": "Undo log entry",
+      "status": "satisfied",
+      "evidence": "UndoEntry extended with 'rename' operation; saveUndoEntry called before mutations."
+    },
+    {
+      "criterion": "Tests for rename, collision, undo",
+      "status": "satisfied",
+      "evidence": "16 tests in rename.test.ts including all 3 explicit collision/undo cases plus 13 more."
+    },
+    {
+      "criterion": "Docs at apps/docs/content/docs/commands/rename.mdx",
+      "status": "satisfied",
+      "evidence": "Created with usage, flags, error table, undo semantics. Added to commands meta.json nav."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Resolved: forward rename now migrates refs/dubstack/last-pushed/<old> to <new>; undo reverses it.",
+      "Resolved: removed noisy 'No PR linked — nothing to push' line that fired on every rename without a PR.",
+      "Reviewer initially flagged an undo checkout ordering issue but self-dismissed it after tracing git's `branch -m` HEAD update semantics."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies detected",
+      "status": "n/a"
+    }
+  ],
+  "rollout": {
+    "summary": "Ship as a new CLI command in the next release. No flags or migrations. Existing undo entries remain valid because the new fields are optional.",
+    "steps": [
+      {
+        "when": "Merge",
+        "label": "Standard squash merge to main",
+        "details": "Conventional commit `feat(rename): ...` so semantic-release picks it up."
+      },
+      {
+        "when": "Post-release",
+        "label": "Verify in real repo",
+        "details": "Run `dub rename` on a sandbox repo with a linked PR to confirm push + cleanup hint behave as documented."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "cc3837f269afd4f2b9e4aeab11714f2b0cb800e9",
+    "shortSha": "cc3837f",
+    "message": "feat(rename): add dub rename command [DUB-35]"
+  }
+}
