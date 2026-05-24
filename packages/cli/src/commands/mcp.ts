@@ -75,7 +75,7 @@ const MAX_HISTORY_ARGS_LENGTH = 500;
 const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.log': ['stack', 'all', 'reverse', 'prs', 'ci', 'refresh'],
   'dubstack.doctor': ['all', 'fetch'],
-  'dubstack.status': [],
+  'dubstack.status': ['live', 'pr'],
   'dubstack.parent': ['branch'],
   'dubstack.children': ['branch'],
   'dubstack.trunk': ['branch'],
@@ -95,12 +95,6 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
 };
-
-const EMPTY_SCHEMA = {
-  type: 'object',
-  properties: {},
-  additionalProperties: false,
-} satisfies JsonValue;
 
 const BRANCH_SCHEMA = {
   type: 'object',
@@ -171,8 +165,24 @@ const TOOLS: ToolDefinition[] = [
   },
   {
     name: 'dubstack.status',
-    description: 'Return current branch, tracking, PR state, and drift issues.',
-    inputSchema: EMPTY_SCHEMA,
+    description:
+      'Return current branch, tracking, PR state, and drift issues. Defaults to the cached overview snapshot for fast reads; pass `live: true` to refresh from gh.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        live: {
+          type: 'boolean',
+          description:
+            'Bypass the stack-overview cache and refresh PR/CI data via a batched gh call.',
+        },
+        pr: {
+          type: 'boolean',
+          description:
+            'Include PR data (default true). Pass false to skip the PR portion entirely.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'dubstack.parent',
@@ -663,7 +673,12 @@ async function callTool(
         }),
       );
     case 'dubstack.status':
-      return jsonToolResult(await status(cwd));
+      return jsonToolResult(
+        await status(cwd, {
+          live: optionalBoolean(args.live),
+          pr: optionalBoolean(args.pr),
+        }),
+      );
     case 'dubstack.parent':
       return jsonToolResult(await parent(cwd, optionalString(args.branch)));
     case 'dubstack.children':

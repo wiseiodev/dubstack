@@ -50,6 +50,7 @@ import { ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
@@ -1049,6 +1050,35 @@ program
         console.log(chalk.dim(`  ↳ ${fix}`));
       }
     }
+  });
+
+program
+  .command('status')
+  .description(
+    'Print a one-line status snapshot or structured JSON for the current branch',
+  )
+  .option('--json', 'Output the status snapshot as JSON')
+  .option('--live', 'Bypass the overview cache and hit gh fresh')
+  .option('--no-pr', 'Skip PR fetch (for fast prompts without gh)')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub status                Print a one-line status (cache-only, fast)
+  $ dub status --json         Emit structured JSON
+  $ dub status --live         Refresh PR/CI data via gh
+  $ dub status --no-pr        Skip the PR fetch (shell prompts without gh)`,
+  )
+  .action(async (options: { json?: boolean; live?: boolean; pr?: boolean }) => {
+    const result = await status(process.cwd(), {
+      live: options.live,
+      pr: options.pr,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(formatStatus(result));
   });
 
 program
