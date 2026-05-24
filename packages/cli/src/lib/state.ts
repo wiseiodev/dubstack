@@ -313,7 +313,8 @@ function normalizeBranch(branch: Branch): Branch {
 
 /**
  * Returns branches in topological (BFS) order starting from the root.
- * Useful for operations that need to process parent branches before children.
+ * Siblings are emitted in deterministic ascending order by branch name so
+ * downstream operations (submit, restack) walk trees predictably.
  */
 export function topologicalOrder(stack: Stack): Branch[] {
   const result: Branch[] = [];
@@ -327,6 +328,9 @@ export function topologicalOrder(stack: Stack): Branch[] {
       children.push(branch);
       childMap.set(branch.parent, children);
     }
+  }
+  for (const children of childMap.values()) {
+    children.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   const queue = [root];

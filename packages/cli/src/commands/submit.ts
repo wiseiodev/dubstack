@@ -43,11 +43,6 @@ import { withTempMarkdownFile } from '../lib/temp-text-file';
 
 export type SubmitPathMode = 'current' | 'stack';
 
-interface SubmitBranchingBlocker {
-  parent: string;
-  children: string[];
-}
-
 export interface SubmitOptions {
   ai?: boolean;
   noAi?: boolean;
@@ -63,7 +58,6 @@ export interface SubmitPlan {
   rootBranch: string;
   path: SubmitPathMode;
   branches: Branch[];
-  fallbackApplied: boolean;
 }
 
 export interface SubmitResult {
@@ -72,7 +66,6 @@ export interface SubmitResult {
   updated: string[];
   path: SubmitPathMode;
   dryRun: boolean;
-  fallbackApplied: boolean;
 }
 
 type SubmitDependencies = AiMetadataDependencies;
@@ -91,7 +84,7 @@ const DEFAULT_DEPS: SubmitDependencies = {
  *
  * @param cwd - Working directory
  * @param dryRun - If true, prints what would happen without executing
- * @throws {DubError} If not in a stack, on root branch, stack is non-linear, or gh errors
+ * @throws {DubError} If not in a stack, on root branch, or gh errors
  */
 export async function submit(
   cwd: string,
@@ -104,6 +97,12 @@ export async function submit(
       "Pass '--ai' alone to force AI-generated PR descriptions.",
       "Pass '--no-ai' alone to skip AI generation for this run.",
     ]);
+  }
+
+  if (options.fix) {
+    console.log(
+      "⚠ '--fix' is deprecated and is now a no-op; submit handles branching stacks natively.",
+    );
   }
 
   const plan = await getSubmitPlan(cwd, options);
@@ -129,11 +128,6 @@ export async function submit(
   console.log(
     `Submitting ${plan.branches.length} branch(es) from '${plan.currentBranch}' onto trunk '${plan.rootBranch}'.`,
   );
-  if (plan.fallbackApplied) {
-    console.log(
-      "⚠ Submit --fix detected branching in '--path stack' mode; using '--path current' for this run.",
-    );
-  }
   if (dryRun) {
     console.log('[dry-run] no branches will be pushed or mutated.');
   }
@@ -144,7 +138,6 @@ export async function submit(
     updated: [],
     path: plan.path,
     dryRun,
-    fallbackApplied: plan.fallbackApplied,
   };
   const prMap = new Map<string, PrInfo>();
   const progress = createProgress();
@@ -280,30 +273,11 @@ export async function getSubmitPlan(
     ]);
   }
 
-  const requestedPath = options.path ?? 'current';
-  let resolvedPath: SubmitPathMode = requestedPath;
-  let branchesWithRoot =
-    requestedPath === 'stack'
+  const resolvedPath: SubmitPathMode = options.path ?? 'current';
+  const branchesWithRoot =
+    resolvedPath === 'stack'
       ? ordered
       : getCurrentPathBranches(stack, currentBranch);
-  let fallbackApplied = false;
-  let blockers = findBranchingBlockers(branchesWithRoot);
-
-  if (blockers.length > 0 && requestedPath === 'stack' && options.fix) {
-    const currentPathBranches = getCurrentPathBranches(stack, currentBranch);
-    const currentPathBlockers = findBranchingBlockers(currentPathBranches);
-    if (currentPathBlockers.length === 0) {
-      resolvedPath = 'current';
-      branchesWithRoot = currentPathBranches;
-      blockers = [];
-      fallbackApplied = true;
-    }
-  }
-
-  if (blockers.length > 0) {
-    const { message, recovery } = buildBranchingError(blockers, currentBranch);
-    throw new DubError(message, recovery);
-  }
 
   const rootBranch =
     branchesWithRoot.find((branch) => branch.type === 'root' || !branch.parent)
@@ -317,7 +291,6 @@ export async function getSubmitPlan(
     rootBranch,
     path: resolvedPath,
     branches,
-    fallbackApplied,
   };
 }
 
@@ -362,51 +335,6 @@ function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
   }
 
   return path.reverse();
-}
-
-function findBranchingBlockers(ordered: Branch[]): SubmitBranchingBlocker[] {
-  const branchSet = new Set(ordered.map((branch) => branch.name));
-  const childMap = new Map<string, string[]>();
-
-  for (const branch of ordered) {
-    if (!branch.parent || !branchSet.has(branch.parent)) continue;
-    const children = childMap.get(branch.parent) ?? [];
-    children.push(branch.name);
-    childMap.set(branch.parent, children);
-  }
-
-  const blockers: SubmitBranchingBlocker[] = [];
-  for (const [parent, children] of childMap) {
-    if (children.length <= 1) continue;
-    blockers.push({
-      parent,
-      children: [...children].sort(),
-    });
-  }
-
-  return blockers.sort((a, b) => a.parent.localeCompare(b.parent));
-}
-
-function buildBranchingError(
-  blockers: SubmitBranchingBlocker[],
-  currentBranch: string,
-): { message: string; recovery: string[] } {
-  const details = blockers
-    .map((blocker) => `${blocker.parent} -> ${blocker.children.join(', ')}`)
-    .join('\n  - ');
-  const message =
-    'Branching stacks are not supported by submit in this mode.\n' +
-    `Found ${blockers.length} branching parent(s):\n` +
-    `  - ${details}\n` +
-    `Current branch: '${currentBranch}'`;
-  return {
-    message,
-    recovery: [
-      "Run 'dub submit --path current' to submit only your current linear path.",
-      "Run 'dub submit --path stack --fix' to retry with safe auto-fix.",
-      "Run 'dub track <child> --parent <branch>' to re-parent and linearize manually.",
-    ],
-  };
 }
 
 async function updateAllPrBodies(

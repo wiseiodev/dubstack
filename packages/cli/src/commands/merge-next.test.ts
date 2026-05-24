@@ -64,7 +64,6 @@ beforeEach(() => {
       { name: 'feat/b', parent: 'feat/a', pr_number: null, pr_link: null },
       { name: 'feat/c', parent: 'feat/b', pr_number: null, pr_link: null },
     ],
-    fallbackApplied: false,
   });
   mockGetPr.mockImplementation(async (branch: string) => {
     if (branch === 'feat/a') {

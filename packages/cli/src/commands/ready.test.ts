@@ -33,7 +33,6 @@ describe('ready', () => {
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],
-      fallbackApplied: false,
     });
 
     const result = await ready('/repo');
@@ -62,7 +61,6 @@ describe('ready', () => {
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],
-      fallbackApplied: false,
     });
 
     const result = await ready('/repo');

@@ -446,7 +446,7 @@ describe('submit', () => {
     });
   });
 
-  it('throws when stack has branching children', async () => {
+  it('submits a tree stack with multiple sibling children in BFS order', async () => {
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
       makeState([
@@ -456,23 +456,12 @@ describe('submit', () => {
       ]),
     );
 
-    await expect(submit('/repo', false, { path: 'stack' })).rejects.toThrow(
-      'Branching stacks are not supported by submit',
-    );
-    await expect(submit('/repo', false, { path: 'stack' })).rejects.toThrow(
-      'main -> feat/a, feat/b',
-    );
-    await expect(
-      submit('/repo', false, { path: 'stack' }),
-    ).rejects.toMatchObject({
-      recovery: expect.arrayContaining([
-        expect.stringContaining('dub submit --path current'),
-        expect.stringContaining('dub track'),
-      ]),
-    });
+    const result = await submit('/repo', true, { path: 'stack' });
+    expect(result.pushed).toEqual(['feat/a', 'feat/b']);
+    expect(result.path).toBe('stack');
   });
 
-  it('defaults to current path and ignores sibling submit blockers', async () => {
+  it('defaults to current path and submits only the current linear path', async () => {
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
       makeState([
@@ -486,7 +475,8 @@ describe('submit', () => {
     expect(result.pushed).toEqual(['feat/a']);
   });
 
-  it('falls back to current path with --fix when stack mode is blocked', async () => {
+  it('treats --fix as a deprecated no-op alias', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
       makeState([
@@ -497,7 +487,11 @@ describe('submit', () => {
     );
 
     const result = await submit('/repo', true, { path: 'stack', fix: true });
-    expect(result.pushed).toEqual(['feat/a']);
+    expect(result.pushed).toEqual(['feat/a', 'feat/b']);
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining("'--fix' is deprecated"),
+    );
+    logSpy.mockRestore();
   });
 
   it('dry-run does not call push or gh commands', async () => {

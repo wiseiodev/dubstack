@@ -23,7 +23,6 @@ describe('flow', () => {
       updated: [],
       path: 'current',
       dryRun: false,
-      fallbackApplied: false,
     });
     const commitStagedFromFile = vi.fn().mockResolvedValue(undefined);
     const getDiffFileNames = vi
@@ -149,7 +148,6 @@ describe('flow', () => {
           updated: [],
           path: 'current',
           dryRun: false,
-          fallbackApplied: false,
         }),
         commitStagedFromFile,
         createTerminalRenderer: vi.fn().mockReturnValue(renderer),

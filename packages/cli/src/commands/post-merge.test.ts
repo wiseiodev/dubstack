@@ -142,7 +142,6 @@ beforeEach(() => {
     updated: ['feat/b'],
     path: 'current',
     dryRun: false,
-    fallbackApplied: false,
   });
 });
 
@@ -318,7 +317,6 @@ describe('postMerge', () => {
         updated: ['feat/b', 'feat/c'],
         path: 'stack',
         dryRun: false,
-        fallbackApplied: false,
       };
     });
 
@@ -391,7 +389,6 @@ describe('postMerge', () => {
       updated: ['feat/a'],
       path: 'current',
       dryRun: false,
-      fallbackApplied: false,
     });
 
     await postMerge('/repo', { all: true, restack: false, submit: true });

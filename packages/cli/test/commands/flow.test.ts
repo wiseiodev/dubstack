@@ -55,7 +55,6 @@ describe('flow integration', () => {
       updated: [],
       path: 'current',
       dryRun: false,
-      fallbackApplied: false,
     });
 
     const result = await flow(
