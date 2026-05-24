@@ -15,12 +15,12 @@ interface UndoResult {
 }
 
 /**
- * Undoes the last `dub create` or `dub restack` operation.
+ * Undoes the last `dub create`, `dub restack`, or `dub move` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
- * - **restack**: Resets every rebased branch to its pre-rebase tip via `git branch -f`,
- *   restores state, checks out the previous branch.
+ * - **restack** or **move**: Resets every rebased branch to its pre-mutation tip
+ *   via `git branch -f`, restores state, checks out the previous branch.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *

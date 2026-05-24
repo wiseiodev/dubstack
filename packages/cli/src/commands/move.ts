@@ -95,7 +95,9 @@ export async function move(
   }
 
   const position: MovePosition = hasBefore ? 'before' : 'after';
-  const target = (hasBefore ? options.before : options.after) as string;
+  // `hasBefore`/`hasAfter` were validated above to be a non-empty string for
+  // exactly one of the two options, so target is always defined.
+  const target = (hasBefore ? options.before : options.after) ?? '';
 
   if (branch === target) {
     throw new DubError(`Cannot move '${branch}' relative to itself.`, [

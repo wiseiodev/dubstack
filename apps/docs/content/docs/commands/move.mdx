@@ -21,7 +21,9 @@ dub move <branch> --after  <target>
 
 `--before` and `--after` are mutually exclusive.
 
-## Example
+## Examples
+
+### `--before`
 
 ```
 Before:                           After (dub move feat/inserted --before feat/auth-login):
@@ -29,6 +31,21 @@ main                              main
 └─ feat/auth-base                 └─ feat/auth-base
    └─ feat/auth-login                └─ feat/inserted
                                         └─ feat/auth-login (restacked)
+```
+
+### `--after`
+
+`--after` absorbs every existing child of `<target>` under `<branch>`, so a
+target with multiple children turns into a true insert-between rather than a
+sibling split.
+
+```
+Before:                           After (dub move feat/inserted --after feat/base):
+main                              main
+└─ feat/base                      └─ feat/base
+   ├─ feat/a                         └─ feat/inserted
+   └─ feat/b                            ├─ feat/a (restacked)
+                                        └─ feat/b (restacked)
 ```
 
 ## What it does

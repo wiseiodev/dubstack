@@ -124,6 +124,49 @@ describe('move command', () => {
     expect(log).toContain('login-commit');
   });
 
+  it('--after absorbs every sibling under the target into the moved branch', async () => {
+    // main → feat/base → {feat/a, feat/b}; feat/inserted off main.
+    // After dub move feat/inserted --after feat/base:
+    // main → feat/base → feat/inserted → {feat/a, feat/b}
+    await create('feat/base', dir);
+    await commitFile('base.txt', 'base', 'base-commit');
+
+    await create('feat/a', dir);
+    await commitFile('a.txt', 'a', 'a-commit');
+
+    await gitInRepo(dir, ['checkout', 'feat/base']);
+    await create('feat/b', dir);
+    await commitFile('b.txt', 'b', 'b-commit');
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    await create('feat/inserted', dir);
+    await commitFile('inserted.txt', 'inserted', 'inserted-commit');
+
+    const result = await move(dir, 'feat/inserted', {
+      after: 'feat/base',
+    });
+
+    expect(result.noOp).toBe(false);
+    // All three branches whose parent changed should be in `reparented`.
+    expect(result.reparented.sort()).toEqual(
+      ['feat/a', 'feat/b', 'feat/inserted'].sort(),
+    );
+
+    const state = await readState(dir);
+    expect(getBranch(state, 'feat/inserted')?.parent).toBe('feat/base');
+    expect(getBranch(state, 'feat/a')?.parent).toBe('feat/inserted');
+    expect(getBranch(state, 'feat/b')?.parent).toBe('feat/inserted');
+
+    // Both siblings should have been rebased onto feat/inserted.
+    for (const name of ['feat/a', 'feat/b']) {
+      const log = (
+        await gitInRepo(dir, ['log', '--oneline', name])
+      ).stdout.trim();
+      expect(log).toContain('inserted-commit');
+      expect(log).toContain('base-commit');
+    }
+  });
+
   it('rejects a move that would create a cycle', async () => {
     // main → feat/a → feat/b
     await create('feat/a', dir);
@@ -143,7 +186,7 @@ describe('move command', () => {
     expect(await hasCleanupJournal(dir)).toBe(false);
   });
 
-  it('rejects --before when the branch is already a parent of the target (no-op)', async () => {
+  it('returns a no-op when --before target is already a child of branch', async () => {
     // main → feat/a → feat/b: feat/a is already feat/b's parent
     await create('feat/a', dir);
     await commitFile('a.txt', 'a', 'a-commit');
@@ -161,7 +204,7 @@ describe('move command', () => {
     expect(getBranch(state, 'feat/b')?.parent).toBe('feat/a');
   });
 
-  it('rejects --after when the branch is already the sole child of the target (no-op)', async () => {
+  it('returns a no-op when --after branch is already targets sole child', async () => {
     // main → feat/a → feat/b: feat/b's parent is already feat/a, and a has no other children
     await create('feat/a', dir);
     await commitFile('a.txt', 'a', 'a-commit');
