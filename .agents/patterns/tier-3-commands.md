@@ -24,10 +24,20 @@ Import from `packages/cli/src/lib/errors.ts`.
 
 **Don't:**
 
-- `throw new DubError('Boom.')` — bare message; lint rule `no-bare-duberror`
-  blocks it. Pass a non-empty `string[]` of recovery hints.
+- `throw new DubError('Boom.')` or `throw new DubError('Boom.', [])` — both
+  are blocked by lint rule `no-bare-duberror`. Pass a non-empty `string[]`
+  of recovery hints.
 - Use a generic `Error` for user-facing failures; the CLI prints those as
   unhandled stack traces.
+
+**The user-cancelled exception.** When the user explicitly cancels (e.g.
+declines an interactive prompt) there is genuinely nothing to recover. Use
+the sanctioned sentinel instead of a bare construction:
+
+```ts
+throw DubError.cancelled(); // defaults to "Cancelled."
+throw DubError.cancelled('Aborted by user.');
+```
 
 ## 2) retry() For Flaky Operations
 
@@ -63,9 +73,11 @@ import { createProgress } from '../lib/progress';
 
 const progress = createProgress();
 progress.start('Restacking', branches.length);
+let processed = 0;
 try {
-  for (const [i, branch] of branches.entries()) {
-    progress.update(`Restacking ${branch}`, i, '');
+  for (const branch of branches) {
+    processed += 1;
+    progress.update(`Restacking ${branch}`, processed, '');
     await restackBranch(branch);
   }
   progress.complete('Restack complete');
@@ -74,6 +86,11 @@ try {
   throw err;
 }
 ```
+
+Use a 1-based counter that increments *before* `progress.update` so the bar
+shows progress on the first step. This matches the convention in
+`commands/sync.ts` and `commands/submit.ts`; a 0-based index from
+`entries()` makes the first frame render as `0/N`.
 
 Import from `packages/cli/src/lib/progress.ts`.
 
@@ -263,11 +280,11 @@ Import from `packages/cli/src/lib/cleanup-journal.ts`.
 Three Biome GritQL plugins enforce the most error-prone rules above. See
 `biome-plugins/`:
 
-| Rule                    | Blocks                                                | Allowed in                |
-| ----------------------- | ----------------------------------------------------- | ------------------------- |
-| `no-bare-duberror`      | `new DubError(msg)` with no `recovery: string[]`      | `lib/errors.ts`, `*.test.ts` |
-| `no-direct-execa-gh`    | `execa('gh', …)` outside the `runGh` wrapper          | `lib/github.ts`           |
-| `no-direct-force-push`  | `git push --force` without `--force-with-lease`       | `lib/git.ts` (pushBranch) |
+| Rule                    | Blocks                                                                  | Allowed in / Escape hatch |
+| ----------------------- | ----------------------------------------------------------------------- | ------------------------- |
+| `no-bare-duberror`      | `new DubError(msg)` and `new DubError(msg, [])` (empty recovery)        | `lib/errors.ts`, `*.test.ts`; use `DubError.cancelled(msg)` for the user-cancelled case |
+| `no-direct-execa-gh`    | `execa('gh', …)` outside the `runGh` wrapper                            | `lib/github.ts` |
+| `no-direct-force-push`  | `git push --force` without `--force-with-lease`                         | `lib/git.ts` (pushBranch) |
 
 Run with `pnpm checks` (rules run as part of `biome check`).
 
