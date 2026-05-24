@@ -133,6 +133,26 @@ describe('freeze', () => {
     expect(await frozenSet()).toEqual(new Set());
   });
 
+  it('undo of freeze does NOT switch checkout if the user has moved branches since freezing', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+
+    // Freeze while on feat/a.
+    await freeze(dir);
+
+    // User switches to feat/b on their own. Undo must not yank them back.
+    await gitInRepo(dir, ['checkout', 'feat/b']);
+
+    await undo(dir);
+
+    const after = (
+      await gitInRepo(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    ).stdout.trim();
+    expect(after).toBe('feat/b');
+    expect(await frozenSet()).toEqual(new Set());
+  });
+
   it('skips a branch checked out in another worktree and does not mutate it', async () => {
     await create('feat/a', dir);
     await create('feat/b', dir);

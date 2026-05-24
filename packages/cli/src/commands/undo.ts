@@ -171,11 +171,10 @@ export async function undo(cwd: string): Promise<UndoResult> {
   }
 
   if (entry.operation === 'freeze' || entry.operation === 'unfreeze') {
-    // freeze/unfreeze only mutate state.json; nothing to reset in git.
+    // freeze/unfreeze only mutate state.json; nothing to reset in git, and
+    // we deliberately do NOT touch the checkout — the original command
+    // didn't switch branches, so undo shouldn't either.
     await writeState(entry.previousState, cwd);
-    if (currentBranch !== entry.previousBranch) {
-      await checkoutBranch(entry.previousBranch, cwd);
-    }
     await clearUndoEntry(cwd);
     const verb = entry.operation === 'freeze' ? 'freeze' : 'unfreeze';
     return {
