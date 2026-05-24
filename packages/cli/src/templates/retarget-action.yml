@@ -5,6 +5,11 @@ on:
 permissions:
   contents: read
   pull-requests: write
+# Serialize runs per repo so back-to-back stack merges don't race on the same
+# dependents. `cancel-in-progress: false` queues runs instead of dropping any.
+concurrency:
+  group: dubstack-retarget-${{ github.repository }}
+  cancel-in-progress: false
 jobs:
   retarget:
     if: github.event.pull_request.merged == true

@@ -13,6 +13,20 @@ inputs:
       ${{ secrets.GITHUB_TOKEN }} works when the workflow has
       `pull-requests: write` permission.
     required: true
+outputs:
+  status:
+    description: >-
+      Outcome of the run. One of: done, skipped-not-merged,
+      skipped-no-metadata, skipped-legacy-metadata, no-dependents.
+  retargeted:
+    description: >-
+      JSON array of { number, fromBase, toBase } describing each PR
+      whose base was actually moved.
+  skipped:
+    description: >-
+      JSON array of { number, reason } describing each dependent PR
+      we deliberately left alone (auto-merge in flight, already
+      retargeted, metadata refresh only, transient API failure, etc.).
 runs:
   using: node24
   main: dist/index.js

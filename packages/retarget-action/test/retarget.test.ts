@@ -266,6 +266,112 @@ describe('runRetarget', () => {
     expect(client.calls.bodyUpdates).toEqual([]);
   });
 
+  it('retargets via the trunk fallback when merged PR is true root-of-stack (parent=null)', async () => {
+    // Build a stack where feat/a's metadata has parent: null (legacy-leaning
+    // or true-root) but a tree pointing at feat/b. The Action should fall
+    // back to mergedPr.base.ref ('main') as the new base for dependents.
+    const branches: FakePullBranch[] = [
+      { number: 1, branch: 'feat/a', parent: null, depth: 0 },
+      { number: 2, branch: 'feat/b', parent: 'feat/a', depth: 1 },
+    ];
+    const fakes = buildStackFakes({
+      stackId: 'stk_root',
+      trunk: 'main',
+      // Force tree to include both nodes so isLegacyShape doesn't fire.
+      branches,
+    });
+    // Build a custom merged body that has parent: null but a populated tree
+    // (proving the trunk-fallback path).
+    const mergedBody = `## Summary\n\n<!-- dubstack-metadata\n${JSON.stringify(
+      {
+        schema_version: 1,
+        stack_id: 'stk_root',
+        pr_number: 1,
+        branch: 'feat/a',
+        parent: null,
+        children: ['feat/b'],
+        siblings: [],
+        prev_pr: null,
+        next_pr: 2,
+        tree: [
+          { name: 'feat/a', depth: 0, pr_number: 1, is_current: true },
+          { name: 'feat/b', depth: 1, pr_number: 2 },
+        ],
+      },
+      null,
+      2,
+    )}\n-->`;
+    const openPulls = makeOpenPulls(fakes, [
+      { number: 2, branch: 'feat/b', base: 'feat/a' },
+    ]);
+    const client = createRecordingClient(openPulls);
+
+    const outcome = await runRetarget(
+      client,
+      {
+        number: 1,
+        merged: true,
+        body: mergedBody,
+        base: { ref: 'main' },
+      },
+      silentLogger(),
+    );
+
+    expect(outcome.status).toBe('done');
+    if (outcome.status !== 'done') return;
+    expect(outcome.retargeted).toEqual([
+      { number: 2, fromBase: 'feat/a', toBase: 'main' },
+    ]);
+    expect(client.calls.baseUpdates).toEqual([{ number: 2, base: 'main' }]);
+    // The dependent's metadata `parent` must now equal `main`, the trunk
+    // fallback, NOT null — otherwise GitHub base ('main') and embedded
+    // metadata diverge.
+    const meta = parseDubstackMetadata(client.calls.bodyUpdates[0].body);
+    expect(meta?.parent).toBe('main');
+  });
+
+  it('continues with other dependents when one base update fails non-403', async () => {
+    const branches: FakePullBranch[] = [
+      { number: 0, branch: 'main', parent: null, depth: 0 },
+      { number: 1, branch: 'feat/a', parent: 'main', depth: 1 },
+      { number: 2, branch: 'feat/b', parent: 'feat/a', depth: 2 },
+      { number: 3, branch: 'feat/c', parent: 'feat/a', depth: 2 },
+    ];
+    const fakes = buildStackFakes({
+      stackId: 'stk',
+      trunk: 'main',
+      branches,
+    });
+    const merged = makeMergedInput(fakes, 'feat/a', 1, 'main');
+    const openPulls = makeOpenPulls(fakes, [
+      { number: 2, branch: 'feat/b', base: 'feat/a' },
+      { number: 3, branch: 'feat/c', base: 'feat/a' },
+    ]);
+    const client = createRecordingClient(openPulls, {
+      onUpdateBase: (n) => {
+        if (n === 2) {
+          const err = new Error('Base branch was modified');
+          Object.assign(err, { status: 422 });
+          throw err;
+        }
+      },
+    });
+
+    const outcome = await runRetarget(client, merged, silentLogger());
+    expect(outcome.status).toBe('done');
+    if (outcome.status !== 'done') return;
+    expect(outcome.retargeted).toEqual([
+      { number: 3, fromBase: 'feat/a', toBase: 'main' },
+    ]);
+    expect(outcome.skipped).toEqual([
+      {
+        number: 2,
+        reason: expect.stringMatching(/^base update failed:/) as unknown,
+      },
+    ]);
+    expect(client.calls.baseUpdates).toEqual([{ number: 3, base: 'main' }]);
+  });
+
   it('continues when body rewrite fails after base update', async () => {
     const branches: FakePullBranch[] = [
       { number: 0, branch: 'main', parent: null, depth: 0 },

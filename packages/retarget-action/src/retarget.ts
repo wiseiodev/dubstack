@@ -136,15 +136,20 @@ export async function runRetarget(
 
   for (const { pr, meta } of dependents) {
     if (pr.auto_merge != null) {
-      log.info(`Skipping #${pr.number}, currently being merged`);
+      log.info(`Skipping #${pr.number}: auto-merge in flight`);
       skipped.push({ number: pr.number, reason: 'auto-merge in flight' });
       continue;
     }
 
     const baseAlreadyCorrect = pr.base.ref === newBase;
-    const metadataAlreadyCorrect = meta.parent === mergedMetadata.parent;
+    // After a successful retarget, the dependent's metadata `parent` should
+    // equal `newBase` — that's what `updateMetadataForRetarget` writes. We
+    // compare against `newBase` (not `mergedMetadata.parent`) so the check
+    // stays correct in the root-merge case where `mergedMetadata.parent` is
+    // null but the dependent should sit on the trunk.
+    const metadataAlreadyCorrect = meta.parent === newBase;
     if (baseAlreadyCorrect && metadataAlreadyCorrect) {
-      log.info(`Skipping #${pr.number}, already retargeted to ${newBase}`);
+      log.info(`Skipping #${pr.number}: already retargeted to ${newBase}`);
       skipped.push({ number: pr.number, reason: 'already retargeted' });
       continue;
     }
@@ -158,7 +163,16 @@ export async function runRetarget(
         if (isPermissionsError(err)) {
           throw new RetargetPermissionsError(pr.number, err);
         }
-        throw err;
+        // Transient or PR-specific failure (network, 422 base conflict, 404
+        // PR gone). Skip this dependent but continue with the others.
+        log.warning(
+          `Failed to update base of #${pr.number}: ${errMessage(err)}. Continuing with remaining dependents.`,
+        );
+        skipped.push({
+          number: pr.number,
+          reason: `base update failed: ${errMessage(err)}`,
+        });
+        continue;
       }
     }
 
@@ -169,7 +183,7 @@ export async function runRetarget(
     const newMeta = updateMetadataForRetarget(
       meta,
       mergedMetadata.branch,
-      mergedMetadata.parent,
+      newBase,
       mergedMetadata.pr_number,
     );
     const newBody = rewritePrBody(pr.body ?? '', newMeta, titleByPr);
@@ -220,7 +234,7 @@ export class RetargetPermissionsError extends Error {
   readonly cause: unknown;
   constructor(prNumber: number, cause: unknown) {
     super(
-      `403 Forbidden while updating PR #${prNumber}. The workflow likely lacks 'pull-requests: write'.`,
+      `403 Forbidden while updating PR #${prNumber}. Common causes: missing 'pull-requests: write' on the workflow, branch protection rules on the new base, or a fork-PR context where GITHUB_TOKEN is read-only.`,
     );
     this.name = 'RetargetPermissionsError';
     this.prNumber = prNumber;
@@ -240,7 +254,8 @@ function errMessage(err: unknown): string {
 
 /**
  * Updates the dependent PR's metadata to reflect the merged PR being gone:
- * - `parent` swaps to the merged PR's parent
+ * - `parent` swaps to `newParentBranch` — the same value we move the GitHub
+ *   base to, so metadata stays consistent with the actual base ref.
  * - `prev_pr` clears when it pointed at the merged PR
  * - the merged branch is dropped from `tree[]`; descendants shift up one
  *   depth (the merged branch is no longer between them and the root).
@@ -248,12 +263,12 @@ function errMessage(err: unknown): string {
 export function updateMetadataForRetarget(
   meta: DubstackMetadata,
   mergedBranch: string,
-  mergedParentBranch: string | null,
+  newParentBranch: string,
   mergedPrNumber: number,
 ): DubstackMetadata {
   return {
     ...meta,
-    parent: mergedParentBranch,
+    parent: newParentBranch,
     prev_pr: meta.prev_pr === mergedPrNumber ? null : meta.prev_pr,
     tree: removeBranchFromTree(meta.tree, mergedBranch),
   };

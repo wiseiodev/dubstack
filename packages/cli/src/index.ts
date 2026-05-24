@@ -161,6 +161,18 @@ Examples:
         dryRun: options.dryRun,
         force: options.force,
         confirm: async (message) => {
+          // Non-interactive shells (piped stdin, CI scripts) would hang
+          // forever on rl.question. Treat as "no" and let the caller surface
+          // a 'cancelled' result; the user can pass --force for scripted
+          // overwrites.
+          if (!process.stdin.isTTY) {
+            console.log(
+              chalk.yellow(
+                '⚠ Refusing to prompt for confirmation in a non-interactive shell. Re-run with --force to overwrite, or --dry-run to preview.',
+              ),
+            );
+            return false;
+          }
           const readline = await import('node:readline/promises');
           const rl = readline.createInterface({
             input: process.stdin,

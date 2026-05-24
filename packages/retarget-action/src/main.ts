@@ -23,11 +23,20 @@ export async function run(): Promise<void> {
       return;
     }
 
+    const prNumber = pr.number;
+    const baseRef = (pr.base as { ref?: unknown } | undefined)?.ref;
+    if (typeof prNumber !== 'number' || typeof baseRef !== 'string') {
+      core.setFailed(
+        `Unexpected pull_request payload shape (number=${String(prNumber)}, base.ref=${String(baseRef)}). This Action expects a pull_request.closed event.`,
+      );
+      return;
+    }
+
     const merged: MergedPullInput = {
-      number: pr.number as number,
+      number: prNumber,
       merged: pr.merged === true,
-      body: (pr.body as string | null | undefined) ?? null,
-      base: { ref: (pr.base as { ref: string }).ref },
+      body: typeof pr.body === 'string' ? pr.body : null,
+      base: { ref: baseRef },
     };
 
     const client = createGitHubClient(

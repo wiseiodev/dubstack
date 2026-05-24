@@ -24,6 +24,9 @@ on:
 permissions:
   contents: read
   pull-requests: write
+concurrency:
+  group: dubstack-retarget-${{ github.repository }}
+  cancel-in-progress: false
 jobs:
   retarget:
     if: github.event.pull_request.merged == true
