@@ -1,6 +1,7 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import {
   appendCleanupOperation,
   type CleanupDeleteOp,
@@ -442,7 +443,12 @@ export async function sync(
       }
       progress.resume();
       await appendCleanupOperation(cwd, cleanupJournal, op);
-      await checkoutBranch(roots[0] ?? originalBranch, cwd);
+      const fallbackTarget = roots[0] ?? originalBranch;
+      await checkoutBranch(fallbackTarget, cwd);
+      await appendCheckoutHistory(cwd, fallbackTarget, {
+        via: 'sync',
+        transient: true,
+      });
       await deleteBranch(branch, cwd);
       // Reparenting was already journaled+applied via explicit reparent ops;
       // here we just drop the entry from state.
@@ -1015,6 +1021,10 @@ export async function sync(
       for (const root of rootsToRestack) {
         if (recordWorktreeSkip(root)) continue;
         await checkoutBranch(root, cwd);
+        await appendCheckoutHistory(cwd, root, {
+          via: 'sync',
+          transient: true,
+        });
         const restackResult = await restack(cwd);
         if (restackResult.status === 'conflict') {
           const conflictBranch = restackResult.conflictBranch ?? 'unknown';
@@ -1075,6 +1085,10 @@ export async function sync(
       if (needsSubmitRefresh && scopeStacks.some(hasNonRootBranches)) {
         if (preferredBranch) {
           await checkoutBranch(preferredBranch, cwd);
+          await appendCheckoutHistory(cwd, preferredBranch, {
+            via: 'sync',
+            transient: true,
+          });
         }
         await submitRefreshedStacks(cwd, scopeStacks, {
           all: options.all,
@@ -1091,6 +1105,10 @@ export async function sync(
   if (activeOperation === 'none') {
     try {
       await checkoutBranch(restoreTarget, cwd);
+      await appendCheckoutHistory(cwd, restoreTarget, {
+        via: 'sync',
+        transient: true,
+      });
     } catch {
       if (!pendingError) {
         pendingError = new DubError(

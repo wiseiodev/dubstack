@@ -1,4 +1,13 @@
-import search from '@inquirer/search';
+import chalk from 'chalk';
+import { execa } from 'execa';
+import {
+  type BranchPickerChoice,
+  type BranchPickerOutcome,
+  branchPickerPrompt,
+} from '../lib/branch-picker';
+import { formatBranchLabel } from '../lib/branch-picker-format';
+import { appendCheckoutHistory } from '../lib/checkout-history';
+import { copyToClipboard } from '../lib/clipboard';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -6,7 +15,19 @@ import {
   getCurrentBranch,
   listBranches,
 } from '../lib/git';
-import { type DubState, findStackForBranch, readState } from '../lib/state';
+import { openPrInBrowser } from '../lib/github';
+import {
+  type BranchOverview,
+  getStackOverviewBatch,
+  type StackOverview,
+} from '../lib/stack-overview';
+import {
+  type DubState,
+  findStackForBranch,
+  getParent,
+  readState,
+} from '../lib/state';
+import { computeRegions, type LogRegion } from './log';
 
 /**
  * Returns a sorted, deduplicated list of branch names tracked by DubStack.
@@ -80,26 +101,230 @@ export async function checkout(
   cwd: string,
 ): Promise<{ branch: string }> {
   await checkoutBranch(name, cwd);
+  await appendCheckoutHistory(cwd, name, { via: 'checkout' });
   return { branch: name };
+}
+
+/**
+ * Computes region tags for every tracked branch across every stack.
+ *
+ * Stacks that don't contain the current branch get `descendant` for all
+ * non-root rows (per {@link computeRegions}), so they render neutrally.
+ */
+export function computeAllRegions(
+  state: DubState,
+  currentBranch: string | null,
+): Map<string, LogRegion> {
+  const merged = new Map<string, LogRegion>();
+  for (const stack of state.stacks) {
+    const stackRegions = computeRegions(stack, currentBranch);
+    for (const [name, region] of stackRegions) {
+      // Prefer a more-specific region if the same root branch appears in
+      // two stacks (e.g. `main`). `current`/`ancestor` win over `root`,
+      // which wins over the descendant/sibling fallbacks.
+      const existing = merged.get(name);
+      if (!existing || regionRank(region) > regionRank(existing)) {
+        merged.set(name, region);
+      }
+    }
+  }
+  return merged;
+}
+
+function regionRank(region: LogRegion): number {
+  // Higher rank wins when the same branch is classified differently across
+  // stacks. Intent: most-specific-to-current wins over the generic root /
+  // sibling fallbacks, but `root` still beats the per-stack fallbacks
+  // (`descendant` / `sibling-subtree`) so a shared trunk stays bold.
+  switch (region) {
+    case 'current':
+      return 5;
+    case 'ancestor':
+      return 4;
+    case 'root':
+      return 3;
+    case 'descendant':
+      return 2;
+    case 'sibling-subtree':
+      return 1;
+  }
+}
+
+export interface InteractiveCheckoutOptions {
+  showUntracked?: boolean;
+  stack?: boolean;
+  all?: boolean;
+  refresh?: boolean;
+  /** Disable ANSI colors (mirrors `dub log --no-color`). */
+  noColor?: boolean;
+}
+
+interface BuildChoicesArgs {
+  validBranches: string[];
+  currentBranch: string | null;
+  regions: Map<string, LogRegion>;
+  overview: StackOverview | null;
+  noColor: boolean;
+}
+
+/**
+ * Builds the picker choice rows. Exported so tests can exercise the
+ * formatting + region styling without spinning up the prompt.
+ */
+export function buildBranchChoices(
+  args: BuildChoicesArgs,
+): BranchPickerChoice[] {
+  const { validBranches, currentBranch, regions, overview, noColor } = args;
+  const overviewByBranch = new Map<string, BranchOverview>();
+  if (overview) {
+    for (const row of overview.branches) overviewByBranch.set(row.branch, row);
+  }
+  const branchColumnWidth = Math.min(
+    Math.max(...validBranches.map((b) => b.length), 0) + 2,
+    48,
+  );
+
+  return validBranches.map((name) => {
+    const label = formatBranchLabel({
+      branch: name,
+      region: regions.get(name),
+      overview: overviewByBranch.get(name) ?? null,
+      branchColumnWidth,
+      noColor,
+    });
+    return {
+      value: name,
+      label,
+      searchKey: name,
+      disabled: name === currentBranch ? '(current)' : undefined,
+    };
+  });
+}
+
+async function safeOverview(
+  cwd: string,
+  refresh: boolean,
+): Promise<{ overview: StackOverview | null; error: string | null }> {
+  try {
+    const overview = await getStackOverviewBatch(cwd, { refresh });
+    return { overview, error: null };
+  } catch (err) {
+    // PR metadata is best-effort — the picker still works without it.
+    const message = err instanceof Error ? err.message : String(err);
+    if (/enoent/i.test(message)) {
+      return {
+        overview: null,
+        error: 'gh CLI not installed — install it to see PR metadata',
+      };
+    }
+    return { overview: null, error: message };
+  }
+}
+
+interface Stylers {
+  yellow: (text: string) => string;
+  green: (text: string) => string;
+}
+
+function makeStylers(noColor: boolean): Stylers {
+  if (noColor) {
+    return { yellow: (t) => t, green: (t) => t };
+  }
+  return { yellow: (t) => chalk.yellow(t), green: (t) => chalk.green(t) };
+}
+
+async function printDiffAgainstParent(
+  branch: string,
+  state: DubState,
+  cwd: string,
+  stylers: Stylers,
+): Promise<void> {
+  const parent = getParent(state, branch);
+  if (!parent) {
+    console.log(
+      stylers.yellow(`No parent recorded for '${branch}' — nothing to diff.`),
+    );
+    return;
+  }
+  if (!(await branchExists(parent, cwd))) {
+    console.log(
+      stylers.yellow(
+        `Parent branch '${parent}' is missing locally — cannot diff '${branch}'.`,
+      ),
+    );
+    return;
+  }
+  try {
+    await execa('git', ['--no-pager', 'diff', `${parent}...${branch}`], {
+      cwd,
+      stdio: 'inherit',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(stylers.yellow(`Failed to run git diff: ${message}`));
+  }
+}
+
+async function handlePickerOutcome(
+  outcome: BranchPickerOutcome,
+  state: DubState,
+  cwd: string,
+  stylers: Stylers,
+): Promise<{ done: { branch: string } | null } | { continueWith: string }> {
+  if (outcome.type === 'checkout') {
+    return { done: await checkout(outcome.branch, cwd) };
+  }
+  if (outcome.type === 'cancel') {
+    return { done: null };
+  }
+  if (outcome.type === 'pr') {
+    try {
+      await openPrInBrowser(cwd, outcome.branch);
+    } catch (err) {
+      if (err instanceof DubError) {
+        console.log(stylers.yellow(err.message));
+      } else {
+        throw err;
+      }
+    }
+    return { continueWith: outcome.branch };
+  }
+  if (outcome.type === 'copy') {
+    const tool = await copyToClipboard(outcome.branch);
+    if (tool) {
+      console.log(stylers.green(`✔ Copied '${outcome.branch}' to clipboard`));
+    } else {
+      console.log(stylers.yellow('(copy unavailable)'));
+    }
+    return { continueWith: outcome.branch };
+  }
+  // outcome.type === 'diff'
+  await printDiffAgainstParent(outcome.branch, state, cwd, stylers);
+  return { continueWith: outcome.branch };
 }
 
 /**
  * Launches an interactive search prompt listing DubStack-tracked branches.
  *
- * The current branch is shown but disabled. The user can type to filter,
- * use arrow keys to navigate, and press Enter to checkout.
+ * Each row shows PR number, review status, CI rollup, and last-commit age
+ * (when available from {@link getStackOverviewBatch}), with the branch
+ * name colored by stack region.
  *
- * @param cwd - Working directory
- * @returns The checked-out branch, or `null` if the user cancelled (Ctrl+C)
+ * Shortcuts:
+ *   - `Enter`        checkout the highlighted branch
+ *   - `p`            open the branch's PR in the browser
+ *   - `d`            run `git diff <parent>...<branch>` and wait for input
+ *   - `c`            copy the branch name to the clipboard (best-effort)
+ *   - `Esc` / `q`    cancel
+ *
+ * After `p`/`d`/`c` the picker is re-launched so the user can chain
+ * actions or finally pick a branch. Returns `null` on cancel.
+ *
  * @throws {DubError} If not initialized or no tracked branches exist
  */
 export async function interactiveCheckout(
   cwd: string,
-  options: {
-    showUntracked?: boolean;
-    stack?: boolean;
-    all?: boolean;
-  } = {},
+  options: InteractiveCheckoutOptions = {},
 ): Promise<{ branch: string } | null> {
   const state = await readState(cwd);
   const localBranches = await listBranches(cwd);
@@ -128,51 +353,55 @@ export async function interactiveCheckout(
     ]);
   }
 
-  // Setup AbortController for Esc key support
-  const controller = new AbortController();
+  const regions = computeAllRegions(state, currentBranch);
 
-  // Listen for keypress events to handle Esc
-  const onKeypress = (_str: string, key: { name: string; ctrl: boolean }) => {
-    if (key && key.name === 'escape') {
-      controller.abort();
-    }
-  };
-  process.stdin.on('keypress', onKeypress);
+  const noColor =
+    options.noColor === true ||
+    chalk.level === 0 ||
+    process.env.NO_COLOR !== undefined;
+  const stylers = makeStylers(noColor);
+  const dim: (t: string) => string = noColor ? (t) => t : (t) => chalk.dim(t);
 
-  try {
-    const selected = await search(
-      {
-        message: 'Checkout a branch (autocomplete or arrow keys)',
-        source(term: string | undefined) {
-          const filtered = term
-            ? validBranches.filter((b) =>
-                b.toLowerCase().includes(term.toLowerCase()),
-              )
-            : validBranches;
+  if (options.refresh) {
+    console.log(dim('Loading PR data...'));
+  }
+  const { overview, error: overviewError } = await safeOverview(
+    cwd,
+    options.refresh === true,
+  );
+  if (overviewError) {
+    console.log(stylers.yellow(`PR metadata unavailable: ${overviewError}`));
+  }
 
-          return filtered.map((name) => ({
-            name,
-            value: name,
-            disabled: name === currentBranch ? '(current)' : false,
-          }));
-        },
-      },
-      { signal: controller.signal },
+  let defaultBranch = currentBranch ?? undefined;
+  const footerParts: string[] = [];
+  if (overview?.truncated) {
+    footerParts.push(
+      dim(
+        `ℹ Showing ${overview.branches.length}+ branches — some PR data may be stale`,
+      ),
     );
+  }
 
-    return checkout(selected, cwd);
-  } catch (error: unknown) {
-    if (error instanceof Error) {
-      if (
-        error.name === 'ExitPromptError' ||
-        error.name === 'AbortError' ||
-        error.name === 'AbortPromptError'
-      ) {
-        return null;
-      }
-    }
-    throw error;
-  } finally {
-    process.stdin.off('keypress', onKeypress);
+  // Side-effect actions (p/d/c) loop back into the picker; only
+  // `checkout` and `cancel` exit.
+  while (true) {
+    const choices = buildBranchChoices({
+      validBranches,
+      currentBranch,
+      regions,
+      overview,
+      noColor,
+    });
+    const outcome = await branchPickerPrompt({
+      message: 'Checkout a branch (autocomplete or arrow keys)',
+      choices,
+      defaultBranch,
+      footer: footerParts.join('\n') || undefined,
+      noColor,
+    });
+    const next = await handlePickerOutcome(outcome, state, cwd, stylers);
+    if ('done' in next) return next.done;
+    defaultBranch = next.continueWith;
   }
 }

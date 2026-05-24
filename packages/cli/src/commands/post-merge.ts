@@ -1,3 +1,4 @@
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import {
   appendCleanupOperation,
   clearCleanupJournal,
@@ -176,6 +177,10 @@ export async function postMerge(
         }
       }
       await checkoutBranch(root, cwd);
+      await appendCheckoutHistory(cwd, root, {
+        via: 'post-merge',
+        transient: true,
+      });
       const restackResult = await restack(cwd);
       if (restackResult.status === 'conflict') {
         throw new DubError(
@@ -199,6 +204,9 @@ export async function postMerge(
       scopeStacks,
     );
     if (preferredBranch) {
+      // History is recorded once at the final landing after submit-refresh
+      // (see the trailing `if (!dryRun && preferredBranch)` block) so we
+      // don't burn two ring-buffer slots on the same intermediate move.
       await checkoutBranch(preferredBranch, cwd);
     }
   }
@@ -218,6 +226,10 @@ export async function postMerge(
   }
   if (!dryRun && preferredBranch) {
     await checkoutBranch(preferredBranch, cwd);
+    await appendCheckoutHistory(cwd, preferredBranch, {
+      via: 'post-merge',
+      transient: true,
+    });
   }
 
   result.cleaned.sort();

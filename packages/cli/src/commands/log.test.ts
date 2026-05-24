@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import type { BranchOverview, StackOverview } from '../lib/stack-overview';
 import { type DubState, initState, type Stack, writeState } from '../lib/state';
 import { computeRegions, log, logJson, styleLogOutput } from './log';
 
@@ -615,6 +616,496 @@ describe('log', () => {
       const regions = computeRegions(cyclic, 'feat/a');
       expect(regions.get('feat/a')).toBe('current');
       expect(regions.get('feat/b')).toBe('ancestor');
+    });
+  });
+
+  describe('rich overview', () => {
+    function makeBranchOverview(
+      branch: string,
+      parent: string | null,
+      overrides: Partial<BranchOverview> = {},
+    ): BranchOverview {
+      return {
+        branch,
+        parent,
+        isRoot: parent === null,
+        pr: null,
+        commit: null,
+        prLink: null,
+        lastSyncedAt: null,
+        syncSource: null,
+        ...overrides,
+      };
+    }
+
+    function makeOverview(branches: BranchOverview[]): StackOverview {
+      return {
+        branches,
+        truncated: false,
+        cachedAt: new Date('2026-05-24T00:00:00Z').toISOString(),
+      };
+    }
+
+    async function seedLinearStack() {
+      await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+      await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+      const state: DubState = {
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: 42,
+                pr_link: 'https://github.com/example/repo/pull/42',
+              },
+              {
+                name: 'feat/b',
+                parent: 'feat/a',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      };
+      await writeState(state, dir);
+    }
+
+    it('renders PR + CI + commit annotations after the label for a linear stack', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null, {
+          commit: {
+            committedRel: '2 days ago',
+            authorEmail: 'a@x',
+            shortSha: 'mainabcd',
+          },
+        }),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          prLink: 'https://github.com/example/repo/pull/42',
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a', {
+          commit: {
+            committedRel: 'just now',
+            authorEmail: 'a@x',
+            shortSha: 'bbbb2222',
+          },
+        }),
+      ]);
+
+      const output = await log(dir, { overview, noColor: true });
+      expect(output).toContain('>feat/a  #42 ✔ approved · ✔ ci');
+      expect(output).toContain('1 hour ago');
+      expect(output).toContain('aaaa1111');
+      // No PR but still gets commit info
+      expect(output).toContain('*feat/b (Current)*  just now · bbbb2222');
+      // Root keeps the parens label and gets commit info appended
+      expect(output).toMatch(/^\(main\) {2}2 days ago · mainabcd/);
+      // No ANSI escape codes in no-color mode
+      expect(output.includes('\x1b')).toBe(false);
+    });
+
+    it('hides PR annotations under --no-prs but keeps CI + commit', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const output = await log(dir, {
+        overview,
+        prs: false,
+        noColor: true,
+      });
+      expect(output).not.toContain('#42');
+      expect(output).not.toContain('approved');
+      expect(output).toContain('✔ ci');
+      expect(output).toContain('1 hour ago');
+    });
+
+    it('hides CI annotations under --no-ci but keeps PR + commit', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const output = await log(dir, {
+        overview,
+        ci: false,
+        noColor: true,
+      });
+      expect(output).toContain('#42');
+      expect(output).toContain('✔ approved');
+      expect(output).not.toContain('✔ ci');
+      expect(output).toContain('1 hour ago');
+    });
+
+    it('omits PR JSON fields under --no-prs but keeps CI and commit metadata', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const json = await logJson(dir, { overview, prs: false });
+      const featA = json.stacks[0]?.root?.children[0];
+      expect(featA).not.toHaveProperty('prState');
+      expect(featA).not.toHaveProperty('prTitle');
+      expect(featA).not.toHaveProperty('reviewDecision');
+      expect(featA).not.toHaveProperty('draft');
+      expect(featA?.ciState).toBe('SUCCESS');
+      expect(featA?.committedRel).toBe('1 hour ago');
+      expect(featA?.shortSha).toBe('aaaa1111');
+      // Branch with overview but no PR also drops the explicit NONE fields.
+      const featB = featA?.children[0];
+      expect(featB).not.toHaveProperty('prState');
+      expect(featB).not.toHaveProperty('reviewDecision');
+      expect(featB).not.toHaveProperty('draft');
+      expect(featB?.ciState).toBe('NONE');
+    });
+
+    it('omits CI JSON field under --no-ci but keeps PR fields and commit metadata', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const json = await logJson(dir, { overview, ci: false });
+      const featA = json.stacks[0]?.root?.children[0];
+      expect(featA?.prState).toBe('OPEN');
+      expect(featA?.reviewDecision).toBe('APPROVED');
+      expect(featA?.draft).toBe(false);
+      expect(featA).not.toHaveProperty('ciState');
+      expect(featA?.committedRel).toBe('1 hour ago');
+    });
+
+    it('renders the correct PR-state glyph for draft, merged, closed, and changes-requested', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: null,
+            ciRollup: 'NONE',
+            // Draft beats reviewDecision in the glyph hierarchy.
+            isDraft: true,
+          },
+        }),
+      ]);
+      let output = await log(dir, { overview, noColor: true });
+      expect(output).toContain('✏ draft');
+
+      overview.branches[1].pr = {
+        number: 42,
+        title: 'feat: a',
+        state: 'MERGED',
+        baseRefName: 'main',
+        mergedAt: '2026-05-23T00:00:00Z',
+        reviewDecision: 'APPROVED',
+        ciRollup: 'SUCCESS',
+        isDraft: false,
+      };
+      output = await log(dir, { overview, noColor: true });
+      expect(output).toContain('⤓ merged');
+
+      overview.branches[1].pr = {
+        number: 42,
+        title: 'feat: a',
+        state: 'CLOSED',
+        baseRefName: 'main',
+        mergedAt: null,
+        reviewDecision: null,
+        ciRollup: 'NONE',
+        isDraft: false,
+      };
+      output = await log(dir, { overview, noColor: true });
+      expect(output).toContain('⊘ closed');
+
+      overview.branches[1].pr = {
+        number: 42,
+        title: 'feat: a',
+        state: 'OPEN',
+        baseRefName: 'main',
+        mergedAt: null,
+        reviewDecision: 'CHANGES_REQUESTED',
+        ciRollup: 'FAILURE',
+        isDraft: false,
+      };
+      output = await log(dir, { overview, noColor: true });
+      expect(output).toContain('✗ changes requested');
+      expect(output).toContain('✗ ci');
+    });
+
+    it('falls back to the plain region-only tree when overview is null', async () => {
+      await seedLinearStack();
+      const output = await log(dir, { overview: null });
+      // Must match the existing region-only output exactly.
+      expect(output).toBe('(main)\n  └─ >feat/a\n       └─ *feat/b (Current)*');
+    });
+
+    it('emits the rich JSON fields when overview is provided', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const json = await logJson(dir, { overview });
+      const root = json.stacks[0]?.root;
+      const featA = root?.children[0];
+      expect(featA?.prState).toBe('OPEN');
+      expect(featA?.prTitle).toBe('feat: a');
+      expect(featA?.reviewDecision).toBe('APPROVED');
+      expect(featA?.ciState).toBe('SUCCESS');
+      expect(featA?.draft).toBe(false);
+      expect(featA?.committedRel).toBe('1 hour ago');
+      expect(featA?.shortSha).toBe('aaaa1111');
+      // frozen is reserved for DUB-37; stays undefined for now.
+      expect(featA?.frozen).toBeUndefined();
+      // Tracked branch present in overview but with no PR — explicit NONE,
+      // not undefined, so consumers can distinguish "no overview" from "no PR".
+      const featB = featA?.children[0];
+      expect(featB?.prState).toBe('NONE');
+      expect(featB?.ciState).toBe('NONE');
+      expect(featB?.draft).toBe(false);
+      expect(featB?.reviewDecision).toBeNull();
+
+      expect(json.overviewTruncated).toBe(false);
+    });
+
+    it('omits rich JSON fields when overview is absent so consumers see additive-only shape', async () => {
+      await seedLinearStack();
+      const json = await logJson(dir, {});
+      const featA = json.stacks[0]?.root?.children[0];
+      expect(featA?.name).toBe('feat/a');
+      // Old fields still present
+      expect(featA?.prNumber).toBe(42);
+      expect(featA?.prLink).toBe('https://github.com/example/repo/pull/42');
+      expect(featA?.region).toBe('ancestor');
+      // New fields strictly omitted
+      expect(featA).not.toHaveProperty('prState');
+      expect(featA).not.toHaveProperty('ciState');
+      expect(featA).not.toHaveProperty('committedRel');
+      expect(json.overviewTruncated).toBeUndefined();
+    });
+
+    it('applies ANSI styling to suffix tokens when noColor is false', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const originalLevel = chalk.level;
+      chalk.level = 1;
+      try {
+        const output = await log(dir, { overview, noColor: false });
+        // ANSI escape codes appear in the suffix.
+        expect(output.includes('\x1b')).toBe(true);
+        // But the styling decision is local to the suffix chalk instance;
+        // explicit noColor: true on the same input strips them.
+        const noAnsi = await log(dir, { overview, noColor: true });
+        expect(noAnsi.includes('\x1b')).toBe(false);
+      } finally {
+        chalk.level = originalLevel;
+      }
+    });
+
+    it('renders rich annotations on a branching tree', async () => {
+      await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+      await gitInRepo(dir, ['checkout', 'main']);
+      await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+      const state: DubState = {
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/b',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      };
+      await writeState(state, dir);
+
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 10,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'REVIEW_REQUIRED',
+            ciRollup: 'PENDING',
+            isDraft: false,
+          },
+        }),
+        makeBranchOverview('feat/b', 'main', {
+          pr: {
+            number: 11,
+            title: 'feat: b',
+            state: 'MERGED',
+            baseRefName: 'main',
+            mergedAt: '2026-05-23T00:00:00Z',
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+        }),
+      ]);
+
+      const output = await log(dir, { overview, noColor: true });
+      // feat/a (sibling of current feat/b) gets "review pending"
+      expect(output).toContain('~feat/a~  #10 ⏳ review pending · ⏳ ci');
+      // feat/b (current) gets "merged"
+      expect(output).toContain('*feat/b (Current)*  #11 ⤓ merged · ✔ ci');
     });
   });
 
