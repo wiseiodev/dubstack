@@ -241,8 +241,7 @@ export async function flow(
   );
 
   const submitted = await resolvedDeps.submit(cwd, false, {
-    path: 'current',
-    fix: false,
+    downstack: true,
     summaryOverrides: new Map([[generated.branch, prDescription]]),
   });
 

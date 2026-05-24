@@ -65,7 +65,7 @@ Use these commands from the repo root:
 
 - `create` auto-initializes state via `ensureState(...)`.
 - `restack` and `submit` require valid tracked stack state and should fail clearly when context is invalid.
-- `submit` defaults to current-path submission; `--path stack` requires a linear stack (one child per parent).
+- `submit` defaults to downstack (current branch + ancestors); use `--upstack`, `--stack`, or `--branch <name>` for other scopes. Scope flags are mutually exclusive. Legacy `--path current|stack` still works in v1.x with a deprecation warning.
 - `undo` remains single-level.
 - Error text is part of UX and often asserted in tests; change carefully.
 

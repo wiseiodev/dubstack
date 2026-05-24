@@ -53,7 +53,7 @@ describe('flow integration', () => {
       pushed: ['feat/flow-real'],
       created: ['feat/flow-real'],
       updated: [],
-      path: 'current',
+      scope: { kind: 'downstack' },
       dryRun: false,
     });
 
@@ -95,8 +95,7 @@ describe('flow integration', () => {
     expect(trackedFile).toContain('flowFeature = true');
 
     expect(submit).toHaveBeenCalledWith(dir, false, {
-      path: 'current',
-      fix: false,
+      downstack: true,
       summaryOverrides: new Map([
         ['feat/flow-real', '## Summary\n\nAdds real flow coverage.'],
       ]),

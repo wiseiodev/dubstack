@@ -160,7 +160,7 @@ beforeEach(() => {
     pushed: ['feat/b'],
     created: [],
     updated: ['feat/b'],
-    path: 'current',
+    scope: { kind: 'downstack' },
     dryRun: false,
   });
 });
@@ -265,8 +265,7 @@ describe('postMerge', () => {
     );
     expect(mockRestack).toHaveBeenCalled();
     expect(mockSubmit).toHaveBeenCalledWith('/repo', false, {
-      path: 'stack',
-      fix: true,
+      stack: true,
     });
     expect(mockCheckoutBranch).toHaveBeenCalledWith('main', '/repo');
   });
@@ -328,14 +327,16 @@ describe('postMerge', () => {
           `expected surviving child checkout, got ${lastCheckout}`,
         );
       }
-      if (options?.path !== 'stack') {
-        throw new Error(`expected full-stack refresh, got ${options?.path}`);
+      if (options?.stack !== true) {
+        throw new Error(
+          `expected full-stack refresh, got ${JSON.stringify(options)}`,
+        );
       }
       return {
         pushed: ['feat/b', 'feat/c'],
         created: [],
         updated: ['feat/b', 'feat/c'],
-        path: 'stack',
+        scope: { kind: 'stack' },
         dryRun: false,
       };
     });
@@ -407,7 +408,7 @@ describe('postMerge', () => {
       pushed: ['feat/a'],
       created: [],
       updated: ['feat/a'],
-      path: 'current',
+      scope: { kind: 'downstack' },
       dryRun: false,
     });
 

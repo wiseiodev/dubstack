@@ -21,7 +21,7 @@ describe('flow', () => {
       pushed: ['feat/flow-preview'],
       created: ['feat/flow-preview'],
       updated: [],
-      path: 'current',
+      scope: { kind: 'downstack' },
       dryRun: false,
     });
     const commitStagedFromFile = vi.fn().mockResolvedValue(undefined);
@@ -87,8 +87,7 @@ describe('flow', () => {
       '/repo',
     );
     expect(submit).toHaveBeenCalledWith('/repo', false, {
-      path: 'current',
-      fix: false,
+      downstack: true,
       summaryOverrides: new Map([
         ['feat/flow-preview', '## Summary\n\nGenerated PR description'],
       ]),
@@ -146,7 +145,7 @@ describe('flow', () => {
           pushed: ['feat/flow-preview'],
           created: ['feat/flow-preview'],
           updated: [],
-          path: 'current',
+          scope: { kind: 'downstack' },
           dryRun: false,
         }),
         commitStagedFromFile,

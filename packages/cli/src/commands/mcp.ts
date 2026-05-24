@@ -17,7 +17,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
-import { type SubmitPathMode, submit } from './submit';
+import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
 
@@ -82,7 +82,15 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.history': ['limit'],
   'dubstack.create': ['name', 'message', 'ai'],
   'dubstack.modify': ['message', 'commit', 'all'],
-  'dubstack.submit': ['dryRun', 'path', 'fix'],
+  'dubstack.submit': [
+    'dryRun',
+    'upstack',
+    'downstack',
+    'stack',
+    'branch',
+    'path',
+    'fix',
+  ],
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
@@ -234,7 +242,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.submit',
     description:
-      'Push branches in the current path or stack and create or update GitHub PRs.',
+      'Push branches in the chosen scope and create or update GitHub PRs.',
     mutating: true,
     inputSchema: {
       type: 'object',
@@ -244,14 +252,32 @@ const TOOLS: ToolDefinition[] = [
           description:
             'Preview what would happen without pushing or mutating PRs.',
         },
+        upstack: {
+          type: 'boolean',
+          description: 'Submit current branch and all descendants.',
+        },
+        downstack: {
+          type: 'boolean',
+          description:
+            'Submit current branch and ancestors to trunk (the default).',
+        },
+        stack: {
+          type: 'boolean',
+          description: 'Submit the full tree from trunk.',
+        },
+        branch: {
+          type: 'string',
+          description: 'Submit only the specified branch.',
+        },
         path: {
           type: 'string',
           enum: ['current', 'stack'],
-          description: "Submit scope: 'current' (default) or 'stack'.",
+          description:
+            "[deprecated] Use 'downstack' (replaces 'current') or 'stack'.",
         },
         fix: {
           type: 'boolean',
-          description: 'Apply safe remediation for common submit blockers.',
+          description: '[deprecated] No-op alias retained for compatibility.',
         },
       },
       additionalProperties: false,
@@ -641,7 +667,11 @@ async function callTool(
     case 'dubstack.submit':
       return mutatingToolResult(() =>
         submit(cwd, optionalBoolean(args.dryRun) ?? false, {
-          path: optionalSubmitPath(args.path) ?? 'current',
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+          stack: optionalBoolean(args.stack),
+          branch: optionalString(args.branch),
+          path: optionalSubmitPath(args.path),
           fix: optionalBoolean(args.fix) ?? false,
         }),
       );
@@ -736,7 +766,7 @@ async function mutatingToolResult<T>(
   }
 }
 
-function optionalSubmitPath(value: unknown): SubmitPathMode | undefined {
+function optionalSubmitPath(value: unknown): 'current' | 'stack' | undefined {
   if (value === 'current' || value === 'stack') return value;
   return undefined;
 }

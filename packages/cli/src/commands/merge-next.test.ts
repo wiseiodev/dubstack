@@ -85,7 +85,7 @@ function makePlan(opts: { branches: BranchSpec[]; currentBranch: string }) {
     stack: { id: 'stack-1', branches },
     currentBranch: opts.currentBranch,
     rootBranch: root?.name ?? 'main',
-    path: 'stack',
+    scope: { kind: 'stack' },
     branches: branches.filter((b) => b.type !== 'root'),
   };
 }

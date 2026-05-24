@@ -125,6 +125,10 @@ dub abort
 
 ```bash
 dub ss
+dub submit
+dub submit --upstack
+dub submit --stack
+dub submit --branch feat/api
 dub submit --dry-run
 dub submit --ai
 dub submit --no-ai

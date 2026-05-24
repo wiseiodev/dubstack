@@ -42,12 +42,25 @@ import {
 } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
 
+/** @deprecated Use SubmitScope. Retained for the v1 `--path` deprecation window. */
 export type SubmitPathMode = 'current' | 'stack';
+
+/** Scope of branches submit/get-plan operates over. */
+export type SubmitScope =
+  | { kind: 'downstack' }
+  | { kind: 'upstack' }
+  | { kind: 'stack' }
+  | { kind: 'branch'; branch: string };
 
 export interface SubmitOptions {
   ai?: boolean;
   noAi?: boolean;
+  /** @deprecated Use upstack/downstack/stack/branch. Emits a deprecation warning. */
   path?: SubmitPathMode;
+  upstack?: boolean;
+  downstack?: boolean;
+  stack?: boolean;
+  branch?: string;
   fix?: boolean;
   summaryOverrides?: Map<string, string>;
 }
@@ -57,7 +70,7 @@ export interface SubmitPlan {
   stack: Stack;
   currentBranch: string;
   rootBranch: string;
-  path: SubmitPathMode;
+  scope: SubmitScope;
   branches: Branch[];
 }
 
@@ -65,7 +78,7 @@ export interface SubmitResult {
   pushed: string[];
   created: string[];
   updated: string[];
-  path: SubmitPathMode;
+  scope: SubmitScope;
   dryRun: boolean;
 }
 
@@ -126,10 +139,7 @@ export async function submit(
   await ensureGhInstalled();
   await checkGhAuth();
 
-  const scopeLabel =
-    plan.path === 'stack'
-      ? `the stack containing '${plan.currentBranch}'`
-      : `the path from '${plan.currentBranch}'`;
+  const scopeLabel = describeScope(plan.scope, plan.currentBranch);
   console.log(
     `Submitting ${plan.branches.length} branch(es) in ${scopeLabel} onto trunk '${plan.rootBranch}'.`,
   );
@@ -141,7 +151,7 @@ export async function submit(
     pushed: [],
     created: [],
     updated: [],
-    path: plan.path,
+    scope: plan.scope,
     dryRun,
   };
   const prMap = new Map<string, PrInfo>();
@@ -264,11 +274,25 @@ export async function getSubmitPlan(
   cwd: string,
   options: SubmitOptions = {},
 ): Promise<SubmitPlan> {
+  const scope = resolveScope(options);
   const state = await readState(cwd);
   const currentBranch = await getCurrentBranch(cwd);
-  const stack = findStackForBranch(state, currentBranch);
+
+  // For --branch <name>, resolve the stack containing that branch instead of
+  // requiring the current branch to be tracked.
+  const targetBranch = scope.kind === 'branch' ? scope.branch : currentBranch;
+  const stack = findStackForBranch(state, targetBranch);
 
   if (!stack) {
+    if (scope.kind === 'branch') {
+      throw new DubError(
+        `Branch '${scope.branch}' is not part of any tracked stack.`,
+        [
+          `Run 'dub track ${scope.branch} --parent <branch>' to track it.`,
+          "Run 'dub log' to list tracked branches.",
+        ],
+      );
+    }
     throw new DubError(`Branch '${currentBranch}' is not part of any stack.`, [
       "Run 'dub create <branch>' to start a stack from this branch.",
       "Run 'dub track <branch>' to track this branch on a parent.",
@@ -277,23 +301,29 @@ export async function getSubmitPlan(
   }
 
   const ordered = topologicalOrder(stack);
-  const currentEntry = ordered.find((b) => b.name === currentBranch);
-  if (currentEntry?.type === 'root') {
+  const targetEntry = ordered.find((b) => b.name === targetBranch);
+  if (targetEntry?.type === 'root') {
+    if (scope.kind === 'branch') {
+      throw new DubError(`Cannot submit root branch '${scope.branch}'.`, [
+        'Choose a non-root tracked branch name.',
+      ]);
+    }
     throw new DubError('Cannot submit from a root branch.', [
       "Run 'dub up' to move to the next branch above this trunk.",
       "Run 'dub checkout <branch>' to switch to a stacked branch.",
     ]);
   }
 
-  const resolvedPath: SubmitPathMode = options.path ?? 'current';
-  const branchesWithRoot =
-    resolvedPath === 'stack'
-      ? ordered
-      : getCurrentPathBranches(stack, currentBranch);
+  const branchesWithRoot = selectScopedBranches(
+    stack,
+    ordered,
+    scope,
+    targetBranch,
+  );
 
   const rootBranch =
-    branchesWithRoot.find((branch) => branch.type === 'root' || !branch.parent)
-      ?.name ?? '(unknown)';
+    ordered.find((branch) => branch.type === 'root' || !branch.parent)?.name ??
+    '(unknown)';
   const branches = branchesWithRoot.filter((b) => b.type !== 'root');
 
   return {
@@ -301,12 +331,118 @@ export async function getSubmitPlan(
     stack,
     currentBranch,
     rootBranch,
-    path: resolvedPath,
+    scope,
     branches,
   };
 }
 
-function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
+/**
+ * Validates flag mutual exclusion and resolves SubmitOptions into a SubmitScope.
+ * Emits a deprecation warning for the legacy `--path` flag.
+ */
+export function resolveScope(options: SubmitOptions): SubmitScope {
+  const flags: Array<{ name: string; set: boolean }> = [
+    { name: '--upstack', set: options.upstack === true },
+    { name: '--downstack', set: options.downstack === true },
+    { name: '--stack', set: options.stack === true },
+    { name: '--branch', set: options.branch != null },
+    { name: '--path', set: options.path != null },
+  ];
+  const activeFlags = flags.filter((f) => f.set).map((f) => f.name);
+  if (activeFlags.length > 1) {
+    const recovery = [
+      'Pass exactly one of --upstack, --downstack, --stack, --branch <name>.',
+      'Omit all scope flags to submit the current branch and its ancestors (default).',
+    ];
+    if (activeFlags.includes('--path')) {
+      recovery.push(
+        "Drop '--path' — it is deprecated and cannot be combined with the new scope flags.",
+      );
+    }
+    throw new DubError(
+      `Scope flags are mutually exclusive: ${activeFlags.join(', ')}.`,
+      recovery,
+    );
+  }
+
+  if (options.path != null) {
+    if (options.path === 'current') {
+      console.warn(
+        "⚠ '--path current' is deprecated. Use '--downstack' instead. This will stop working in v2.",
+      );
+      return { kind: 'downstack' };
+    }
+    if (options.path === 'stack') {
+      console.warn(
+        "⚠ '--path stack' is deprecated. Use '--stack' instead. This will stop working in v2.",
+      );
+      return { kind: 'stack' };
+    }
+  }
+
+  if (options.upstack) return { kind: 'upstack' };
+  if (options.stack) return { kind: 'stack' };
+  if (options.branch != null) return { kind: 'branch', branch: options.branch };
+  // Default and explicit --downstack both map to downstack.
+  return { kind: 'downstack' };
+}
+
+function selectScopedBranches(
+  stack: Stack,
+  ordered: Branch[],
+  scope: SubmitScope,
+  targetBranch: string,
+): Branch[] {
+  if (scope.kind === 'stack') return ordered;
+  if (scope.kind === 'branch') {
+    const entry = stack.branches.find((b) => b.name === scope.branch);
+    return entry ? [entry] : [];
+  }
+  if (scope.kind === 'upstack') {
+    return getUpstackBranches(stack, targetBranch);
+  }
+  return getDownstackBranches(stack, targetBranch);
+}
+
+function getUpstackBranches(stack: Stack, startBranch: string): Branch[] {
+  const childMap = new Map<string, Branch[]>();
+  for (const branch of stack.branches) {
+    if (branch.parent) {
+      const list = childMap.get(branch.parent) ?? [];
+      list.push(branch);
+      childMap.set(branch.parent, list);
+    }
+  }
+  for (const children of childMap.values()) {
+    children.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const start = stack.branches.find((b) => b.name === startBranch);
+  if (!start) return [];
+  const result: Branch[] = [];
+  const queue: Branch[] = [start];
+  const seen = new Set<string>();
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) continue;
+    if (seen.has(current.name)) {
+      throw new DubError(
+        `Stack metadata is invalid: cycle detected while walking upstack from '${startBranch}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack and surface the bad parent link.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch.",
+        ],
+      );
+    }
+    seen.add(current.name);
+    result.push(current);
+    const children = childMap.get(current.name) ?? [];
+    queue.push(...children);
+  }
+  return result;
+}
+
+function getDownstackBranches(stack: Stack, currentBranch: string): Branch[] {
   const branchMap = new Map(
     stack.branches.map((branch) => [branch.name, branch]),
   );
@@ -347,6 +483,19 @@ function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
   }
 
   return path.reverse();
+}
+
+function describeScope(scope: SubmitScope, currentBranch: string): string {
+  switch (scope.kind) {
+    case 'stack':
+      return `the stack containing '${currentBranch}'`;
+    case 'upstack':
+      return `the upstack from '${currentBranch}'`;
+    case 'branch':
+      return `branch '${scope.branch}'`;
+    case 'downstack':
+      return `the downstack from '${currentBranch}'`;
+  }
 }
 
 async function updateAllPrBodies(

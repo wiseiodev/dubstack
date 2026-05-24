@@ -1,11 +1,11 @@
 import { doctor } from './doctor';
-import { getSubmitPlan } from './submit';
+import { getSubmitPlan, type SubmitScope } from './submit';
 
 export interface ReadyResult {
   ready: boolean;
   checkedBranch: string;
   submitBranches: string[];
-  submitPath: 'current' | 'stack' | null;
+  submitScope: SubmitScope | null;
   rootBranch: string | null;
   blockers: string[];
 }
@@ -15,13 +15,13 @@ export async function ready(cwd: string): Promise<ReadyResult> {
   const blockers: string[] = doctorResult.issues.map((issue) => issue.code);
 
   let submitBranches: string[] = [];
-  let submitPath: 'current' | 'stack' | null = null;
+  let submitScope: SubmitScope | null = null;
   let rootBranch: string | null = null;
 
   try {
-    const plan = await getSubmitPlan(cwd, { path: 'current' });
+    const plan = await getSubmitPlan(cwd, { downstack: true });
     submitBranches = plan.branches.map((branch) => branch.name);
-    submitPath = plan.path;
+    submitScope = plan.scope;
     rootBranch = plan.rootBranch;
     if (submitBranches.length === 0) {
       blockers.push('submit-preflight');
@@ -34,7 +34,7 @@ export async function ready(cwd: string): Promise<ReadyResult> {
     ready: blockers.length === 0,
     checkedBranch: doctorResult.checkedBranch,
     submitBranches,
-    submitPath,
+    submitScope,
     rootBranch,
     blockers: Array.from(new Set(blockers)),
   };

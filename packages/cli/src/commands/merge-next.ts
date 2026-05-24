@@ -69,7 +69,7 @@ export async function mergeNext(
   await ensureGhInstalled();
   await checkGhAuth();
 
-  const plan = await getSubmitPlan(cwd, { path: 'stack' });
+  const plan = await getSubmitPlan(cwd, { stack: true });
   const batch = await getAllPrSyncInfoBatch(cwd);
   const depthByName = computeDepths(plan.stack);
   const currentPathSet = currentPathBranchNames(plan.stack, plan.currentBranch);
