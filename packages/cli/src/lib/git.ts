@@ -341,6 +341,10 @@ export async function softResetHead(steps: number, cwd: string): Promise<void> {
         `Failed to soft-reset HEAD by ${steps} commit(s).`,
         readGitCommandOutput(error),
       ),
+      [
+        `Run 'git status' to confirm the branch is in a state where 'git reset --soft HEAD~${steps}' is valid.`,
+        `Run 'git log --oneline -n ${steps + 1}' to verify there are at least ${steps} commit(s) above the reset target.`,
+      ],
     );
   }
 }
