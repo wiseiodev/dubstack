@@ -1553,7 +1553,7 @@ Examples:
       if (result.pushed && result.prNumber != null) {
         console.log(
           chalk.dim(
-            `  ↳ Pushed '${result.newName}' to origin (PR #${result.prNumber} remains linked to the old head until you re-target)`,
+            `  ↳ Pushed '${result.newName}' to origin (PR #${result.prNumber} still points at '${result.oldName}' — GitHub doesn't allow editing a PR's head, so close it and rerun 'dub submit' to open a fresh PR on the renamed branch)`,
           ),
         );
       }

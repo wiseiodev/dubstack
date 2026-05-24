@@ -57,7 +57,7 @@ export async function readUndoEntry(cwd: string): Promise<UndoEntry> {
   const undoPath = await getUndoPath(cwd);
   if (!fs.existsSync(undoPath)) {
     throw new DubError('Nothing to undo.', [
-      "DubStack tracks only the last 'create' or 'restack'; perform one to enable undo.",
+      "DubStack tracks only the last 'create', 'restack', or 'rename'; perform one to enable undo.",
     ]);
   }
   const raw = fs.readFileSync(undoPath, 'utf-8');

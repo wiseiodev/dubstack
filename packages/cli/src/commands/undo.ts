@@ -21,12 +21,17 @@ interface UndoResult {
 }
 
 /**
- * Undoes the last `dub create` or `dub restack` operation.
+ * Undoes the last `dub create`, `dub restack`, or `dub rename` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
  * - **restack**: Resets every rebased branch to its pre-rebase tip via `git branch -f`,
  *   restores state, checks out the previous branch.
+ * - **rename**: Renames the branch back to its original name via `git branch -m`, reverses
+ *   the `refs/dubstack/last-pushed/<branch>` migration, and restores state. Refuses if a
+ *   branch with the original name has been re-created in the meantime. Any push that
+ *   happened during the rename is NOT reverted — the local branch is restored, but the
+ *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *
