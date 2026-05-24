@@ -1,8 +1,8 @@
 import { DubError } from './errors';
-import { execa } from './exec';
 import {
   checkoutBranch,
   deleteLocalBranch,
+  fastForwardBranchToRef,
   formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCommitSubjectsBetween,
@@ -14,13 +14,23 @@ import {
 } from './git';
 import { assertStateInvariants } from './invariants';
 import { detectActiveOperation } from './operation-state';
-import { findStackForBranch, readState, type Stack, writeState } from './state';
+import {
+  type Branch,
+  findStackForBranch,
+  readState,
+  type Stack,
+  writeState,
+} from './state';
 
 export interface FoldPreview {
   branch: string;
   parent: string;
   childrenReparented: string[];
-  squashedCommits: number;
+  /** Number of commits that will move from the branch onto its parent
+   * (whether they end up as separate commits or one squash commit). */
+  foldedCommits: number;
+  /** Open or closed PR number recorded in state for the folded branch, if
+   * any. Caller may want to mention it in a confirmation prompt. */
   prNumber: number | null;
 }
 
@@ -35,20 +45,30 @@ export interface FoldResult {
   branch: string;
   parent: string;
   newParentTip: string;
-  squashedCommits: number;
+  /** Number of commits that moved from the folded branch onto its parent. */
+  foldedCommits: number;
   childrenReparented: string[];
   prNumber: number | null;
+}
+
+interface ResolvedFoldTarget {
+  state: { stacks: Stack[] };
+  stack: Stack;
+  branch: Branch;
+  branchName: string;
+  parent: string;
 }
 
 /**
  * Resolves the branch to fold and validates it is foldable. Shared by the
  * preview-only path (so we can ask the user to confirm before mutating
- * anything) and the apply path.
+ * anything) and the apply path — kept as the single source of truth for
+ * "is this branch foldable?" so both paths stay in lockstep.
  */
 async function resolveFoldTarget(
   cwd: string,
   branchArg: string | undefined,
-): Promise<{ stack: Stack; branchName: string; parent: string }> {
+): Promise<ResolvedFoldTarget> {
   const branchName = branchArg ?? (await getCurrentBranch(cwd));
   const state = await readState(cwd);
   const stack = findStackForBranch(state, branchName);
@@ -81,7 +101,7 @@ async function resolveFoldTarget(
       ],
     );
   }
-  return { stack, branchName, parent: branch.parent };
+  return { state, stack, branch, branchName, parent: branch.parent };
 }
 
 /**
@@ -93,7 +113,7 @@ export async function getFoldPreview(
   cwd: string,
   options: FoldOptions = {},
 ): Promise<FoldPreview> {
-  const { stack, branchName, parent } = await resolveFoldTarget(
+  const { stack, branch, branchName, parent } = await resolveFoldTarget(
     cwd,
     options.branch,
   );
@@ -102,7 +122,7 @@ export async function getFoldPreview(
     .map((b) => b.name)
     .sort();
 
-  let squashedCommits = 0;
+  let foldedCommits = 0;
   try {
     const parentTip = await getBranchTip(parent, cwd);
     const branchTip = await getBranchTip(branchName, cwd);
@@ -112,18 +132,18 @@ export async function getFoldPreview(
         branchTip,
         cwd,
       );
-      squashedCommits = subjects.length;
+      foldedCommits = subjects.length;
     }
   } catch {
-    squashedCommits = 0;
+    foldedCommits = 0;
   }
 
   return {
     branch: branchName,
     parent,
     childrenReparented,
-    squashedCommits,
-    prNumber: null,
+    foldedCommits,
+    prNumber: branch.pr_number,
   };
 }
 
@@ -173,38 +193,13 @@ export async function foldBranch(
     ]);
   }
 
-  const state = await readState(cwd);
-  const branchName = options.branch ?? (await getCurrentBranch(cwd));
-  const stack = findStackForBranch(state, branchName);
-  if (!stack) {
-    throw new DubError(`Branch '${branchName}' is not tracked.`, [
-      `Run 'dub track ${branchName} --parent <branch>' to track it.`,
-      "Run 'dub log' to see currently tracked branches.",
-    ]);
-  }
-  const branch = stack.branches.find((b) => b.name === branchName);
-  if (!branch) {
-    throw new DubError(
-      `Branch '${branchName}' is missing from tracked stack.`,
-      ["Run 'dub doctor' to inspect the stack for metadata damage."],
-    );
-  }
-  if (branch.type === 'root' || !branch.parent) {
-    throw new DubError(`Cannot fold root branch '${branchName}'.`, [
-      "Run 'dub log' to inspect the stack and pick a non-root branch.",
-    ]);
-  }
-  const parentName = branch.parent;
-  const parentBranchMeta = stack.branches.find((b) => b.name === parentName);
-  if (parentBranchMeta?.type === 'root') {
-    throw new DubError(
-      `Cannot fold '${branchName}' into trunk '${parentName}'.`,
-      [
-        `Run 'dub merge-next' to land '${branchName}' onto trunk via PR instead.`,
-        "Run 'dub log' to inspect the stack.",
-      ],
-    );
-  }
+  const {
+    state,
+    stack,
+    branch,
+    branchName,
+    parent: parentName,
+  } = await resolveFoldTarget(cwd, options.branch);
 
   const worktreeCheckouts = await listWorktreeCheckouts(cwd);
   const branchWorktree = worktreeCheckouts.get(branchName);
@@ -218,6 +213,20 @@ export async function foldBranch(
           'dub fold',
         ),
         `Close the worktree at '${branchWorktree}' or fold from that worktree instead.`,
+      ],
+    );
+  }
+  const parentWorktree = worktreeCheckouts.get(parentName);
+  if (parentWorktree) {
+    throw new DubError(
+      `Cannot fold into '${parentName}': it is checked out in another worktree.`,
+      [
+        formatWorktreeCheckoutSkipMessage(
+          parentName,
+          parentWorktree,
+          'dub fold',
+        ),
+        `Close the worktree at '${parentWorktree}' or run 'dub fold' from that worktree.`,
       ],
     );
   }
@@ -257,7 +266,7 @@ export async function foldBranch(
     .map((b) => b.name)
     .sort();
   const subjects = await getCommitSubjectsBetween(parentTip, branchTip, cwd);
-  const squashedCommits = subjects.length;
+  const foldedCommits = subjects.length;
 
   const originalBranch = await getCurrentBranch(cwd);
   if (originalBranch !== parentName) {
@@ -268,7 +277,21 @@ export async function foldBranch(
     const message = buildSquashMessage(branchName, subjects);
     await mergeSquashAndCommit(branchName, message, cwd);
   } else {
-    await execa('git', ['merge', '--ff-only', branchName], { cwd });
+    const fastForwarded = await fastForwardBranchToRef(
+      parentName,
+      branchName,
+      cwd,
+    );
+    if (!fastForwarded) {
+      throw new DubError(
+        `Cannot fold '${branchName}' into '${parentName}': fast-forward refused.`,
+        [
+          `Run 'dub restack' to bring '${branchName}' up to date with '${parentName}', then retry.`,
+          `Run 'git merge --ff-only ${branchName}' manually on '${parentName}' to inspect the underlying error.`,
+          `Rerun 'dub fold --squash' to collapse '${branchName}' into one commit instead.`,
+        ],
+      );
+    }
   }
 
   const newParentTip = await getBranchTip(parentName, cwd);
@@ -299,7 +322,7 @@ export async function foldBranch(
     branch: branchName,
     parent: parentName,
     newParentTip,
-    squashedCommits,
+    foldedCommits,
     childrenReparented: children,
     prNumber: branch.pr_number,
   };

@@ -64,7 +64,7 @@ describe('dub fold', () => {
     expect(result.branch).toBe('feat/child');
     expect(result.parent).toBe('feat/base');
     expect(result.childrenReparented).toEqual([]);
-    expect(result.squashedCommits).toBe(1);
+    expect(result.foldedCommits).toBe(1);
 
     // feat/child branch is gone locally
     const branches = await listBranches();
@@ -144,7 +144,7 @@ describe('dub fold', () => {
     const result = await fold(dir, { force: true, squash: true });
 
     expect(result.restacked).toBe(true);
-    expect(result.squashedCommits).toBe(2);
+    expect(result.foldedCommits).toBe(2);
 
     const newBaseTip = await getBranchTip('feat/base', dir);
     const leafParentSha = (
@@ -176,7 +176,7 @@ describe('dub fold', () => {
 
     const result = await fold(dir, { force: true, squash: true });
 
-    expect(result.squashedCommits).toBe(3);
+    expect(result.foldedCommits).toBe(3);
 
     // Count commits on feat/base post-fold using rev-list (one SHA per commit,
     // not per message line). Pre-fold parent has: [init, init dubstack,
@@ -350,6 +350,29 @@ describe('dub fold', () => {
     await expect(fold(dir, { branch: 'main', force: true })).rejects.toThrow(
       /Cannot fold root branch 'main'/,
     );
+  });
+
+  it('rejects fold when the parent branch is checked out in another worktree', async () => {
+    await create('feat/base', dir);
+    await commitFile('base.txt', 'base', 'base-commit');
+
+    await create('feat/child', dir);
+    await commitFile('child.txt', 'child', 'child-commit');
+
+    const worktreePath = path.join(
+      path.dirname(dir),
+      `${path.basename(dir)}-parent-wt`,
+    );
+    await gitInRepo(dir, ['worktree', 'add', worktreePath, 'feat/base']);
+    try {
+      await expect(
+        fold(dir, { branch: 'feat/child', force: true }),
+      ).rejects.toThrow(
+        /Cannot fold into 'feat\/base'.*checked out in another worktree/s,
+      );
+    } finally {
+      await gitInRepo(dir, ['worktree', 'remove', '--force', worktreePath]);
+    }
   });
 
   it('rejects fold when the target branch is checked out in another worktree', async () => {

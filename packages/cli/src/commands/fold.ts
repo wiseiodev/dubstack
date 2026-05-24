@@ -39,7 +39,7 @@ async function confirmFold(
   branch: string,
   parent: string,
   childrenReparented: string[],
-  squashedCommits: number,
+  foldedCommits: number,
   squash: boolean,
 ): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -50,7 +50,7 @@ async function confirmFold(
         ? ` Re-parents ${childrenReparented.length} child(ren): ${childrenReparented.join(', ')}.`
         : '';
     const answer = await rl.question(
-      `Fold '${branch}' (${squashedCommits} commit(s), ${mode}) into '${parent}' and delete '${branch}'?${childSummary} [y/N] `,
+      `Fold '${branch}' (${foldedCommits} commit(s), ${mode}) into '${parent}' and delete '${branch}'?${childSummary} [y/N] `,
     );
     const normalized = answer.trim().toLowerCase();
     return normalized === 'y' || normalized === 'yes';
@@ -63,7 +63,7 @@ const EMPTY_FOLD_RESULT_BASE = {
   branch: '',
   parent: '',
   newParentTip: '',
-  squashedCommits: 0,
+  foldedCommits: 0,
   childrenReparented: [] as string[],
   prNumber: null as number | null,
 };
@@ -86,7 +86,7 @@ export async function fold(
       preview.branch,
       preview.parent,
       preview.childrenReparented,
-      preview.squashedCommits,
+      preview.foldedCommits,
       options.squash ?? false,
     );
     if (!confirmed) {
@@ -94,7 +94,7 @@ export async function fold(
         ...EMPTY_FOLD_RESULT_BASE,
         branch: preview.branch,
         parent: preview.parent,
-        squashedCommits: preview.squashedCommits,
+        foldedCommits: preview.foldedCommits,
         childrenReparented: preview.childrenReparented,
         cancelled: true,
         prClosed: false,

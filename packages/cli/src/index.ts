@@ -594,8 +594,8 @@ Examples:
         return;
       }
       const summary = options.squash
-        ? `squashed ${result.squashedCommits} commit(s)`
-        : `kept ${result.squashedCommits} commit(s)`;
+        ? `squashed ${result.foldedCommits} commit(s)`
+        : `kept ${result.foldedCommits} commit(s)`;
       console.log(
         chalk.green(
           `✔ Folded '${result.branch}' into '${result.parent}' (${summary})`,
