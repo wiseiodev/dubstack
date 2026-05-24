@@ -1,0 +1,853 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-18 - DFS-greedy cleanup with eager re-parenting + idempotent continue-replay journal</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-18</div>
+        <h1>DUB-18 - DFS-greedy cleanup with eager re-parenting + idempotent continue-replay journal</h1>
+        <div class="meta"><span><strong>15</strong> files</span>
+<span><span class="add">+1112</span> / <span class="del">-60</span></span>
+<span>branch <strong>feature/dub-18-dfs-greedy-cleanup-with-eager-re-parenting-idempotent</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Adopt Graphite&#39;s DFS-greedy cleanup algorithm with eager re-parenting and add an idempotent replay journal so `dub continue` can resume cleanup mid-flow.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Replace `dub sync`&#39;s flat cleanup scan with a DFS-greedy algorithm that interleaves re-parent and delete ops, and journal every decision to `.git/dubstack/cleanup-journal.json` before execution so `dub continue` can replay it idempotently after a crash or Ctrl-C.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Cleanup ran as an undifferentiated flat scan: a merged middle branch deleted, its child was reparented as a side-effect — no plan, no log, no replay path.</p>
+<p class="lede">If sync crashed or was cancelled mid-cleanup, the only recovery was to re-run `dub sync` and hope the second pass converged to the same answer.</p>
+<p class="lede">Stacks with multi-branch chains where intermediate branches got merged didn&#39;t get the rest of the chain collapsed greedily — each branch survived independently until its turn came up.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`buildCleanupPlan` returned `{ toDelete, skipped }` — a flat list with no awareness of parent/child relationships.</li>
+<li>Re-parenting happened implicitly inside `removeBranchFromState` when each delete was applied, with no journal of the decision.</li>
+<li>There was no `cleanup` active operation; an interrupted cleanup left the repo half-changed with no way to resume.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`buildCleanupPlan` walks the tree DFS from trunk children, deferring each deletable branch until its child blockers are also deletable, and emits an ordered `operations` list interleaving `reparent` and `delete` ops.</li>
+<li>`sync` writes every op to `.git/dubstack/cleanup-journal.json` *before* executing it; the journal is cleared only on full success.</li>
+<li>`detectActiveOperation` reports `cleanup` when the journal is left behind, and `dub continue` dispatches to `resumeCleanup` for idempotent replay (deletes no-op when the ref is gone, reparents no-op when state already matches, ghost state entries get swept). `dub abort` clears the journal.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/cleanup.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+248</span> <span class="del">-21</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Rewrites `buildCleanupPlan` as a DFS-greedy walk with eager re-parenting. New optional `parentOf`, `isEmpty`, `force` inputs; returns an ordered `operations` list plus per-category `toDelete`/`toReparent`/`skipped`. Backwards compatible when `parentOf` is omitted (flat mode preserves prior behavior).</p>
+    <div class="code"><pre>while (queue.length &gt; 0) {
+  const branch = queue.shift();
+  if (branch == null) break;
+  if (visited.has(branch) || deleted.has(branch)) continue;
+
+  const reason = await getDeleteReason(branch);
+  if (reason != null) {
+    visited.add(branch);
+    const liveChildren = (childrenOf.get(branch) ?? []).filter(
+      (c) =&gt; !deleted.has(c),
+    );
+    pendingDelete.set(branch, { reason, blockers: new Set(liveChildren) });
+    for (let i = liveChildren.length - 1; i &gt;= 0; i--) {
+      const child = liveChildren[i];
+      if (!visited.has(child) &amp;&amp; !deleted.has(child)) queue.unshift(child);
+    }
+    greedilyDeleteUnblocked();
+    continue;
+  }
+  // ... reparent path releases old-parent blocker so greedy delete can fire</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/journal.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+108</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>New atomic append-only journal at `.git/dubstack/cleanup-journal.json`. `start` / `append` / `read` / `clear`; writes go through a tmp + rename so a crash mid-write can&#39;t leave a half-flushed file. `version: 1` validated on read.</p>
+    <div class="code"><pre>const tmp = `${journalPath}.tmp`;
+fs.writeFileSync(tmp, `${JSON.stringify(journal, null, 2)}\n`, &#39;utf8&#39;);
+fs.renameSync(tmp, journalPath);</pre></div>
+  </div>
+</details>
+<details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/cleanup-resume.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+113</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Idempotent journal replay used by `dub continue`. Always cleans the state entry for a delete op (sweeps ghost entries from a crash between `git branch -D` and `writeState`), no-ops when the git ref or parent assignment is already gone/matching, and clears the journal after a successful pass.</p>
+    <div class="code"><pre>if (op.type === &#39;delete&#39;) {
+  const stateChanged = removeBranchFromStacks(state.stacks, op.branch);
+  if (stateChanged) stateDirty = true;
+
+  if (op.branch === currentBranch) {
+    console.log(`⚠ Branch &#39;${op.branch}&#39; is currently checked out; left it in place. ...`);
+    alreadyApplied.push(op);
+    continue;
+  }
+  const exists = await branchExists(op.branch, cwd);
+  if (!exists) { alreadyApplied.push(op); continue; }
+  await deleteBranch(op.branch, cwd);
+  applied.push(op);
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+95</span> <span class="del">-36</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Threads stack `parentOf`, `--force`, and an `isEmpty` check (via `hasUniquePatchCommits`) into `buildCleanupPlan`. Iterates the returned `operations` list in order, journaling each op before applying it, then calls `clearCleanupJournal` on success. Auto-clean warning now derives dependent branches from the in-plan reparent set; `reparentedDueToMergedParent` derives from a look-ahead at the matching `delete` op.</p>
+    <div class="code"><pre>const cleanupJournal = await startCleanupJournal(cwd);
+for (const op of cleanupPlan.operations) {
+  if (op.type === &#39;reparent&#39;) {
+    await appendCleanupOperation(cwd, cleanupJournal, op);
+    const stateEntry = stateBranchMap.get(op.branch);
+    if (stateEntry) stateEntry.parent = op.newParent;
+    reparentedBranchNames.add(op.branch);
+    // ... mark orphan-due-to-merged-parent
+    continue;
+  }
+  // delete: log, journal, checkout, deleteBranch, drop state entry
+}
+await clearCleanupJournal(cwd);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/operation-state.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+3</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `&#39;cleanup&#39;` to `ActiveOperation` and reports it from `detectActiveOperation` when the journal is present and no rebase/restack is in flight (rebase/restack still take precedence).</p>
+    <div class="code"><pre>if (await hasRestackProgress(cwd)) return &#39;restack&#39;;
+if (await hasGitRebaseInProgress(cwd)) return &#39;rebase&#39;;
+if (await hasCleanupJournal(cwd)) return &#39;cleanup&#39;;
+return &#39;none&#39;;</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/continue.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+8</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Dispatches to `resumeCleanup` when the active operation is `cleanup` and surfaces the replay result on the command return value.</p>
+    <div class="code"><pre>if (active === &#39;cleanup&#39;) {
+  const cleanupResult = await resumeCleanup(cwd);
+  return { continued: &#39;cleanup&#39;, cleanupResult };
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/abort.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+6</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Clears the cleanup journal when the user aborts a pending cleanup, so the next `dub sync` starts from scratch instead of replaying.</p>
+    <div class="code"><pre>if (active === &#39;cleanup&#39;) {
+  await clearCleanupJournal(cwd);
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/conflict-context.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+11</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Throws a clear `DubError` if conflict-context is invoked during a cleanup operation — cleanup replay can&#39;t produce merge conflicts so there&#39;s nothing for `--ai` to resolve.</p>
+    <div class="code"><pre>if (operation === &#39;cleanup&#39;) {
+  throw new DubError(
+    &#39;Cleanup replay does not produce merge conflicts requiring AI resolution.&#39;,
+    [&quot;Run &#39;dub continue&#39; to replay the pending cleanup journal.&quot;, &quot;Run &#39;dub abort&#39; to discard the pending cleanup journal.&quot;],
+  );
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/sync/cleanup.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+134</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a `DFS-greedy with re-parenting` describe block: 3-deep stack reparents child onto grandparent, cascading reparent through multiple merged ancestors, empty-branch safety with and without `--force`, bottom-up greedy deletion order.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/test/lib/sync/journal.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+75</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Integration tests against a real temp git repo: journal records ops in order then clears, malformed payloads are rejected with a clear DubError, no-op clear is safe.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/test/lib/sync/cleanup-resume.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+197</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>End-to-end replay tests: full replay deletes the branch and reparents state, ghost state entry is swept when the branch ref is already gone, idempotent second replay is a no-op, journal is cleared after a successful pass.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/continue.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+21</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Asserts `dub continue` dispatches to `resumeCleanup` and returns the replay payload when active operation is `cleanup`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/abort.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+18</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Asserts `dub abort` clears the cleanup journal and reports `aborted: &#39;cleanup&#39;` when the active operation is `cleanup`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+15</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `hasUniquePatchCommits` to the git mock and mocks the new journal module so the 50 existing sync tests continue to pass unchanged against the new ops-based cleanup loop.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-18-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+60</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback document — non-browser CLI change, deterministic vitest evidence in lieu of a video.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">DFS-greedy algorithm correctness</div>
+    <div class="note"><code>packages/cli/src/lib/sync/cleanup.ts:170-240</code> Verify the reparent path releases the old parent&#39;s blocker (so greedy delete can collapse the chain), and the walk-up-to-non-deleted helper correctly skips both deleted and pending-delete ancestors.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Crash-safety of the journal write path</div>
+    <div class="note"><code>packages/cli/src/lib/sync/journal.ts:97-108</code> Writes go through tmp + atomic rename so a partial flush can&#39;t poison the next `dub continue`. Worth double-checking the version validation on read rejects old/unknown shapes loudly.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Idempotent replay sweeps ghost state</div>
+    <div class="note"><code>packages/cli/src/lib/sync/cleanup-resume.ts:54-78</code> A crash between `git branch -D` and `writeState` in the original sync can leave the state entry pointing at a now-missing branch. Replay must clean that ghost entry unconditionally — covered by the new `drops a ghost state entry` test.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">4</div>
+  <div>
+    <div class="item-title">Existing `dub sync` UX preserved</div>
+    <div class="note"><code>packages/cli/src/commands/sync.ts:300-395</code> Auto-clean dependent-branch warning, `parent-merged-orphan` outcome, and `sync-parent-merged-reparent` reconcile source must keep working under the new ops-based loop. Covered by the 50 prior sync tests still passing.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">DFS-greedy cleanup algorithm cases (6 new + 9 existing)</div>
+      <div class="note">packages/cli/src/lib/sync/cleanup.test.ts — `buildCleanupPlan` + `DFS-greedy with re-parenting` describe blocks.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Journal round-trip and replay against a real temp git repo (7 cases)</div>
+      <div class="note">packages/cli/test/lib/sync/journal.test.ts (3) + packages/cli/test/lib/sync/cleanup-resume.test.ts (4).</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`dub continue` / `dub abort` cleanup dispatch</div>
+      <div class="note">packages/cli/src/commands/continue.test.ts + packages/cli/src/commands/abort.test.ts — new `cleanup` operation cases.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Existing `dub sync` behavior preserved end-to-end</div>
+      <div class="note">packages/cli/src/commands/sync.test.ts — 50 cases including dependent-child warning, surviving-child refresh, parent_revision preservation, per-branch error isolation.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 225 files in 47ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">typecheck</div>
+      <div class="note">Command: pnpm typecheck. tsc --noEmit clean for `dubstack` and `docs` packages.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">vitest</div>
+      <div class="note">Command: pnpm test. 655 tests passing across 77 files (was 639 / 75 pre-DUB-18).</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback for the new cleanup algorithm, journal, and continue/abort dispatch — all AC items covered by tests.</div>
+      <div class="note">No `.tsx` files touched, no UI surface — pure CLI behavior change exercised by deterministic vitest cases against a real temp git repo.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-18-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>3-deep stack with middle merged → child reparented onto trunk, middle deleted (cleanup.test.ts).</li>
+<li>Cascading reparent through multiple merged ancestors → leaf attaches to trunk (cleanup.test.ts).</li>
+<li>Empty branch with no PR is preserved by default; deleted only with `--force` (cleanup.test.ts).</li>
+<li>Journal records every decision before execution and clears on success (journal.test.ts).</li>
+<li>`dub continue` replays the journal idempotently: ghost state entries swept, no-op on second replay (cleanup-resume.test.ts).</li>
+<li>`dub abort` clears the cleanup journal (abort.test.ts).</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`buildCleanupPlan` in `lib/sync/cleanup.ts` implements DFS-greedy with eager re-parenting</div>
+      <div class="note">packages/cli/src/lib/sync/cleanup.ts — DFS queue starts at trunk children, recurses into a deletable parent&#39;s children, eager-deletes when blockers clear.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Branches whose blocking children are deleted are themselves immediately deleted</div>
+      <div class="note">`greedilyDeleteUnblocked` iterates `pendingDelete` and deletes any entry whose blocker set is empty; verified by `greedy-deletes a chain when both ancestor and child are merged` test.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Re-parented orphans correctly attach to nearest non-deleted ancestor</div>
+      <div class="note">`walkUpToNonDeleted` skips both deleted and pending-delete ancestors; verified by `re-parents an open child onto the grandparent` and `cascades reparenting through several merged ancestors`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Empty branches without PRs are NOT auto-deleted unless `--force`</div>
+      <div class="note">`getDeleteReason` only returns `empty-branch` for `NONE`-PR branches when `input.force === true`. Verified by `does not delete an empty branch with no PR by default` and `deletes an empty branch with no PR when --force is set`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`.git/dubstack/cleanup-journal.json` records every cleanup decision before execution</div>
+      <div class="note">`sync.ts` calls `appendCleanupOperation` before each `deleteBranch` / state mutation. Verified by `records operations in order and clears on success` in `journal.test.ts`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`dub continue` replays the journal idempotently</div>
+      <div class="note">`resumeCleanup` no-ops when the branch ref or parent assignment is already in the target state; ghost state entries get swept. Verified by `is idempotent: a second replay ... is a no-op` and `drops a ghost state entry` in `cleanup-resume.test.ts`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: 3-deep stack with middle merged → child re-parented onto grandparent, middle deleted</div>
+      <div class="note">`re-parents an open child onto the grandparent when the middle is merged` in cleanup.test.ts asserts ordered `[reparent, delete]` ops.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: interruption mid-cleanup → `dub continue` resumes from journal</div>
+      <div class="note">`replays a journal: reparents a child and deletes the merged middle` in cleanup-resume.test.ts simulates a paused cleanup and verifies branch ref + state both reach the intended end state.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: empty-branch safety rule</div>
+      <div class="note">Both branches of the rule (no-force keeps, force deletes) are covered in cleanup.test.ts.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Critical (fixed): `dropBranchFromState` after a `delete` op only removed the entry without forwarding children. Combined with a crash between `git branch -D` and `writeState`, replay would leave a ghost state entry pointing at a missing branch — fixed by always sweeping the entry in `resumeCleanup` and adding the `drops a ghost state entry` test.</li>
+<li>Important (fixed): `abort.test.ts` had no coverage for the new `cleanup` operation — fixed by adding `aborts a pending cleanup by clearing the journal`.</li>
+<li>Minor: when the journal references the user&#39;s current HEAD branch, replay skips the git delete (state is still swept). A clearer warning is now printed; the next `dub sync` will re-plan and delete once the user moves off.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-1 — Universal recovery hints in DubError</div>
+  <div class="note">Done (landed)</div>
+</div>
+<div class="dep">
+  <div class="item-title">DUB-14 — Expand sync status taxonomy + reconciliation source tags</div>
+  <div class="note">Done (landed)</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Source-only change in the CLI package — no migration, no flag, ships with the next `dub` release.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">Merge</div>
+  <div class="label">Land on `main`</div>
+  <div class="note">Squash-merge the PR. No data migration; `.git/dubstack/cleanup-journal.json` is created on demand and cleaned up after each successful sync.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-merge</div>
+  <div class="label">Verify on a real stack</div>
+  <div class="note">Run `dub sync` on a stack with a merged middle branch; confirm the child reparents and the middle is deleted with the `↪ Reparenting … onto …` log line.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>808c497</strong> <code>808c497ab4175f58fd56fb467d1c928f6119516b</code></div>
+  <pre>feat(sync): dfs-greedy cleanup with eager reparenting + journal replay [DUB-18]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">cleanup.ts</a>
+<a href="#tour" class="sub">journal.ts</a>
+<a href="#tour" class="sub">cleanup-resume.ts</a>
+<a href="#tour" class="sub">sync.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
