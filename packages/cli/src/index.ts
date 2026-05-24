@@ -49,6 +49,7 @@ import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { ready } from './commands/ready';
 import { rename } from './commands/rename';
+import { reorder } from './commands/reorder';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import { stashList, stashPop, stashPush } from './commands/stash';
@@ -1678,6 +1679,72 @@ Examples:
         '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
       ),
     );
+  });
+
+program
+  .command('reorder')
+  .description(
+    'Interactively reorder or drop commits within the current branch',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub reorder    Open the picker for the current branch's commits`,
+  )
+  .action(async () => {
+    const result = await reorder(process.cwd());
+
+    if (result.status === 'no-op') {
+      console.log(
+        chalk.yellow(
+          `⚠ Nothing to do: ${result.noOpReason ?? 'no changes in picker'}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'cancelled') {
+      console.log(
+        chalk.yellow(
+          `⚠ Reorder cancelled${result.noOpReason ? `: ${result.noOpReason}` : ''}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'exit') {
+      console.log(
+        chalk.yellow(
+          `⚠ Reorder left in its current state on '${result.conflictBranch}'.`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
+        ),
+      );
+      return;
+    }
+    if (result.status === 'conflict') {
+      console.log(
+        chalk.yellow(`⚠ Conflict while reordering '${result.conflictBranch}'`),
+      );
+      console.log(
+        chalk.dim(
+          '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
+        ),
+      );
+      return;
+    }
+    const kept = result.finalPicks.length;
+    const dropped = result.dropped.length;
+    console.log(
+      chalk.green(
+        `✔ Reordered ${kept} commit(s)${dropped > 0 ? `, dropped ${dropped}` : ''}`,
+      ),
+    );
+    if (result.rebased.length > 0) {
+      console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
+    }
   });
 
 program

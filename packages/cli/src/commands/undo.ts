@@ -18,17 +18,19 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop';
+  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'reorder';
   details: string;
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, or `dub pop` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
+ * `dub pop`, or `dub reorder` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
- * - **restack** or **move**: Resets every rebased branch to its pre-mutation tip
- *   via `git branch -f`, restores state, checks out the previous branch.
+ * - **restack**, **move**, or **reorder**: Resets every rebased branch to its
+ *   pre-mutation tip via `git branch -f`, restores state, checks out the
+ *   previous branch.
  * - **rename**: Renames the branch back to its original name via `git branch -m`, reverses
  *   the `refs/dubstack/last-pushed/<branch>` migration, and restores state. Refuses if a
  *   branch with the original name has been re-created in the meantime. Any push that
@@ -184,7 +186,9 @@ export async function undo(cwd: string): Promise<UndoResult> {
   const details =
     entry.operation === 'move'
       ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+      : entry.operation === 'reorder'
+        ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-reorder state`
+        : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
 
   return {
     undone: entry.operation,

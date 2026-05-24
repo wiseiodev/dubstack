@@ -15,6 +15,7 @@
     "merge-next",
     "post-merge",
     "move",
+    "reorder",
     "undo",
     "doctor",
     "track",

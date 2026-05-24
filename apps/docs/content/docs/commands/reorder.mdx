@@ -1,0 +1,99 @@
+---
+title: dub reorder
+description: Interactively reorder or drop commits within the current branch, with cascading restack and undo.
+---
+
+`dub reorder` opens an interactive picker for the commits on the current
+branch and lets you move them up/down or mark them as `drop`. After the
+rebase, descendant branches are restacked onto the new tip and an undo entry
+is recorded so the whole operation rolls back in one step.
+
+The picker is intentionally limited to **reorder** and **drop**. Editing,
+squashing, and rewording commits are out of scope:
+
+- Edit a commit's contents → `dub modify --pop`
+- Combine adjacent commits → `dub squash`
+- Reword a message → `dub modify --amend -e`
+
+## Usage
+
+```bash
+dub reorder
+```
+
+There are no flags — the command always opens a picker against the current
+branch.
+
+## What it does
+
+1. Validates the working tree is clean and the current branch is tracked.
+2. Lists commits between the branch's parent (per the tracked stack) and
+   `HEAD`, newest first.
+3. Opens the picker. You can:
+   - **Move a commit up/down** in the order.
+   - **Toggle drop** on a commit to skip it during the rebase.
+   - **Finish** to apply your changes.
+   - **Cancel** to bail without rewriting history.
+4. If the picker exits unchanged, the command no-ops — no rebase runs.
+5. Otherwise, builds a custom `git rebase --interactive` todo with only
+   `pick` and `drop` actions and runs the rebase with that todo applied.
+6. On rebase conflict, prompts with the same three-option dialog used by
+   `dub restack`:
+   - **Continue resolving** — leaves files in their conflicted state. After
+     resolving, run `dub continue` (or `dub continue --ai`).
+   - **Cancel and roll back** — aborts the rebase and resets the branch to
+     its pre-reorder tip via the undo snapshot.
+   - **Exit** — leaves the operation in its current state for manual handling.
+7. After a clean rebase, runs the standard restack to rebase descendants.
+8. Saves a `reorder` undo entry so `dub undo` reverts both the reordered
+   branch and any descendants the cascading restack rewrote.
+
+## Examples
+
+Reorder three commits (A, B, C → C, B, A) on the current branch:
+
+```bash
+dub reorder
+# Picker:
+#   [pick] ghi9012 C
+#   [pick] def5678 B
+#   [pick] abc1234 A
+# Move each commit to the desired position, then "Finish".
+```
+
+Drop the middle commit:
+
+```bash
+dub reorder
+# Picker:
+#   [pick] ghi9012 C
+#   [drop] def5678 B    <- toggled
+#   [pick] abc1234 A
+# Finish.
+```
+
+Roll back the most recent reorder:
+
+```bash
+dub undo
+# ✔ Undid 'reorder': Restored N branches to pre-reorder state
+```
+
+## Errors
+
+| Situation | Behavior |
+|---|---|
+| Working tree has uncommitted changes | Fail with a hint to commit or stash. |
+| Current branch is not tracked | Fail with a hint to run `dub track`. |
+| Current branch is the stack root | Fail — root branches don't carry commits to reorder. |
+| Branch has zero commits beyond its parent | Fail — nothing to reorder. |
+| Branch has exactly one commit | Fail — use `dub modify` for single-commit edits. |
+| All commits marked as drop in the picker | Picker rejects the choice and loops; the rebase would otherwise empty the branch. |
+| Rebase conflict | Prompts with the standard `dub restack` three-option dialog. |
+
+## Related
+
+- [`dub modify`](./modify.mdx) — edit, amend, or pop the latest commit.
+- [`dub restack`](./restack.mdx) — rebase descendants after a parent moves.
+- [`dub move`](./move.mdx) — relocate a branch within its stack (not commits).
+- [`dub undo`](./undo.mdx) — roll back the last create/restack/move/rename/reorder.
