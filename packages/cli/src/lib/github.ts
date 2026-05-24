@@ -884,6 +884,32 @@ export async function mergePr(
   }
 }
 
+/**
+ * Closes a PR with an explanatory comment in a single `gh pr close` call.
+ *
+ * Used by `dub fold` when the folded branch had an open PR: the comment
+ * explains where the commits went so reviewers landing on the closed PR
+ * aren't left guessing.
+ */
+export async function closePrWithComment(
+  prNumber: number,
+  comment: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await runGh(['pr', 'close', String(prNumber), '--comment', comment], {
+      cwd,
+    });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(`Failed to close PR #${prNumber}: ${message}`, [
+      `Run 'gh pr close ${prNumber}' manually to close the PR.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
+}
+
 export async function getRepositoryWebUrl(cwd: string): Promise<string> {
   const remote = await getPreferredRemote(cwd);
   let remoteUrl: string;

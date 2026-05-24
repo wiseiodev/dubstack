@@ -1,0 +1,46 @@
+---
+title: fold
+description: Combine the current branch into its parent and re-parent its children.
+---
+
+## Usage
+
+```bash
+dub fold [--squash] [--force]
+```
+
+## Description
+
+`dub fold` combines the current branch into its parent. The branch's commits are applied to the parent (either preserved individually or squashed into one), any children of the branch are re-parented onto its former parent, and the now-folded branch is deleted locally. If the branch had an open GitHub PR, the PR is closed with a comment noting that it was folded.
+
+Useful when a sub-feature ends up small enough that it makes more sense to ship as part of its parent.
+
+## Behavior
+
+1. The current branch must be tracked and must not be a root. Its parent must also not be a root (use `dub merge-next` to land a branch directly onto trunk).
+2. The working tree must be clean.
+3. The branch must be up to date with its parent (`dub restack` first if not).
+4. Commits are fast-forwarded onto the parent (default) or collapsed into one commit (`--squash`).
+5. Children of the folded branch are re-parented onto the former parent and any descendants are restacked automatically.
+6. The folded branch is deleted locally. If it had a PR, the PR is closed with the comment `Folded into <parent> via dub fold.`
+
+## Options
+
+| Flag | Description |
+|---|---|
+| `-f, --force` | Skip the deletion confirmation prompt. |
+| `--squash` | Collapse the folded commits into a single commit on the parent. |
+| `--keep-commits` | Preserve commits as separate commits on the parent (default). |
+
+## Examples
+
+```bash
+# Interactive: confirm before folding into parent
+dub fold
+
+# Non-interactive
+dub fold --force
+
+# Squash into a single commit on the parent
+dub fold --squash --force
+```

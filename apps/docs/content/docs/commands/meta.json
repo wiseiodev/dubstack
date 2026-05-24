@@ -13,6 +13,7 @@
     "restack",
     "merge-next",
     "post-merge",
+    "fold",
     "move",
     "undo",
     "doctor",
