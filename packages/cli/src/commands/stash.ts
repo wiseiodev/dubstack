@@ -63,7 +63,17 @@ export async function stashPush(
   }
 
   const entry: StashLogEntry = { sha, branch, message, createdAt };
-  await prependStashLogEntry(entry, cwd);
+  // git stash push already succeeded above. If writing the log fails (disk
+  // full, permissions), the stash itself is safe in git's stack — warn rather
+  // than throw so the user isn't told the stash failed when it actually
+  // succeeded. They can still recover the work via plain `git stash pop`.
+  try {
+    await prependStashLogEntry(entry, cwd);
+  } catch (error) {
+    console.warn(
+      `⚠ Stashed via git stash, but failed to record in '.git/dubstack/stash-log.json' (${error instanceof Error ? error.message : String(error)}). The stash itself is safe at stash@{0} — run 'git stash list' to confirm, or 'git stash pop' to restore.`,
+    );
+  }
 
   return { branch, sha, message, createdAt };
 }
@@ -116,8 +126,14 @@ export async function stashPop(
   const gitStashes = await listGitStashes(cwd);
   const match = gitStashes.find((s) => s.sha === entry.sha);
   if (!match) {
-    // Clean up the dangling log entry so the user can move forward.
-    await removeStashLogEntry(entry.sha, cwd);
+    // Clean up the dangling log entry so the user can move forward, but
+    // never let a log-write error mask the actionable "no longer present"
+    // DubError below — the log cleanup is best-effort.
+    try {
+      await removeStashLogEntry(entry.sha, cwd);
+    } catch {
+      // best-effort: leave the dangling entry; the user can re-pop later.
+    }
     throw new DubError(
       `Recorded stash for '${entry.branch}' (${entry.sha.slice(0, 7)}) is no longer in 'git stash list'.`,
       [

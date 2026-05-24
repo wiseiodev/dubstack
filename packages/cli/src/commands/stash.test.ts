@@ -1,8 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { getCurrentBranch } from '../lib/git';
+import * as stashLogLib from '../lib/stash-log';
 import { readStashLog } from '../lib/stash-log';
 import { init } from './init';
 import { stashList, stashPop, stashPush } from './stash';
@@ -23,6 +24,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanup();
 });
 
@@ -243,5 +245,65 @@ describe('dub stash list', () => {
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0].present).toBe(false);
     expect(result.entries[0].ref).toBeNull();
+  });
+});
+
+describe('log-write failure paths', () => {
+  it('warns instead of throwing when the post-push log write fails', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    dirtyTrackedFile('wip.txt', 'aaa\n');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(stashLogLib, 'prependStashLogEntry').mockRejectedValueOnce(
+      new Error('ENOSPC: disk full'),
+    );
+
+    // Stash itself must succeed even though the log record failed.
+    const result = await stashPush(dir);
+    expect(result.branch).toBe('feat/a');
+    expect(result.sha).toMatch(/^[0-9a-f]{40}$/);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/failed to record/);
+    // git stash still holds the entry.
+    const { stdout } = await gitInRepo(dir, ['stash', 'list']);
+    expect(stdout.trim()).not.toBe('');
+  });
+
+  it('still surfaces the dangling-entry DubError when log cleanup fails', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    dirtyTrackedFile('wip.txt');
+    await stashPush(dir);
+
+    // Drop the stash outside DubStack to trigger the dangling-entry path.
+    await gitInRepo(dir, ['stash', 'drop', 'stash@{0}']);
+
+    // Force the log cleanup write to fail — the DubError must still surface.
+    vi.spyOn(stashLogLib, 'removeStashLogEntry').mockRejectedValueOnce(
+      new Error('EACCES: read-only file system'),
+    );
+
+    await expect(stashPop(dir)).rejects.toThrow(
+      /no longer in 'git stash list'/,
+    );
+  });
+
+  it('warns instead of throwing when the post-pop log write fails', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    dirtyTrackedFile('wip.txt', 'aaa\n');
+    await stashPush(dir);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(stashLogLib, 'removeStashLogEntry').mockRejectedValueOnce(
+      new Error('ENOSPC: disk full'),
+    );
+
+    // The pop must succeed (working tree restored) even though log update failed.
+    const result = await stashPop(dir);
+    expect(result.branch).toBe('feat/a');
+    expect(fs.readFileSync(path.join(dir, 'wip.txt'), 'utf-8')).toBe('aaa\n');
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(/dangling entry/);
   });
 });

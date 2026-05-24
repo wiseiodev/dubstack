@@ -323,8 +323,22 @@ export async function gitStashPushIncludeUntracked(
   try {
     const { stdout } = await execa('git', ['rev-parse', 'stash@{0}'], { cwd });
     return stdout.trim();
-  } catch {
-    return null;
+  } catch (error) {
+    // The stash exists on disk (push above succeeded), we just can't identify
+    // it. This is distinct from "nothing to stash" — surface it as a DubError
+    // so callers can give the user an actionable next step instead of silently
+    // pretending the stash wasn't created.
+    throw new DubError(
+      formatGitFailure(
+        'Created a stash but failed to resolve its SHA via `git rev-parse stash@{0}`.',
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git stash list' to confirm the stash exists at stash@{0}.",
+        "Run 'git stash pop' manually to recover the working tree if needed.",
+        "Re-run after investigating; the stash is still present in git's stack.",
+      ],
+    );
   }
 }
 
