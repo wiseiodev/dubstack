@@ -127,6 +127,9 @@ describe('ready', () => {
     const result = await ready('/repo', { scope: 'current' });
     expect(result.scope).toBe('current');
     expect(result.submitBranches).toEqual(['feat/b2']);
+    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', {
+      path: 'current',
+    });
   });
 
   it('stack scope checks every branch in the stack', async () => {
