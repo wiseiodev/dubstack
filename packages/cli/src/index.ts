@@ -36,7 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
-import { log, logJson } from './commands/log';
+import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
@@ -258,6 +258,10 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option(
+    '--no-color',
+    'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
+  )
   .addHelpText(
     'after',
     `
@@ -270,6 +274,7 @@ Examples:
       all?: boolean;
       reverse?: boolean;
       json?: boolean;
+      color?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -282,12 +287,17 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option(
+    '--no-color',
+    'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
+  )
   .action(
     async (options: {
       stack?: boolean;
       all?: boolean;
       reverse?: boolean;
       json?: boolean;
+      color?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -1600,6 +1610,7 @@ async function printLog(
     all?: boolean;
     reverse?: boolean;
     json?: boolean;
+    color?: boolean;
   } = {},
 ) {
   if (options.json) {
@@ -1608,10 +1619,8 @@ async function printLog(
   }
 
   const output = await log(cwd, options);
-  const styled = output
-    .replace(/\*(.+?) \(Current\)\*/g, chalk.bold.cyan('$1 (Current)'))
-    .replace(/⚠ \(missing\)/g, chalk.yellow('⚠ (missing)'));
-  console.log(styled);
+  const noColor = options.color === false || chalk.level === 0;
+  console.log(styleLogOutput(output, noColor));
 }
 
 function parseSteps(positional?: string, option?: string): number {

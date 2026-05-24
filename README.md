@@ -240,7 +240,9 @@ dub checkout --stack
 
 ### `dub log` / `dub ls` / `dub l`
 
-Render tracked stacks as an ASCII tree.
+Render tracked stacks as an ASCII tree. On tree-shaped stacks, the current
+branch's ancestor path is shown in **bold**, sibling sub-trees are dimmed,
+and the current branch is highlighted in bright cyan.
 
 ```bash
 dub log
@@ -255,6 +257,9 @@ dub log --all
 
 # reverse branch ordering for quick top-down scan
 dub log --reverse
+
+# disable ANSI colors (falls back to `*` for current, `>` for ancestor)
+dub log --no-color
 ```
 
 ### Navigation: `dub up`, `dub down`, `dub top`, `dub bottom`

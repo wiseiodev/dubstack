@@ -29,10 +29,12 @@ This is a concise command reference for agents using `dub`.
 
 | Command | Purpose |
 |---|---|
-| `dub log` / `dub ls` / `dub l` | Show stack tree |
+| `dub log` / `dub ls` / `dub l` | Show stack tree with region-aware highlights (bold ancestor path, bright current, dim sibling sub-tree) |
 | `dub log --stack` | Show only current stack |
 | `dub log --all` | Show all stacks explicitly |
 | `dub log --reverse` | Reverse stack and child ordering |
+| `dub log --no-color` | Disable ANSI; keep `*` for current and `>` for ancestor as text markers |
+| `dub log --json` | Emit the tree as JSON with a `region` field per branch (`root \| ancestor \| current \| descendant \| sibling-subtree`) |
 | `dub checkout` / `dub co` | Interactive checkout |
 | `dub checkout <branch>` | Direct checkout |
 | `dub checkout --trunk` | Checkout stack trunk |
