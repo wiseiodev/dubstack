@@ -5,6 +5,13 @@ import input from '@inquirer/input';
 import { createGateway, generateText } from 'ai';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import type { AiMetadataDependencies } from '../lib/ai-metadata';
+import {
+  appendCleanupOperation,
+  type CleanupJournal,
+  clearCleanupJournal,
+  hasCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import {
@@ -148,6 +155,20 @@ export async function split(
     ]);
   }
 
+  // Refuse to start if an unrelated cleanup journal is on disk — running a
+  // new split would clobber it and the prior crash would be unrecoverable.
+  // Matches the discipline `startCleanupJournal` enforces internally, but
+  // surfaced here with a split-flavored recovery hint.
+  if (await hasCleanupJournal(cwd)) {
+    throw new DubError(
+      'A pending DubStack cleanup operation must finish before starting a split.',
+      [
+        "Run 'dub continue' to finish replaying the interrupted operation.",
+        "Run 'dub abort' to discard the pending operation and start fresh.",
+      ],
+    );
+  }
+
   const state = await readState(cwd);
   const sourceBranch = await getCurrentBranch(cwd);
   const stack = findStackForBranch(state, sourceBranch);
@@ -170,6 +191,14 @@ export async function split(
 
   const created: SplitNewBranchResult[] = [];
   let aiProposal: AiSplitProposal[] | undefined;
+  // Lazy-started: only spin up a journal once we're about to mutate git.
+  // The AI dry-run path bails before any mutation, so it deliberately
+  // skips journal start.
+  let journal: CleanupJournal | null = null;
+  const startJournal = async () => {
+    if (journal === null) journal = await startCleanupJournal(cwd);
+    return journal;
+  };
 
   if (options.mode === 'ai') {
     const config = await readConfig(cwd);
@@ -220,6 +249,7 @@ export async function split(
       seenProposalBranches.add(proposal.branch);
       await ensureUniqueAvailableBranchName(proposal.branch, cwd);
     }
+    const aiJournal = await startJournal();
     for (const proposal of aiProposal) {
       created.push(
         await extractByFiles({
@@ -230,6 +260,7 @@ export async function split(
           newBranchName: proposal.branch,
           files: proposal.files,
           summary: proposal.summary,
+          journal: aiJournal,
         }),
       );
     }
@@ -261,6 +292,7 @@ export async function split(
         );
       }
     }
+    const byFileJournal = await startJournal();
     created.push(
       await extractByFiles({
         cwd,
@@ -269,6 +301,7 @@ export async function split(
         parentTip,
         newBranchName: options.name,
         files: options.files,
+        journal: byFileJournal,
       }),
     );
   } else if (options.mode === 'by-commit') {
@@ -310,6 +343,7 @@ export async function split(
       );
     }
     const newBranchName = await resolveNewBranchName(options, cwd);
+    const byCommitJournal = await startJournal();
     created.push(
       await extractByCommits({
         cwd,
@@ -319,10 +353,12 @@ export async function split(
         commits,
         picks,
         newBranchName,
+        journal: byCommitJournal,
       }),
     );
   } else if (options.mode === 'by-hunk') {
     const newBranchName = await resolveNewBranchName(options, cwd);
+    const byHunkJournal = await startJournal();
     created.push(
       await extractByHunks({
         cwd,
@@ -330,6 +366,7 @@ export async function split(
         parentBranch,
         parentTip,
         newBranchName,
+        journal: byHunkJournal,
       }),
     );
   } else {
@@ -365,6 +402,19 @@ export async function split(
       // submit treats it as a fresh branch.
       // Only run this when closePr actually succeeded — otherwise state and
       // GitHub would silently desync (an open PR with no recorded pr_number).
+      // Journal the intent first so a crash between this point and writeState
+      // is recoverable by `dub continue`.
+      //
+      // Reaching this branch implies an extractor ran, which means the lazy
+      // `startJournal()` has fired and `journal` is non-null. We call
+      // `startJournal()` again here as a belt-and-suspenders guarantee so a
+      // future code path that lands in `sourceEmpty` without an extractor
+      // can't silently skip the journal append.
+      const j = await startJournal();
+      await appendCleanupOperation(cwd, j, {
+        type: 'split-clear-source-pr',
+        branch: sourceBranch,
+      });
       const refreshed = await readState(cwd);
       const refreshedBranch = findBranch(refreshed, sourceBranch);
       if (refreshedBranch) {
@@ -379,6 +429,13 @@ export async function split(
   if (!options.noRestack && sourceTipAfter !== sourceTipBefore) {
     const result = await restack(cwd);
     restacked = result.status === 'success' || result.status === 'up-to-date';
+  }
+
+  // Everything landed cleanly — drop the journal so `dub continue` doesn't
+  // try to replay a completed split. Leaving the journal on disk would also
+  // block any subsequent `dub split` via the hasCleanupJournal preflight.
+  if (journal !== null) {
+    await clearCleanupJournal(cwd);
   }
 
   return {
@@ -401,6 +458,8 @@ interface ExtractByFilesInput {
   newBranchName: string;
   files: string[];
   summary?: string;
+  /** Cleanup journal the extractor appends its track-branch op to. */
+  journal: CleanupJournal;
 }
 
 /**
@@ -422,6 +481,7 @@ async function extractByFiles(
     newBranchName,
     files,
     summary,
+    journal,
   } = input;
 
   const sourceTip = await getBranchTip(sourceBranch, cwd);
@@ -516,7 +576,16 @@ async function extractByFiles(
     throw error;
   }
 
-  // Both sides landed cleanly — persist state.
+  // Both sides landed cleanly — journal the state-tracking intent first,
+  // then persist state. A crash between append and writeState is recoverable
+  // because replay sees the branch exists in git but not in state and adds it.
+  await appendCleanupOperation(cwd, journal, {
+    type: 'split-track-branch',
+    branch: newBranchName,
+    parent: parentBranch,
+    parentTip,
+    sourceBranch,
+  });
   const stateAfterCreate = await readState(cwd);
   addBranchToStack(stateAfterCreate, newBranchName, parentBranch, parentTip);
   await writeState(stateAfterCreate, cwd);
@@ -537,6 +606,8 @@ interface ExtractByCommitsInput {
   commits: CommitInfo[];
   picks: number[];
   newBranchName: string;
+  /** Cleanup journal the extractor appends its track-branch op to. */
+  journal: CleanupJournal;
 }
 
 /**
@@ -555,6 +626,7 @@ async function extractByCommits(
     commits,
     picks,
     newBranchName,
+    journal,
   } = input;
   const pickSet = new Set(picks);
   const movedCommits = picks.map((i) => commits[i].sha);
@@ -605,7 +677,15 @@ async function extractByCommits(
     throw error;
   }
 
-  // Both sides landed cleanly — persist state.
+  // Both sides landed cleanly — journal the state-tracking intent first,
+  // then persist state. Replay handles the gap between append and writeState.
+  await appendCleanupOperation(cwd, journal, {
+    type: 'split-track-branch',
+    branch: newBranchName,
+    parent: parentBranch,
+    parentTip,
+    sourceBranch,
+  });
   const stateAfterCreate = await readState(cwd);
   addBranchToStack(stateAfterCreate, newBranchName, parentBranch, parentTip);
   await writeState(stateAfterCreate, cwd);
@@ -623,6 +703,8 @@ interface ExtractByHunksInput {
   parentBranch: string;
   parentTip: string;
   newBranchName: string;
+  /** Cleanup journal the extractor appends its track-branch op to. */
+  journal: CleanupJournal;
 }
 
 /**
@@ -647,7 +729,8 @@ interface ExtractByHunksInput {
 async function extractByHunks(
   input: ExtractByHunksInput,
 ): Promise<SplitNewBranchResult> {
-  const { cwd, sourceBranch, parentBranch, parentTip, newBranchName } = input;
+  const { cwd, sourceBranch, parentBranch, parentTip, newBranchName, journal } =
+    input;
   const sourceTip = await getBranchTip(sourceBranch, cwd);
 
   const fullDiff = await getDiffBetween(parentBranch, sourceBranch, cwd);
@@ -766,7 +849,15 @@ async function extractByHunks(
     throw error;
   }
 
-  // Both sides landed cleanly — persist state.
+  // Both sides landed cleanly — journal the state-tracking intent first,
+  // then persist state. Replay handles the gap between append and writeState.
+  await appendCleanupOperation(cwd, journal, {
+    type: 'split-track-branch',
+    branch: newBranchName,
+    parent: parentBranch,
+    parentTip,
+    sourceBranch,
+  });
   const stateAfterCreate = await readState(cwd);
   addBranchToStack(stateAfterCreate, newBranchName, parentBranch, parentTip);
   await writeState(stateAfterCreate, cwd);

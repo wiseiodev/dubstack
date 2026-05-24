@@ -32,10 +32,54 @@ export interface CleanupRetargetOp {
   newBase: string;
 }
 
+/**
+ * Records the intent to track a newly-created sibling branch in `state.json`
+ * after the git side of a `dub split` extractor has landed both commits
+ * cleanly.
+ *
+ * Why this op exists: the extractor commits the new branch and the source
+ * removal commit (rolling back both on failure), then needs to persist the
+ * new branch to state. A crash between "git side done" and "state.json
+ * written" leaves an orphaned branch that DubStack doesn't know about.
+ * Replay reconciles state from git: if the branch exists in git but not in
+ * state, it gets added; otherwise the op is a no-op.
+ *
+ * Idempotency: keyed off the branch name; replay first checks both git and
+ * state, and skips when the branch already appears in state or no longer
+ * exists in git (which means the extractor rolled back).
+ */
+export interface CleanupSplitTrackBranchOp {
+  type: 'split-track-branch';
+  /** Name of the newly-created sibling branch. */
+  branch: string;
+  /** Parent branch the sibling was created off of. */
+  parent: string;
+  /** Parent tip SHA at split time — recorded as `parent_revision` in state. */
+  parentTip: string;
+  /** Source branch the split was driven from. Carried for diagnostic output. */
+  sourceBranch: string;
+}
+
+/**
+ * Records that the source branch's existing PR was closed (because the split
+ * left the source branch empty vs its parent) and the corresponding
+ * `pr_number` / `pr_link` should be nulled in state.
+ *
+ * Idempotency: replay first checks state; if `pr_number` is already `null`,
+ * the op is a no-op.
+ */
+export interface CleanupSplitClearSourcePrOp {
+  type: 'split-clear-source-pr';
+  /** Source branch whose state pr_number/pr_link should be nulled. */
+  branch: string;
+}
+
 export type CleanupOperation =
   | CleanupDeleteOp
   | CleanupReparentOp
-  | CleanupRetargetOp;
+  | CleanupRetargetOp
+  | CleanupSplitTrackBranchOp
+  | CleanupSplitClearSourcePrOp;
 
 export const CLEANUP_JOURNAL_FILENAME = 'cleanup-journal.json';
 

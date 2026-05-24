@@ -2,9 +2,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import {
+  appendCleanupOperation,
+  hasCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
+import { resumeCleanup } from '../lib/cleanup-resume';
 import { writeConfig } from '../lib/config';
 import { getBranchTip, getCurrentBranch, listCommitsBetween } from '../lib/git';
-import { findStackForBranch, readState } from '../lib/state';
+import { findStackForBranch, readState, writeState } from '../lib/state';
 import { create } from './create';
 import { init } from './init';
 import { split } from './split';
@@ -445,5 +451,187 @@ describe('split descendants', () => {
     expect(fs.existsSync(path.join(dir, 'b.ts'))).toBe(true);
     // a.ts was extracted away so child no longer has it.
     expect(fs.existsSync(path.join(dir, 'a.ts'))).toBe(false);
+  });
+});
+
+describe('split journal integration', () => {
+  it('clears the cleanup journal after a successful split', async () => {
+    await create('feat/source', dir);
+    fs.writeFileSync(path.join(dir, 'x.ts'), 'x\n');
+    await gitInRepo(dir, ['add', 'x.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: add x']);
+    fs.writeFileSync(path.join(dir, 'y.ts'), 'y\n');
+    await gitInRepo(dir, ['add', 'y.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: add y']);
+
+    expect(await hasCleanupJournal(dir)).toBe(false);
+    await split(dir, {
+      mode: 'by-file',
+      files: ['x.ts'],
+      name: 'feat/extracted',
+    });
+    // Clean exit must clear the journal so the next `dub split` is not
+    // blocked by the hasCleanupJournal preflight.
+    expect(await hasCleanupJournal(dir)).toBe(false);
+  });
+
+  it('refuses to start when an unrelated cleanup journal is on disk', async () => {
+    await create('feat/source', dir);
+    fs.writeFileSync(path.join(dir, 'a.ts'), 'a\n');
+    await gitInRepo(dir, ['add', 'a.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: a']);
+
+    const j = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, j, {
+      type: 'delete',
+      branch: 'something-else',
+      reason: 'merged-pr',
+    });
+
+    await expect(
+      split(dir, {
+        mode: 'by-file',
+        files: ['a.ts'],
+        name: 'feat/extracted',
+      }),
+    ).rejects.toThrow('pending DubStack cleanup');
+    // No git side-effects from the refused split.
+    const state = await readState(dir);
+    const names = state.stacks.flatMap((s) => s.branches.map((b) => b.name));
+    expect(names).not.toContain('feat/extracted');
+  });
+
+  it('dub continue (resumeCleanup) reconciles state after a crash between branch creation and state write', async () => {
+    // Simulate the precise crash window: the split extractor created the new
+    // branch in git AND appended the track-branch op AND completed both git
+    // commits, but the process died before writeState landed. We forge that
+    // state shape by hand and prove resumeCleanup repairs it idempotently.
+    await create('feat/source', dir);
+    fs.writeFileSync(path.join(dir, 'lost.ts'), 'lost\n');
+    await gitInRepo(dir, ['add', 'lost.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: lost']);
+
+    const parentTip = await getBranchTip('main', dir);
+    // Create the orphan branch directly in git (mirrors createBranchFrom
+    // + commitStaged having run successfully).
+    await gitInRepo(dir, ['checkout', '-b', 'feat/orphan', parentTip]);
+    fs.writeFileSync(path.join(dir, 'lost.ts'), 'lost\n');
+    await gitInRepo(dir, ['add', 'lost.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'split: extract 1 file(s)']);
+    await gitInRepo(dir, ['checkout', 'feat/source']);
+
+    // Confirm state DOES NOT know about feat/orphan yet (the writeState
+    // that would normally happen never did).
+    const stateBefore = await readState(dir);
+    const namesBefore = stateBefore.stacks
+      .flatMap((s) => s.branches.map((b) => b.name))
+      .sort();
+    expect(namesBefore).not.toContain('feat/orphan');
+
+    // Forge the journal entry that would have been written before the crash.
+    const j = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, j, {
+      type: 'split-track-branch',
+      branch: 'feat/orphan',
+      parent: 'main',
+      parentTip,
+      sourceBranch: 'feat/source',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0].type).toBe('split-track-branch');
+
+    const stateAfter = await readState(dir);
+    const namesAfter = stateAfter.stacks
+      .flatMap((s) => s.branches.map((b) => b.name))
+      .sort();
+    expect(namesAfter).toContain('feat/orphan');
+    // Journal cleared after replay so the next dub command isn't blocked.
+    expect(await hasCleanupJournal(dir)).toBe(false);
+  });
+
+  it('dub continue replays idempotently — second call is a no-op', async () => {
+    await create('feat/source', dir);
+    fs.writeFileSync(path.join(dir, 'x.ts'), 'x\n');
+    await gitInRepo(dir, ['add', 'x.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'feat: x']);
+    const parentTip = await getBranchTip('main', dir);
+
+    await gitInRepo(dir, ['checkout', '-b', 'feat/orphan', parentTip]);
+    fs.writeFileSync(path.join(dir, 'x.ts'), 'x\n');
+    await gitInRepo(dir, ['add', 'x.ts']);
+    await gitInRepo(dir, ['commit', '-m', 'split: extract']);
+    await gitInRepo(dir, ['checkout', 'feat/source']);
+
+    const j = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, j, {
+      type: 'split-track-branch',
+      branch: 'feat/orphan',
+      parent: 'main',
+      parentTip,
+      sourceBranch: 'feat/source',
+    });
+
+    const first = await resumeCleanup(dir);
+    expect(first.applied).toHaveLength(1);
+
+    // Re-forge an identical journal (since the first replay cleared it) and
+    // confirm a second pass is a no-op.
+    const j2 = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, j2, {
+      type: 'split-track-branch',
+      branch: 'feat/orphan',
+      parent: 'main',
+      parentTip,
+      sourceBranch: 'feat/source',
+    });
+    const second = await resumeCleanup(dir);
+    expect(second.applied).toHaveLength(0);
+    expect(second.alreadyApplied).toHaveLength(1);
+  });
+
+  // Note: there is no end-to-end test that fires `split-clear-source-pr`
+  // through `split()` itself. That path requires `sourceEmpty === true`, which
+  // means the source branch's git tip SHA must equal the parent tip SHA after
+  // the split. The extractors all append a "drop"/"remaining commits"/"retain
+  // hunks" commit on source whenever there is any net diff, so the resulting
+  // source tip is a fresh SHA — content can be equivalent to parent but the
+  // SHA is never identical. The path stays as a defensive net for a future
+  // extractor that does not commit on source (e.g. an "extract entire branch"
+  // mode); the replay handler is fully covered in cleanup-resume.test.ts and
+  // by the direct forged-crash test below.
+
+  it('split-clear-source-pr replay re-nulls pr_number after a forged crash', async () => {
+    // Forge the precise crash window: journal has the clear-source-pr op,
+    // but state still has the pr_number set. Replay must reconcile.
+    await create('feat/source', dir);
+    const stateBefore = await readState(dir);
+    const sourceMeta = stateBefore.stacks[0].branches.find(
+      (b) => b.name === 'feat/source',
+    );
+    if (sourceMeta) {
+      sourceMeta.pr_number = 77;
+      sourceMeta.pr_link = 'https://github.com/x/y/pull/77';
+    }
+    await writeState(stateBefore, dir);
+
+    const j = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, j, {
+      type: 'split-clear-source-pr',
+      branch: 'feat/source',
+    });
+
+    const result = await resumeCleanup(dir);
+    expect(result.applied).toHaveLength(1);
+
+    const stateAfter = await readState(dir);
+    const refreshedSource = stateAfter.stacks
+      .flatMap((s) => s.branches)
+      .find((b) => b.name === 'feat/source');
+    expect(refreshedSource?.pr_number).toBeNull();
+    expect(refreshedSource?.pr_link).toBeNull();
+    expect(await hasCleanupJournal(dir)).toBe(false);
   });
 });
