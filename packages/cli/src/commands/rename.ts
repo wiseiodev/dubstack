@@ -5,13 +5,14 @@ import {
   getCurrentBranch,
   isValidBranchName,
   lastPushedRef,
+  listWorktreeCheckouts,
   pushBranch,
   readLastPushedSha,
   renameBranch,
   writeLastPushedSha,
 } from '../lib/git';
 import { findStackForBranch, readState, writeState } from '../lib/state';
-import { saveUndoEntry } from '../lib/undo-log';
+import { clearUndoEntry, saveUndoEntry } from '../lib/undo-log';
 
 interface RenameOptions {
   /**
@@ -118,6 +119,21 @@ export async function rename(
     ]);
   }
 
+  // Refuse to rename a branch that's checked out in another worktree —
+  // `git branch -m` would fail mid-operation, and undo would point to a
+  // rename that never happened.
+  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
+  const otherWorktree = worktreeCheckouts.get(oldName);
+  if (otherWorktree) {
+    throw new DubError(
+      `Branch '${oldName}' is checked out in another worktree (${otherWorktree}).`,
+      [
+        `Run 'git worktree remove ${otherWorktree}' to drop the worktree, then retry.`,
+        `Switch off '${oldName}' in the other worktree, then retry.`,
+      ],
+    );
+  }
+
   const childBranches = sourceStack.branches.filter(
     (b) => b.parent === oldName,
   );
@@ -134,32 +150,42 @@ export async function rename(
       createdBranches: [],
       renameFrom: oldName,
       renameTo: newName,
+      hadRemote: hadRemote || prNumber != null,
     },
     cwd,
   );
 
-  await renameBranch(oldName, newName, cwd);
-
-  // Migrate the local `refs/dubstack/last-pushed/<branch>` tracking ref so
-  // `pushBranch` keeps its --force-with-lease race protection after rename.
-  const trackedSha = await readLastPushedSha(oldName, cwd);
-  if (trackedSha) {
-    await writeLastPushedSha(newName, trackedSha, cwd);
-    await deleteRef(lastPushedRef(oldName), cwd);
-  }
-
-  sourceBranch.name = newName;
   const reparentedChildren: string[] = [];
-  for (const child of childBranches) {
-    child.parent = newName;
-    reparentedChildren.push(child.name);
-  }
-  await writeState(state, cwd);
-
   let pushed = false;
-  if (prNumber != null && !options.noPush) {
-    await pushBranch(newName, cwd);
-    pushed = true;
+  try {
+    await renameBranch(oldName, newName, cwd);
+
+    // Migrate the local `refs/dubstack/last-pushed/<branch>` tracking ref so
+    // `pushBranch` keeps its --force-with-lease race protection after rename.
+    const trackedSha = await readLastPushedSha(oldName, cwd);
+    if (trackedSha) {
+      await writeLastPushedSha(newName, trackedSha, cwd);
+      await deleteRef(lastPushedRef(oldName), cwd);
+    }
+
+    sourceBranch.name = newName;
+    for (const child of childBranches) {
+      child.parent = newName;
+      reparentedChildren.push(child.name);
+    }
+    await writeState(state, cwd);
+
+    if (prNumber != null && !options.noPush) {
+      await pushBranch(newName, cwd);
+      pushed = true;
+    }
+  } catch (error) {
+    // The mutation chain failed. Drop the undo entry so the user isn't
+    // pointed at a rename that may have only partially completed.
+    await clearUndoEntry(cwd).catch(() => {
+      // best-effort: leave the entry if cleanup itself fails
+    });
+    throw error;
   }
 
   return {

@@ -25,6 +25,12 @@ export interface UndoEntry {
   renameFrom?: string;
   /** For `rename`: the new branch name after the rename. */
   renameTo?: string;
+  /**
+   * For `rename`: true when the renamed branch had been pushed (PR linked or
+   * `last_submitted_version` set). Lets `dub undo` warn that the remote may
+   * now diverge from the restored local name.
+   */
+  hadRemote?: boolean;
 }
 
 async function getUndoPath(cwd: string): Promise<string> {

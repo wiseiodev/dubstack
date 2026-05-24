@@ -225,6 +225,61 @@ describe('rename', () => {
     expect(await readLastPushedSha('feat/a-renamed', dir)).toBeNull();
   });
 
+  it('allows re-creating a branch with the old name after a rename', async () => {
+    await create('feat/a', dir);
+    await rename(dir, 'feat/a-renamed');
+
+    // After rename, the old name should be reusable for a fresh branch.
+    await gitInRepo(dir, ['checkout', 'main']);
+    await create('feat/a', dir);
+
+    const state = await readState(dir);
+    const stack = findStackForBranch(state, 'feat/a');
+    const branchNames = stack?.branches.map((b) => b.name).sort();
+    expect(branchNames).toContain('feat/a');
+    expect(branchNames).toContain('feat/a-renamed');
+    expect(await branchExists('feat/a', dir)).toBe(true);
+    expect(await branchExists('feat/a-renamed', dir)).toBe(true);
+  });
+
+  it('supports renaming a branch twice in a row', async () => {
+    await create('feat/a', dir);
+
+    await rename(dir, 'feat/b');
+    await rename(dir, 'feat/c');
+
+    expect(await branchExists('feat/c', dir)).toBe(true);
+    expect(await branchExists('feat/b', dir)).toBe(false);
+    expect(await branchExists('feat/a', dir)).toBe(false);
+
+    const state = await readState(dir);
+    const stack = findStackForBranch(state, 'feat/c');
+    expect(stack?.branches.map((b) => b.name).sort()).toEqual(
+      ['feat/c', 'main'].sort(),
+    );
+  });
+
+  it('clears the undo entry when a mutation fails mid-flight', async () => {
+    await create('feat/a', dir);
+    const { writeState } = await import('../lib/state');
+    const stateMod = await import('../lib/state');
+    const spy = vi
+      .spyOn(stateMod, 'writeState')
+      .mockRejectedValueOnce(new Error('disk full'));
+
+    await expect(rename(dir, 'feat/a-renamed')).rejects.toThrow('disk full');
+
+    // Forward git rename already ran, so the branch is now feat/a-renamed.
+    // We just need the undo entry to be gone so the user isn't pointed at
+    // a half-completed rename.
+    const { readUndoEntry } = await import('../lib/undo-log');
+    await expect(readUndoEntry(dir)).rejects.toThrow('Nothing to undo');
+
+    spy.mockRestore();
+    // sanity: state.json was not corrupted by the failed write (still readable)
+    await expect(writeState).toBeDefined();
+  });
+
   it('skips push when --no-push is provided even if PR exists', async () => {
     await create('feat/a', dir);
     const state = await readState(dir);

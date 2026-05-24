@@ -108,9 +108,12 @@ export async function undo(cwd: string): Promise<UndoResult> {
 
     await clearUndoEntry(cwd);
 
+    const remoteHint = entry.hadRemote
+      ? ` (remote '${renameTo}' may still exist — run 'git push origin --delete ${renameTo}' to clean up)`
+      : '';
     return {
       undone: 'rename',
-      details: `Renamed '${renameTo}' back to '${renameFrom}'`,
+      details: `Renamed '${renameTo}' back to '${renameFrom}'${remoteHint}`,
     };
   }
 
