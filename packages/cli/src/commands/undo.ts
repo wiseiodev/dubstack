@@ -26,17 +26,18 @@ interface UndoResult {
     | 'move'
     | 'pop'
     | 'reorder'
+    | 'absorb'
     | 'unlink';
   details: string;
 }
 
 /**
  * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
- * `dub pop`, `dub reorder`, or `dub unlink` operation.
+ * `dub pop`, `dub reorder`, `dub absorb`, or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
- * - **restack**, **move**, or **reorder**: Resets every rebased branch to its
+ * - **restack**, **move**, **reorder**, or **absorb**: Resets every rebased branch to its
  *   pre-mutation tip via `git branch -f`, restores state, checks out the
  *   previous branch.
  * - **rename**: Renames the branch back to its original name via `git branch -m`, reverses
@@ -211,12 +212,12 @@ export async function undo(cwd: string): Promise<UndoResult> {
 
 /**
  * Renders the success message for the branch-reset undo path
- * (`restack`/`move`/`reorder`/`unlink`). Exhaustive switch with a `never` fallback
+ * (`restack`/`move`/`reorder`/`absorb`/`unlink`). Exhaustive switch with a `never` fallback
  * so any future `UndoEntry.operation` value lands here as a typecheck error
  * rather than silently falling through to the restack wording.
  */
 function describeBranchResetDetails(
-  operation: 'restack' | 'move' | 'reorder' | 'unlink',
+  operation: 'restack' | 'move' | 'reorder' | 'absorb' | 'unlink',
   branchCount: number,
 ): string {
   switch (operation) {
@@ -224,6 +225,8 @@ function describeBranchResetDetails(
       return `Restored ${branchCount} branches to pre-move state`;
     case 'reorder':
       return `Restored ${branchCount} branches to pre-reorder state`;
+    case 'absorb':
+      return `Reset ${branchCount} branches to pre-absorb state`;
     case 'unlink':
       return 'Restored stack metadata to pre-unlink state';
     case 'restack':

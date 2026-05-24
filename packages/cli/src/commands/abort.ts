@@ -6,9 +6,10 @@ import {
   detectActiveOperation,
   hasGitRebaseInProgress,
 } from '../lib/operation-state';
+import { absorbAbort } from './absorb';
 
 interface AbortCommandResult {
-  aborted: 'rebase' | 'restack' | 'cleanup';
+  aborted: 'rebase' | 'restack' | 'cleanup' | 'absorb';
 }
 
 export async function abortCommand(cwd: string): Promise<AbortCommandResult> {
@@ -18,6 +19,11 @@ export async function abortCommand(cwd: string): Promise<AbortCommandResult> {
       "Run 'dub log' to inspect the stack.",
       "Run 'dub restack' to start restacking the current stack if you intended to.",
     ]);
+  }
+
+  if (active === 'absorb') {
+    await absorbAbort(cwd);
+    return { aborted: active };
   }
 
   if (await hasGitRebaseInProgress(cwd)) {
