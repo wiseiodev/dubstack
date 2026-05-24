@@ -290,10 +290,11 @@
       <header class="page-head">
         <div class="eyebrow">Linear - DUB-24</div>
         <h1>DUB-24 - Submit scope flags (--upstack / --downstack / --branch / --stack) + --path deprecation</h1>
-        <div class="meta"><span><strong>22</strong> files</span>
-<span><span class="add">+452</span> / <span class="del">-95</span></span>
+        <div class="meta"><span><strong>23</strong> files</span>
+<span><span class="add">+672</span> / <span class="del">-99</span></span>
 <span>branch <strong>feature/dub-24-submit-scope-flags-upstack-downstack-branch-stack-path</strong> &rarr; <strong>main</strong></span>
-<span>author <strong>Daniel Wise</strong></span></div>
+<span>author <strong>Daniel Wise</strong></span>
+<span><a href="https://github.com/wiseiodev/dubstack/pull/56">Pull request</a></span></div>
         <div class="prompt"><span class="label">Prompt</span>Replace `dub submit --path current|stack` with Graphite-style scope flags (--upstack, --downstack, --stack, --branch &lt;name&gt;). Two-release deprecation: v1.x emits a warning, v2 removes --path entirely.</div>
       </header>
 
@@ -649,12 +650,15 @@ export function resolveScope(options: SubmitOptions): SubmitScope {
             <div class="adversarial">
   <div class="item-title">Remaining critical and major findings are resolved.</div>
   <div class="adversarial-grid">
-    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Iterations</div><div class="v">3</div></div>
     <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
-    <div class="metric"><div class="k">Minor</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
     <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
   </div>
-  <ul class="clean"><li>Reviewer (feature-dev:code-reviewer) flagged one wording nit on the root-branch error path when `--branch &lt;root&gt;` is passed; resolved by replacing the recovery hint with &#39;Choose a non-root tracked branch name.&#39; before commit.</li></ul>
+  <ul class="clean"><li>Round 1 (feature-dev:code-reviewer): one wording nit on the `--branch &lt;root&gt;` recovery hint — fixed pre-commit.</li>
+<li>Round 2 (feature-dev:code-reviewer): silent cycle in getUpstackBranches, missing direct resolveScope tests, --branch help vagueness, --path mutex recovery hint missing, internal coupling of mcp.ts to SubmitPathMode, zero-branch output silence, merge-next still passing deprecated fix:true, public skills doc drift — all fixed in commit d4a5b47.</li>
+<li>Round 3 (Copilot inline review on PR #56): internal callers (stack-maintenance, flow) still triggering --path deprecation warnings, two console.warn spies restored manually instead of via afterEach, &#39;Submit path&#39; label stale after submitScope rename, QA report diff-stat stale — all fixed in commit ef46021.</li>
+<li>Round 3 also added topologicalOrder cycle guard in state.ts so --stack benefits from the same protection as --upstack/--downstack.</li></ul>
 </div>
           </section>
 
@@ -683,8 +687,8 @@ export function resolveScope(options: SubmitOptions): SubmitScope {
           <section id="commit">
             <h2>Commit</h2>
             <div class="commit">
-  <div><strong>0d9ed8b</strong> <code>0d9ed8b6961a7bf2d982c926ba6e38aa13aa8728</code></div>
-  <pre>feat(submit): scope flags --upstack/--downstack/--branch/--stack [DUB-24]</pre>
+  <div><strong>ef46021</strong> <code>ef460216bbe91fd5fae7d30adbcc26ad76671682</code></div>
+  <pre>refactor(submit): silence internal --path warnings + UX/test polish [DUB-24]</pre>
 </div>
           </section>
         </main>

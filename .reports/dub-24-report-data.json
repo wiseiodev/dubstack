@@ -10,13 +10,13 @@
     "author": "Daniel Wise",
     "contextLabel": "Linear",
     "contextId": "DUB-24",
-    "prUrl": ""
+    "prUrl": "https://github.com/wiseiodev/dubstack/pull/56"
   },
   "stats": {
-    "fileCount": 22,
-    "additions": 452,
-    "deletions": 95,
-    "diffStat": "22 files changed, 452 insertions(+), 95 deletions(-)"
+    "fileCount": 23,
+    "additions": 672,
+    "deletions": 99,
+    "diffStat": "23 files changed, 672 insertions(+), 99 deletions(-) (source + docs, excluding .reports/)"
   },
   "prompt": "Replace `dub submit --path current|stack` with Graphite-style scope flags (--upstack, --downstack, --stack, --branch <name>). Two-release deprecation: v1.x emits a warning, v2 removes --path entirely.",
   "tldr": "Adds four mutually-exclusive scope flags to `dub submit` and `dub ss`, keeps `--path current|stack` working in v1.x with a deprecation warning, refactors the submit plan around a `SubmitScope` discriminated union, and updates every caller, the MCP schema, and the docs to match.",
@@ -257,13 +257,16 @@
     }
   ],
   "adversarialReview": {
-    "iterations": 1,
+    "iterations": 3,
     "critical": 0,
     "major": 0,
-    "minor": 1,
+    "minor": 0,
     "nitpick": 0,
     "findings": [
-      "Reviewer (feature-dev:code-reviewer) flagged one wording nit on the root-branch error path when `--branch <root>` is passed; resolved by replacing the recovery hint with 'Choose a non-root tracked branch name.' before commit."
+      "Round 1 (feature-dev:code-reviewer): one wording nit on the `--branch <root>` recovery hint — fixed pre-commit.",
+      "Round 2 (feature-dev:code-reviewer): silent cycle in getUpstackBranches, missing direct resolveScope tests, --branch help vagueness, --path mutex recovery hint missing, internal coupling of mcp.ts to SubmitPathMode, zero-branch output silence, merge-next still passing deprecated fix:true, public skills doc drift — all fixed in commit d4a5b47.",
+      "Round 3 (Copilot inline review on PR #56): internal callers (stack-maintenance, flow) still triggering --path deprecation warnings, two console.warn spies restored manually instead of via afterEach, 'Submit path' label stale after submitScope rename, QA report diff-stat stale — all fixed in commit ef46021.",
+      "Round 3 also added topologicalOrder cycle guard in state.ts so --stack benefits from the same protection as --upstack/--downstack."
     ]
   },
   "dependencies": [
@@ -288,8 +291,8 @@
     ]
   },
   "commit": {
-    "sha": "0d9ed8b6961a7bf2d982c926ba6e38aa13aa8728",
-    "shortSha": "0d9ed8b",
-    "message": "feat(submit): scope flags --upstack/--downstack/--branch/--stack [DUB-24]"
+    "sha": "ef460216bbe91fd5fae7d30adbcc26ad76671682",
+    "shortSha": "ef46021",
+    "message": "refactor(submit): silence internal --path warnings + UX/test polish [DUB-24]"
   }
 }

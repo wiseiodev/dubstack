@@ -148,13 +148,16 @@ Deterministic CLI evidence: gate runs + built-binary smoke tests for help text, 
 
 ## Adversarial review
 
-Iterations: 1
+Iterations: 3
 
 Remaining critical/major: 0/0
 
-Remaining minor/nitpick: 1/0
+Remaining minor/nitpick: 0/0
 
-- Reviewer (feature-dev:code-reviewer) flagged one wording nit on the root-branch error path when `--branch <root>` is passed; resolved by replacing the recovery hint with 'Choose a non-root tracked branch name.' before commit.
+- Round 1 (feature-dev:code-reviewer): one wording nit on the `--branch <root>` recovery hint — fixed pre-commit.
+- Round 2 (feature-dev:code-reviewer): silent cycle in getUpstackBranches, missing direct resolveScope tests, --branch help vagueness, --path mutex recovery hint missing, internal coupling of mcp.ts to SubmitPathMode, zero-branch output silence, merge-next still passing deprecated fix:true, public skills doc drift — all fixed in commit d4a5b47.
+- Round 3 (Copilot inline review on PR #56): internal callers (stack-maintenance, flow) still triggering --path deprecation warnings, two console.warn spies restored manually instead of via afterEach, 'Submit path' label stale after submitScope rename, QA report diff-stat stale — all fixed in commit ef46021.
+- Round 3 also added topologicalOrder cycle guard in state.ts so --stack benefits from the same protection as --upstack/--downstack.
 
 ## Dependencies
 
@@ -170,5 +173,5 @@ Ship as a v1 feature: new flags are additive, existing scripts keep working with
 ## Commit
 
 ```text
-feat(submit): scope flags --upstack/--downstack/--branch/--stack [DUB-24]
+refactor(submit): silence internal --path warnings + UX/test polish [DUB-24]
 ```
