@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getSubmitPlan } from '../../src/commands/submit';
 import type { DubState } from '../../src/lib/state';
 import { writeState } from '../../src/lib/state';
@@ -14,6 +14,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await cleanup();
 });
 
@@ -72,9 +73,9 @@ describe('submit tree integration', () => {
     await writeState(makeTreeState(), dir);
     await createTreeBranches();
 
-    const plan = await getSubmitPlan(dir, { path: 'stack' });
+    const plan = await getSubmitPlan(dir, { stack: true });
 
-    expect(plan.path).toBe('stack');
+    expect(plan.scope).toEqual({ kind: 'stack' });
     expect(plan.rootBranch).toBe('main');
     // BFS-correct: feat/alpha comes before its child feat/alpha-grandchild,
     // and all main-children come before any grandchild. Siblings under main
@@ -94,16 +95,139 @@ describe('submit tree integration', () => {
     await writeState(makeTreeState(), dir);
     await createTreeBranches();
 
-    await expect(getSubmitPlan(dir, { path: 'stack' })).resolves.toBeDefined();
+    await expect(getSubmitPlan(dir, { stack: true })).resolves.toBeDefined();
   });
 
-  it('limits --path current to the linear path even when siblings exist', async () => {
+  it('default scope (downstack) limits to ancestors of current branch', async () => {
     await writeState(makeTreeState(), dir);
     await createTreeBranches();
     await gitInRepo(dir, ['checkout', 'feat/bravo']);
 
-    const plan = await getSubmitPlan(dir, { path: 'current' });
-    expect(plan.path).toBe('current');
+    const plan = await getSubmitPlan(dir);
+    expect(plan.scope).toEqual({ kind: 'downstack' });
     expect(plan.branches.map((b) => b.name)).toEqual(['feat/bravo']);
+  });
+
+  it('--upstack selects the current branch plus all descendants', async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+    await gitInRepo(dir, ['checkout', 'feat/alpha']);
+
+    const plan = await getSubmitPlan(dir, { upstack: true });
+    expect(plan.scope).toEqual({ kind: 'upstack' });
+    expect(plan.branches.map((b) => b.name)).toEqual([
+      'feat/alpha',
+      'feat/alpha-grandchild',
+    ]);
+  });
+
+  it('--downstack matches default behaviour', async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+    await gitInRepo(dir, ['checkout', 'feat/alpha-grandchild']);
+
+    const plan = await getSubmitPlan(dir, { downstack: true });
+    expect(plan.scope).toEqual({ kind: 'downstack' });
+    expect(plan.branches.map((b) => b.name)).toEqual([
+      'feat/alpha',
+      'feat/alpha-grandchild',
+    ]);
+  });
+
+  it('--branch <name> selects only the named branch', async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+    await gitInRepo(dir, ['checkout', 'feat/alpha-grandchild']);
+
+    const plan = await getSubmitPlan(dir, { branch: 'feat/bravo' });
+    expect(plan.scope).toEqual({ kind: 'branch', branch: 'feat/bravo' });
+    expect(plan.branches.map((b) => b.name)).toEqual(['feat/bravo']);
+  });
+
+  it('--branch <name> rejects untracked branches', async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+
+    await expect(
+      getSubmitPlan(dir, { branch: 'feat/nonexistent' }),
+    ).rejects.toThrow('not part of any tracked stack');
+  });
+
+  it('rejects passing more than one scope flag', async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+
+    await expect(
+      getSubmitPlan(dir, { upstack: true, downstack: true }),
+    ).rejects.toThrow('mutually exclusive');
+  });
+
+  it("'--path current' emits a deprecation warning and behaves like --downstack", async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+    await gitInRepo(dir, ['checkout', 'feat/alpha-grandchild']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const plan = await getSubmitPlan(dir, { path: 'current' });
+    expect(plan.scope).toEqual({ kind: 'downstack' });
+    expect(plan.branches.map((b) => b.name)).toEqual([
+      'feat/alpha',
+      'feat/alpha-grandchild',
+    ]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("'--path current' is deprecated"),
+    );
+    warn.mockRestore();
+  });
+
+  it('--upstack throws an actionable error when stack metadata has a cycle', async () => {
+    const cyclic: DubState = {
+      stacks: [
+        {
+          id: 'cyclic-stack',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'feat/b',
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(cyclic, dir);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+
+    await expect(getSubmitPlan(dir, { upstack: true })).rejects.toThrow(
+      /cycle detected while walking upstack/,
+    );
+  });
+
+  it("'--path stack' emits a deprecation warning and behaves like --stack", async () => {
+    await writeState(makeTreeState(), dir);
+    await createTreeBranches();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const plan = await getSubmitPlan(dir, { path: 'stack' });
+    expect(plan.scope).toEqual({ kind: 'stack' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("'--path stack' is deprecated"),
+    );
+    warn.mockRestore();
   });
 });

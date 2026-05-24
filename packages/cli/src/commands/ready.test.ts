@@ -29,7 +29,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/a',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],
@@ -58,7 +58,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/a',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],
@@ -93,7 +93,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/b2',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
         { name: 'feat/b2', parent: 'feat/a', pr_number: null, pr_link: null },
@@ -104,7 +104,7 @@ describe('ready', () => {
     expect(result.scope).toBe('downstack');
     expect(result.submitBranches).toEqual(['feat/a', 'feat/b2']);
     expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', {
-      path: 'current',
+      downstack: true,
     });
   });
 
@@ -117,7 +117,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/b2',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
         { name: 'feat/b2', parent: 'feat/a', pr_number: null, pr_link: null },
@@ -128,7 +128,7 @@ describe('ready', () => {
     expect(result.scope).toBe('current');
     expect(result.submitBranches).toEqual(['feat/b2']);
     expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', {
-      path: 'current',
+      downstack: true,
     });
   });
 
@@ -141,7 +141,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/b2',
       rootBranch: 'main',
-      path: 'stack',
+      scope: { kind: 'stack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
         { name: 'feat/b1', parent: 'feat/a', pr_number: null, pr_link: null },
@@ -158,6 +158,6 @@ describe('ready', () => {
       'feat/b2',
       'feat/b3',
     ]);
-    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', { path: 'stack' });
+    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', { stack: true });
   });
 });

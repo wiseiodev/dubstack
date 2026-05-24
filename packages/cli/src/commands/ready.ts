@@ -1,13 +1,13 @@
 import type { ScopeMode } from '../lib/scope';
 import { doctor } from './doctor';
-import { getSubmitPlan, type SubmitPathMode } from './submit';
+import { getSubmitPlan, type SubmitOptions, type SubmitScope } from './submit';
 
 export interface ReadyResult {
   ready: boolean;
   scope: ScopeMode;
   checkedBranch: string;
   submitBranches: string[];
-  submitPath: SubmitPathMode | null;
+  submitScope: SubmitScope | null;
   rootBranch: string | null;
   blockers: string[];
 }
@@ -21,13 +21,16 @@ export async function ready(
   const blockers: string[] = doctorResult.issues.map((issue) => issue.code);
 
   let submitBranches: string[] = [];
-  let submitPath: SubmitPathMode | null = null;
+  let submitScope: SubmitScope | null = null;
   let rootBranch: string | null = null;
 
   try {
-    const planPath: SubmitPathMode = scope === 'stack' ? 'stack' : 'current';
-    const plan = await getSubmitPlan(cwd, { path: planPath });
-    submitPath = plan.path;
+    // 'current' uses downstack and narrows to the current branch below;
+    // 'downstack' and 'stack' map directly to submit's same-named scopes.
+    const planOptions: SubmitOptions =
+      scope === 'stack' ? { stack: true } : { downstack: true };
+    const plan = await getSubmitPlan(cwd, planOptions);
+    submitScope = plan.scope;
     rootBranch = plan.rootBranch;
 
     const planBranches = plan.branches.map((b) => b.name);
@@ -48,7 +51,7 @@ export async function ready(
     scope,
     checkedBranch: doctorResult.checkedBranch,
     submitBranches,
-    submitPath,
+    submitScope,
     rootBranch,
     blockers: Array.from(new Set(blockers)),
   };

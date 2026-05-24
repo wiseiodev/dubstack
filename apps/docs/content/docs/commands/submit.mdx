@@ -15,14 +15,17 @@ dub submit --dry-run
 # Generate a PR description body with AI
 dub submit --ai
 
-# Submit only current linear path (default)
-dub submit --path current
+# Submit current branch + ancestors to trunk (default)
+dub submit
+
+# Submit current branch + all descendants
+dub submit --upstack
 
 # Submit the whole stack graph
-dub submit --path stack
+dub submit --stack
 
-# Auto-fallback to current path when stack-mode is blocked
-dub submit --path stack --fix
+# Submit only a single named branch
+dub submit --branch feat/api
 ```
 
 ## Flags
@@ -32,11 +35,33 @@ dub submit --path stack --fix
 | `--dry-run` | Preview submit actions without executing |
 | `--ai` | Generate a PR description body for this invocation |
 | `--no-ai` | Disable AI PR description generation for this invocation |
-| `--path current` | Submit only current linear path (default) |
-| `--path stack` | Submit the whole stack graph |
-| `--fix` | Auto-fallback to current path when stack-mode is blocked |
+| (default) | Current branch + ancestors to trunk |
+| `--downstack` | Same as default — current branch + ancestors to trunk |
+| `--upstack` | Current branch + all descendants |
+| `--stack` | Full tree from trunk |
+| `--branch <name>` | Only the specified branch |
+| `--path <mode>` | _[deprecated]_ `current` maps to `--downstack`; `stack` maps to `--stack`. Removed in v2. |
+| `--fix` | _[deprecated]_ No-op alias retained for script compatibility |
+
+Scope flags are mutually exclusive. Passing more than one (or combining a scope flag with `--path`) is a validation error.
 
 **Aliases:** `dub ss`
+
+## Migration from `--path`
+
+`--path current` and `--path stack` still work in v1.x but emit a deprecation warning:
+
+```
+⚠ '--path current' is deprecated. Use '--downstack' instead. This will stop working in v2.
+⚠ '--path stack' is deprecated. Use '--stack' instead. This will stop working in v2.
+```
+
+Replace usage as follows:
+
+| v1.x | Replacement |
+|---|---|
+| `dub submit --path current` | `dub submit` (or `dub submit --downstack`) |
+| `dub submit --path stack` | `dub submit --stack` |
 
 When AI submit defaults are enabled for the repository, `--no-ai` lets you force a manual PR body update for one run. AI submit only writes the PR description body; the PR title still comes from the last commit message.
 

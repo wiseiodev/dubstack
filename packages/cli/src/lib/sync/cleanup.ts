@@ -1,27 +1,10 @@
+import type {
+  CleanupDeleteOp,
+  CleanupOperation,
+  CleanupReason,
+  CleanupReparentOp,
+} from '../cleanup-journal';
 import type { BranchPrLifecycleState } from '../github';
-
-export type CleanupReason =
-  | 'merged-pr'
-  | 'merged-pr-with-trailing-commits'
-  | 'closed-pr-merged-into-trunk'
-  | 'merged-by-patch-id'
-  /** Branch has zero unique commits relative to its parent. */
-  | 'empty-branch';
-
-export interface CleanupDeleteOp {
-  type: 'delete';
-  branch: string;
-  reason: CleanupReason;
-}
-
-export interface CleanupReparentOp {
-  type: 'reparent';
-  branch: string;
-  oldParent: string | null;
-  newParent: string | null;
-}
-
-export type CleanupOperation = CleanupDeleteOp | CleanupReparentOp;
 
 export interface CleanupPlan {
   /** Ordered list of operations to apply (deletes + reparents). */

@@ -48,7 +48,7 @@ import { prune } from './commands/prune';
 import { ready } from './commands/ready';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
-import type { SubmitPathMode } from './commands/submit';
+import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
 import { track } from './commands/track';
@@ -714,21 +714,29 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--upstack', 'Submit current branch + all descendants')
+  .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
+  .option('--stack', 'Submit the full tree from trunk')
+  .option(
+    '--branch <name>',
+    'Submit exactly this one branch (no ancestors, no descendants)',
+  )
   .option(
     '--path <mode>',
-    'Submit scope: current (default) or stack',
+    "[deprecated] Use --downstack (for 'current') or --stack",
     parseSubmitPath,
-    'current',
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub submit           Push and create/update PRs
-  $ dub submit --dry-run Preview what would happen
-  $ dub submit --ai      Generate a PR description before updating the PR body
-  $ dub submit --path stack Submit every branch in the stack (trees supported)`,
+  $ dub submit              Push current branch + ancestors and create/update PRs (default)
+  $ dub submit --upstack    Push current branch + all descendants
+  $ dub submit --stack      Push every branch in the stack (trees supported)
+  $ dub submit --branch foo Push only the 'foo' branch
+  $ dub submit --dry-run    Preview what would happen
+  $ dub submit --ai         Generate a PR description before updating the PR body`,
   )
   .action(runSubmit);
 
@@ -738,11 +746,17 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--upstack', 'Submit current branch + all descendants')
+  .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
+  .option('--stack', 'Submit the full tree from trunk')
+  .option(
+    '--branch <name>',
+    'Submit exactly this one branch (no ancestors, no descendants)',
+  )
   .option(
     '--path <mode>',
-    'Submit scope: current (default) or stack',
+    "[deprecated] Use --downstack (for 'current') or --stack",
     parseSubmitPath,
-    'current',
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
   .action(runSubmit);
@@ -868,6 +882,31 @@ program
       submit?: boolean;
     }) => {
       const result = await mergeNext(process.cwd(), options);
+      const printSiblingHint = () => {
+        if (result.siblingCandidates.length > 0) {
+          console.log(
+            chalk.dim(
+              `ℹ Other mergeable candidates at this stack level: ${result.siblingCandidates.join(', ')}`,
+            ),
+          );
+          console.log(
+            chalk.dim(
+              "   Switch with 'dub co <branch>' and rerun 'dub merge-next'.",
+            ),
+          );
+        }
+        if (result.blockedSiblings.length > 0) {
+          const summary = result.blockedSiblings
+            .map(
+              (s) =>
+                `${s.branch} (PR #${s.prNumber}: ${s.mergeable}/${s.mergeStateStatus})`,
+            )
+            .join(', ');
+          console.log(
+            chalk.yellow(`⚠ Blocked siblings at this stack level: ${summary}`),
+          );
+        }
+      };
       if (result.dryRun) {
         console.log(
           chalk.green(
@@ -881,6 +920,7 @@ program
             ),
           );
         }
+        printSiblingHint();
         return;
       }
       console.log(
@@ -895,6 +935,7 @@ program
           ),
         );
       }
+      printSiblingHint();
     },
   );
 
@@ -1468,19 +1509,27 @@ async function runSubmit(options: {
   ai?: boolean;
   noAi?: boolean;
   path?: SubmitPathMode;
+  upstack?: boolean;
+  downstack?: boolean;
+  stack?: boolean;
+  branch?: string;
   fix?: boolean;
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
     noAi: options.noAi,
-    path: options.path ?? 'current',
+    path: options.path,
+    upstack: options.upstack,
+    downstack: options.downstack,
+    stack: options.stack,
+    branch: options.branch,
     fix: options.fix ?? false,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
     console.log(
       chalk.green(
-        `✔ Dry-run complete (${result.path} path): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
+        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
       ),
     );
     return;
@@ -1495,7 +1544,15 @@ async function runSubmit(options: {
     for (const branch of [...result.created, ...result.updated]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
+    return;
   }
+
+  const scopeLabel = describeScopeLabel(result.scope);
+  console.log(
+    chalk.yellow(
+      `⚠ Nothing to push for ${scopeLabel}. The selected scope contains no submittable branches.`,
+    ),
+  );
 }
 
 async function runFlow(options: {
@@ -1572,9 +1629,22 @@ function parseSteps(positional?: string, option?: string): number {
 function parseSubmitPath(value: string): SubmitPathMode {
   if (value === 'current' || value === 'stack') return value;
   throw new DubError("Submit path must be either 'current' or 'stack'.", [
-    "Pass '--path current' to submit your current linear path.",
-    "Pass '--path stack' to submit every branch in the stack.",
+    "Pass '--downstack' (replaces '--path current').",
+    "Pass '--stack' (replaces '--path stack').",
   ]);
+}
+
+function describeScopeLabel(scope: SubmitScope): string {
+  switch (scope.kind) {
+    case 'stack':
+      return 'stack';
+    case 'upstack':
+      return 'upstack';
+    case 'downstack':
+      return 'downstack';
+    case 'branch':
+      return `branch ${scope.branch}`;
+  }
 }
 
 function parsePositiveInt(value: string): number {

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/git.js', () => ({
   getBranchTip: vi.fn(),
@@ -54,7 +54,7 @@ import {
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
-import { submit } from './submit';
+import { resolveScope, submit } from './submit';
 
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 const mockGetBranchTip = getBranchTip as ReturnType<typeof vi.fn>;
@@ -136,6 +136,10 @@ function makeState(
     ],
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -456,9 +460,9 @@ describe('submit', () => {
       ]),
     );
 
-    const result = await submit('/repo', true, { path: 'stack' });
+    const result = await submit('/repo', true, { stack: true });
     expect(result.pushed).toEqual(['feat/a', 'feat/b']);
-    expect(result.path).toBe('stack');
+    expect(result.scope).toEqual({ kind: 'stack' });
   });
 
   it('defaults to current path and submits only the current linear path', async () => {
@@ -486,7 +490,7 @@ describe('submit', () => {
       ]),
     );
 
-    const result = await submit('/repo', true, { path: 'stack', fix: true });
+    const result = await submit('/repo', true, { stack: true, fix: true });
     expect(result.pushed).toEqual(['feat/a', 'feat/b']);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining("'--fix' is deprecated"),
@@ -653,5 +657,173 @@ describe('submit', () => {
       (b) => b.name === 'feat/a',
     );
     expect(featBranch?.parent_revision).toBe('original-fork-sha');
+  });
+
+  it('--upstack submits the current branch plus all descendants in BFS order', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/a-bravo', parent: 'feat/a' },
+        { name: 'feat/a-alpha', parent: 'feat/a' },
+        { name: 'feat/a-alpha-deep', parent: 'feat/a-alpha' },
+        { name: 'feat/other', parent: 'main' },
+      ]),
+    );
+
+    const result = await submit('/repo', true, { upstack: true });
+
+    expect(result.pushed).toEqual([
+      'feat/a',
+      'feat/a-alpha',
+      'feat/a-bravo',
+      'feat/a-alpha-deep',
+    ]);
+    expect(result.scope).toEqual({ kind: 'upstack' });
+  });
+
+  it('--branch <name> submits only the named branch even when not currently checked out', async () => {
+    mockGetCurrentBranch.mockResolvedValue('main');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+
+    const result = await submit('/repo', true, { branch: 'feat/b' });
+
+    expect(result.pushed).toEqual(['feat/b']);
+    expect(result.scope).toEqual({ kind: 'branch', branch: 'feat/b' });
+  });
+
+  it('--branch <name> rejects untracked branches', async () => {
+    mockGetCurrentBranch.mockResolvedValue('main');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+
+    await expect(
+      submit('/repo', true, { branch: 'feat/nonexistent' }),
+    ).rejects.toThrow('not part of any tracked stack');
+  });
+
+  it('--branch <name> rejects a root branch with an actionable error', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+
+    await expect(submit('/repo', true, { branch: 'main' })).rejects.toThrow(
+      "Cannot submit root branch 'main'",
+    );
+  });
+
+  it("'--path current' still works in v1 and emits the deprecation warning", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+
+    const result = await submit('/repo', true, { path: 'current' });
+
+    expect(result.pushed).toEqual(['feat/a']);
+    expect(result.scope).toEqual({ kind: 'downstack' });
+    expect(warn).toHaveBeenCalledWith(
+      "⚠ '--path current' is deprecated. Use '--downstack' instead. This will stop working in v2.",
+    );
+    warn.mockRestore();
+  });
+
+  it("'--path stack' still works in v1 and emits the deprecation warning", async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'main' },
+      ]),
+    );
+
+    const result = await submit('/repo', true, { path: 'stack' });
+
+    expect(result.pushed).toEqual(['feat/a', 'feat/b']);
+    expect(result.scope).toEqual({ kind: 'stack' });
+    expect(warn).toHaveBeenCalledWith(
+      "⚠ '--path stack' is deprecated. Use '--stack' instead. This will stop working in v2.",
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('resolveScope', () => {
+  it('returns downstack for empty options (default)', () => {
+    expect(resolveScope({})).toEqual({ kind: 'downstack' });
+  });
+
+  it('returns the matching scope for each explicit flag', () => {
+    expect(resolveScope({ upstack: true })).toEqual({ kind: 'upstack' });
+    expect(resolveScope({ downstack: true })).toEqual({ kind: 'downstack' });
+    expect(resolveScope({ stack: true })).toEqual({ kind: 'stack' });
+    expect(resolveScope({ branch: 'feat/x' })).toEqual({
+      kind: 'branch',
+      branch: 'feat/x',
+    });
+  });
+
+  it('rejects multiple scope flags with an actionable error', () => {
+    expect(() => resolveScope({ upstack: true, downstack: true })).toThrow(
+      'Scope flags are mutually exclusive: --upstack, --downstack.',
+    );
+    expect(() => resolveScope({ stack: true, branch: 'feat/x' })).toThrow(
+      'Scope flags are mutually exclusive: --stack, --branch.',
+    );
+  });
+
+  it('includes a --path-specific recovery hint when --path is part of the mutex conflict', () => {
+    try {
+      resolveScope({ upstack: true, path: 'current' });
+      throw new Error('expected resolveScope to throw');
+    } catch (error) {
+      expect(error).toMatchObject({
+        message: expect.stringContaining(
+          'mutually exclusive: --upstack, --path',
+        ),
+        recovery: expect.arrayContaining([
+          expect.stringContaining("Drop '--path'"),
+        ]),
+      });
+    }
+  });
+
+  it("warns and maps '--path current' to downstack", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(resolveScope({ path: 'current' })).toEqual({ kind: 'downstack' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("'--path current' is deprecated"),
+    );
+    warn.mockRestore();
+  });
+
+  it("warns and maps '--path stack' to stack", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(resolveScope({ path: 'stack' })).toEqual({ kind: 'stack' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("'--path stack' is deprecated"),
+    );
+    warn.mockRestore();
   });
 });

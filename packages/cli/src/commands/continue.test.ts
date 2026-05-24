@@ -1,16 +1,16 @@
 import { execa } from 'execa';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resumeCleanup } from '../lib/cleanup-resume';
 import { DubError } from '../lib/errors';
 import { rebaseContinue } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
-import { resumeCleanup } from '../lib/sync/cleanup-resume';
 import { aiResolve } from './ai-resolve';
 import { continueCommand } from './continue';
 import { restackContinue } from './restack';
 
 vi.mock('../lib/operation-state');
 vi.mock('../lib/git');
-vi.mock('../lib/sync/cleanup-resume');
+vi.mock('../lib/cleanup-resume');
 vi.mock('./restack');
 vi.mock('./ai-resolve');
 vi.mock('execa');

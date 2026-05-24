@@ -1,8 +1,8 @@
 import { execa } from 'execa';
+import { resumeCleanup } from '../lib/cleanup-resume';
 import { DubError } from '../lib/errors';
 import { rebaseContinue } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
-import { resumeCleanup } from '../lib/sync/cleanup-resume';
 import { aiResolve } from './ai-resolve';
 import { restackContinue } from './restack';
 

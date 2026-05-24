@@ -315,6 +315,8 @@ function normalizeBranch(branch: Branch): Branch {
  * Returns branches in topological (BFS) order starting from the root.
  * Siblings are emitted in deterministic ascending order by branch name so
  * downstream operations (submit, restack) walk trees predictably.
+ *
+ * @throws {DubError} If stack metadata contains a cycle reachable from root.
  */
 export function topologicalOrder(stack: Stack): Branch[] {
   const result: Branch[] = [];
@@ -334,9 +336,20 @@ export function topologicalOrder(stack: Stack): Branch[] {
   }
 
   const queue = [root];
+  const seen = new Set<string>();
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current) break;
+    if (seen.has(current.name)) {
+      throw new DubError(
+        `Stack metadata is invalid: cycle detected at '${current.name}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack and surface the bad parent link.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch.",
+        ],
+      );
+    }
+    seen.add(current.name);
     result.push(current);
     const children = childMap.get(current.name) ?? [];
     queue.push(...children);

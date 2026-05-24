@@ -24,7 +24,7 @@ vi.mock('../lib/git.js', () => ({
   remoteBranchExists: vi.fn(),
 }));
 
-vi.mock('../lib/sync/journal.js', () => ({
+vi.mock('../lib/cleanup-journal.js', () => ({
   startCleanupJournal: vi.fn().mockResolvedValue({
     version: 1,
     started_at: 'mock',
@@ -236,7 +236,7 @@ beforeEach(() => {
     pushed: ['feat/a'],
     created: [],
     updated: ['feat/a'],
-    path: 'current',
+    scope: { kind: 'downstack' },
     dryRun: false,
   });
 });
@@ -749,14 +749,16 @@ describe('sync', () => {
           `expected surviving child checkout, got ${lastCheckout}`,
         );
       }
-      if (options?.path !== 'stack') {
-        throw new Error(`expected full-stack refresh, got ${options?.path}`);
+      if (options?.stack !== true) {
+        throw new Error(
+          `expected full-stack refresh, got ${JSON.stringify(options)}`,
+        );
       }
       return {
         pushed: ['feat/b', 'feat/c'],
         created: [],
         updated: ['feat/b', 'feat/c'],
-        path: 'stack',
+        scope: { kind: 'stack' },
         dryRun: false,
       };
     });
@@ -765,8 +767,7 @@ describe('sync', () => {
 
     expect(mockRetargetPrBase).toHaveBeenCalledWith('feat/b', 'main', '/repo');
     expect(mockSubmit).toHaveBeenCalledWith('/repo', false, {
-      path: 'stack',
-      fix: true,
+      stack: true,
     });
     expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/b', '/repo');
   });
@@ -2029,7 +2030,7 @@ describe('sync', () => {
         pushed: [],
         created: [],
         updated: [],
-        path: 'current',
+        scope: { kind: 'downstack' },
         dryRun: false,
       });
 

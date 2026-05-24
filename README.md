@@ -402,15 +402,22 @@ dub submit --dry-run
 # AI-generate PR description body
 dub submit --ai
 
-# submit only current linear path (default)
-dub submit --path current
+# submit current branch + ancestors to trunk (default)
+dub submit
 
-# submit the whole stack graph (requires linearity)
-dub submit --path stack
+# submit current branch + all descendants
+dub submit --upstack
 
-# auto-fallback to current path when stack-mode is blocked
-dub submit --path stack --fix
+# submit the whole stack graph (trees supported)
+dub submit --stack
+
+# submit only a single named branch
+dub submit --branch feat/api
 ```
+
+Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exclusive. Passing more than one is a validation error.
+
+`--path current` and `--path stack` still work but emit a deprecation warning and will be removed in v2. Use `--downstack` and `--stack` respectively.
 
 Notes:
 - `--no-ai` disables AI PR description generation for one invocation.
@@ -527,7 +534,7 @@ If `dub doctor` reports a GitHub base mismatch, refresh that base first, then re
 ```bash
 git checkout main && git pull --ff-only origin main
 dub restack
-dub submit --path current
+dub submit
 ```
 
 ### `dub ready`
@@ -909,8 +916,8 @@ dub prune --apply
 # 4) Re-run pre-submit checks
 dub ready
 
-# 5) Submit current linear path
-dub submit --path current
+# 5) Submit current branch + ancestors
+dub submit
 ```
 
 ## State Files
