@@ -13,6 +13,7 @@
     "submit",
     "sync",
     "restack",
+    "split",
     "merge-next",
     "post-merge",
     "move",

@@ -605,23 +605,6 @@ export async function getCommitMessagesBetween(
   }
 }
 
-/**
- * Soft-resets HEAD to the given ref, keeping the working tree and index
- * intact. The pre-reset commits' changes remain staged.
- *
- * @throws {DubError} If the reset fails (e.g. ref does not exist).
- */
-export async function softResetTo(ref: string, cwd: string): Promise<void> {
-  try {
-    await execa('git', ['reset', '--soft', ref], { cwd });
-  } catch {
-    throw new DubError(`Failed to soft-reset HEAD to '${ref}'.`, [
-      `Run 'git reset --soft ${ref}' manually to inspect the underlying error.`,
-      "Run 'git status' to confirm the repository is in a clean state.",
-    ]);
-  }
-}
-
 /** Per-branch commit metadata returned by {@link getBranchCommitMetaBatch}. */
 export interface BranchCommitMeta {
   /** `git for-each-ref %(committerdate:relative)`, e.g. "3 hours ago". */
@@ -889,6 +872,9 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
  * (column 2 of `git status --porcelain` is not space). Runs with
  * `--untracked-files=no` so untracked files are never reported; they are
  * intentionally ignored because `git reset --hard` does not touch them.
+ *
+ * Differs from {@link isWorkingTreeClean} which flags staged changes too —
+ * use this when you need to know whether the index and working tree diverge.
  */
 export async function hasUnstagedTrackedChanges(cwd: string): Promise<boolean> {
   const { stdout } = await execa(
@@ -1627,4 +1613,393 @@ function isFastForwardConflictError(output: string): boolean {
     normalized.includes('not possible to fast-forward') ||
     normalized.includes('cannot fast-forward')
   );
+}
+
+/** A commit on a branch range. */
+export interface CommitInfo {
+  sha: string;
+  subject: string;
+}
+
+/**
+ * Lists commits reachable from `headRef` but not from `baseRef`, oldest first.
+ */
+export async function listCommitsBetween(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<CommitInfo[]> {
+  // Use ASCII unit separator (0x1f) as the SHA/subject delimiter — git
+  // disallows control characters in commit subjects, so this byte cannot
+  // appear inside %s and parsing stays unambiguous even for commit messages
+  // that contain `<<<...>>>`-style markers, pipes, tabs, or other quoting.
+  const FIELD_SEP = '\x1f';
+  try {
+    const { stdout } = await execa(
+      'git',
+      [
+        'log',
+        '--reverse',
+        `--format=%H${FIELD_SEP}%s`,
+        `${baseRef}..${headRef}`,
+      ],
+      { cwd },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const sepIdx = line.indexOf(FIELD_SEP);
+        if (sepIdx === -1) return { sha: line.trim(), subject: '' };
+        return {
+          sha: line.slice(0, sepIdx).trim(),
+          subject: line.slice(sepIdx + 1).trim(),
+        };
+      })
+      .filter((c) => c.sha.length > 0);
+  } catch {
+    throw new DubError(`Failed to list commits in ${baseRef}..${headRef}.`, [
+      `Run 'git log ${baseRef}..${headRef}' manually to inspect the error.`,
+    ]);
+  }
+}
+
+/**
+ * Cherry-picks a commit onto the current branch.
+ * @throws {DubError} On conflict or git failure.
+ */
+export async function cherryPick(sha: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['cherry-pick', sha], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Cherry-pick of '${sha}' failed.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        "Resolve conflicts and run 'git cherry-pick --continue'.",
+        "Run 'git cherry-pick --abort' to roll back the cherry-pick.",
+      ],
+    );
+  }
+}
+
+/**
+ * Aborts an in-progress cherry-pick.
+ */
+export async function cherryPickAbort(cwd: string): Promise<void> {
+  try {
+    await execa('git', ['cherry-pick', '--abort'], { cwd });
+  } catch {
+    // ignore — no cherry-pick in progress
+  }
+}
+
+/**
+ * Hard-resets the currently checked-out branch to a SHA.
+ * @throws {DubError} If reset fails.
+ */
+export async function resetHard(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--hard', ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to reset current branch to '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git status' to inspect uncommitted changes blocking the reset.",
+        "Run 'git stash' to set aside local changes, then retry.",
+      ],
+    );
+  }
+}
+
+/**
+ * Checks out specific paths from a ref into the working tree.
+ * Used by split to copy file contents from one branch to another.
+ */
+export async function checkoutPathsFromRef(
+  ref: string,
+  paths: string[],
+  cwd: string,
+): Promise<void> {
+  if (paths.length === 0) return;
+  try {
+    await execa('git', ['checkout', ref, '--', ...paths], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to checkout paths from '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git checkout ${ref} -- ${paths.join(' ')}' manually to inspect the error.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Adds (stages) the given paths.
+ */
+export async function addPaths(paths: string[], cwd: string): Promise<void> {
+  if (paths.length === 0) return;
+  try {
+    await execa('git', ['add', '--', ...paths], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure('Failed to stage paths.', readGitCommandOutput(error)),
+      [`Run 'git add ${paths.join(' ')}' manually to inspect the error.`],
+    );
+  }
+}
+
+/**
+ * Removes the given paths from the index and working tree.
+ * Used by split when extracting a new file to the new branch — the original
+ * branch must drop the file so the split is net-zero.
+ */
+export async function removePaths(paths: string[], cwd: string): Promise<void> {
+  if (paths.length === 0) return;
+  try {
+    await execa('git', ['rm', '-f', '--', ...paths], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure('Failed to remove paths.', readGitCommandOutput(error)),
+      [`Run 'git rm -f ${paths.join(' ')}' manually to inspect the error.`],
+    );
+  }
+}
+
+/**
+ * Returns the list of paths that exist (as files) at the given ref.
+ */
+export async function listPathsAtRef(
+  ref: string,
+  paths: string[],
+  cwd: string,
+): Promise<string[]> {
+  if (paths.length === 0) return [];
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['ls-tree', '-r', '--name-only', ref, '--', ...paths],
+      { cwd },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Runs `git checkout -p <ref>` interactively so the user picks hunks from
+ * `ref` to apply to the working tree of the current branch.
+ *
+ * Uses `stdio: 'inherit'` so the user can interact with git directly.
+ */
+export async function interactivePatchCheckout(
+  ref: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['checkout', '-p', ref], { cwd, stdio: 'inherit' });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        'Interactive hunk selection failed.',
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git checkout -p ${ref}' manually to inspect the error.`,
+        "Run 'git status' to confirm the working tree state.",
+      ],
+    );
+  }
+}
+
+/**
+ * Creates a new branch starting at a specific commit/ref and switches to it.
+ * Use this when you need the new branch anchored to a captured SHA rather
+ * than a possibly-moving branch tip (e.g. so a background fetch updating
+ * the parent ref cannot relocate the new branch's starting point).
+ *
+ * @throws {DubError} If a branch with that name already exists or `ref` is unknown.
+ */
+export async function createBranchFrom(
+  name: string,
+  ref: string,
+  cwd: string,
+): Promise<void> {
+  if (await branchExists(name, cwd)) {
+    throw new DubError(`Branch '${name}' already exists.`, [
+      `Run 'dub checkout ${name}' to switch to the existing branch.`,
+      'Pick a different branch name and retry.',
+      `Run 'dub delete ${name}' to remove the existing branch first.`,
+    ]);
+  }
+  try {
+    await execa('git', ['checkout', '-b', name, ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to create branch '${name}' from '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git rev-parse ${ref}' to confirm the ref exists.`,
+        `Run 'git checkout -b ${name} ${ref}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Soft-resets the currently checked-out branch to a ref. Leaves the index
+ * holding the difference between the old tip and `ref`, and the working tree
+ * untouched.
+ */
+export async function softResetTo(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--soft', ref], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to soft-reset current branch to '${ref}'.`,
+        readGitCommandOutput(error),
+      ),
+      [`Run 'git reset --soft ${ref}' manually to inspect the error.`],
+    );
+  }
+}
+
+/**
+ * Sentinel thrown by {@link interactiveResetPatch} when the user quits the
+ * interactive prompt (presses `q`). Callers can branch on this to emit a
+ * "split aborted by user" message instead of a generic git-failure error.
+ */
+export class InteractivePatchQuitError extends Error {
+  constructor() {
+    super('Interactive hunk session quit by user.');
+    this.name = 'InteractivePatchQuitError';
+  }
+}
+
+/**
+ * Runs `git reset --patch HEAD` interactively so the user can selectively
+ * unstage hunks. Hunks the user answers `y` to are unstaged into the working
+ * tree; hunks answered `n` to remain in the index.
+ *
+ * @throws {InteractivePatchQuitError} If the user quit the prompt (exit code 1
+ *   with no stderr — git's signal for a clean `q`).
+ * @throws {DubError} For any other failure.
+ */
+export async function interactiveResetPatch(cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--patch', 'HEAD'], {
+      cwd,
+      stdio: 'inherit',
+    });
+  } catch (error) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    const stderr = readGitCommandOutput(error).trim();
+    if (exitCode === 1 && stderr.length === 0) {
+      // `git reset --patch` exits 1 with no stderr when the user presses `q`.
+      throw new InteractivePatchQuitError();
+    }
+    throw new DubError(
+      formatGitFailure('Interactive hunk reset failed.', stderr),
+      [
+        "Run 'git reset --patch HEAD' manually to inspect the error.",
+        "Run 'git status' to confirm the working tree state.",
+      ],
+    );
+  }
+}
+
+/**
+ * Stashes the working-tree changes (including untracked files) while keeping
+ * the index intact. Returns true if a stash entry was created, false when
+ * there was nothing to stash.
+ */
+export async function stashKeepIndex(
+  message: string,
+  cwd: string,
+): Promise<boolean> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['stash', 'push', '--keep-index', '--include-untracked', '-m', message],
+      { cwd },
+    );
+    return !/No local changes to save/i.test(stdout);
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        'Failed to stash working-tree changes.',
+        readGitCommandOutput(error),
+      ),
+      [
+        "Run 'git stash push --keep-index --include-untracked' manually to inspect the error.",
+      ],
+    );
+  }
+}
+
+/**
+ * Pops the most recent stash entry. Throws on conflict.
+ */
+export async function stashPop(cwd: string): Promise<void> {
+  try {
+    await execa('git', ['stash', 'pop'], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure('Failed to pop stash.', readGitCommandOutput(error)),
+      [
+        "Run 'git stash list' to inspect the stashes.",
+        "Run 'git stash pop' manually to inspect the error.",
+      ],
+    );
+  }
+}
+
+/**
+ * Drops the most recent stash entry. Best-effort — never throws.
+ */
+export async function stashDropTop(cwd: string): Promise<void> {
+  try {
+    await execa('git', ['stash', 'drop'], { cwd });
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+/**
+ * Lists files changed between two refs (merge-base aware via `...`).
+ */
+export async function getDiffFileNamesBetween(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['diff', '--name-only', `${baseRef}...${headRef}`],
+      { cwd },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
