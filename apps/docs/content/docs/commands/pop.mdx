@@ -1,0 +1,42 @@
+---
+title: dub pop
+description: Pop the last commit(s) off the current branch into the staging area for re-editing.
+---
+
+## Usage
+
+```bash
+# Pop one commit; its changes become staged.
+dub pop
+
+# Pop the last three commits; their changes squash into the staging area.
+dub pop --steps 3
+```
+
+After `dub pop`, edit the files and re-commit with `dub modify`. Descendants restack lazily — the next `dub modify` that produces a new commit rebases them automatically.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-n, --steps <count>` | Number of commits to pop (default: 1) |
+
+## Safety
+
+- Refuses to pop past the parent branch.
+- Refuses to pop when the working tree has uncommitted changes (they would conflict with the staged pop output).
+- Saves an undo entry so `dub undo` restores the popped commits.
+
+## Common Pattern
+
+Edit a commit you just landed without `git reset --soft` gymnastics:
+
+```bash
+# Pop the last commit; changes are now staged.
+dub pop
+
+# Tweak files in your editor.
+
+# Recommit with a fresh message; descendants restack automatically.
+dub modify -a -m "feat: clearer commit message"
+```

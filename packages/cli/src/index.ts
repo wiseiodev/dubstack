@@ -44,6 +44,7 @@ import { mergeNext } from './commands/merge-next';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
+import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
@@ -51,6 +52,7 @@ import { ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
@@ -890,7 +892,9 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create, dub restack, or dub rename operation')
+  .description(
+    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+  )
   .addHelpText(
     'after',
     `
@@ -1731,6 +1735,39 @@ program
   });
 
 program
+  .command('pop')
+  .description(
+    'Pop the last commit(s) off the current branch into the staging area',
+  )
+  .option(
+    '-n, --steps <count>',
+    'Number of commits to pop (default: 1)',
+    parsePositiveInt,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub pop                Pop last commit into staged changes
+  $ dub pop --steps 3      Squash last 3 commits into staged changes
+  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)`,
+  )
+  .action(async (options: { steps?: number }) => {
+    const result = await pop(process.cwd(), { steps: options.steps });
+    const noun = result.steps === 1 ? 'commit' : 'commits';
+    console.log(
+      chalk.green(
+        `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
+      ),
+    );
+  });
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
@@ -1789,6 +1826,103 @@ Examples:
       }
     },
   );
+
+const stashCommand = program
+  .command('stash')
+  .description(
+    'Branch-aware stash: capture working tree + record source branch so pop can refuse mismatched branches',
+  )
+  .option(
+    '-m, --message <message>',
+    'Override the default stash message (default: branch + timestamp)',
+  )
+  .option('--list', "Alias for 'dub stash list' — show recorded stashes")
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub stash                                Stash on current branch
+  $ dub stash -m "wip: refactor"             Stash with custom message
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless
+  $ dub stash list                           Show recorded stashes with branch context`,
+  )
+  .action(async (options: { message?: string; list?: boolean }) => {
+    if (options.list) {
+      await runStashList();
+      return;
+    }
+    const result = await stashPush(process.cwd(), { message: options.message });
+    console.log(
+      chalk.green(
+        `✔ Stashed on '${result.branch}' (${result.sha.slice(0, 7)})`,
+      ),
+    );
+    console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    console.log(
+      chalk.dim(
+        `  ↳ run 'dub stash pop' on '${result.branch}' to restore, or 'dub stash pop --on <branch>' to move it.`,
+      ),
+    );
+  });
+
+stashCommand.addCommand(
+  new Command('pop')
+    .description('Pop the most recent dub stash (refuses if branch differs)')
+    .option('--on <branch>', 'Checkout <branch> first, then pop the stash')
+    .option(
+      '--force',
+      "Pop onto the current branch even if it doesn't match the recorded branch",
+    )
+    .addHelpText(
+      'after',
+      `
+Examples:
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless`,
+    )
+    .action(async (options: { on?: string; force?: boolean }) => {
+      const result = await stashPop(process.cwd(), {
+        on: options.on,
+        force: options.force,
+      });
+      if (result.checkedOut) {
+        console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+      }
+      const label =
+        result.sourceBranch === result.branch
+          ? `'${result.branch}'`
+          : `'${result.branch}' (originally on '${result.sourceBranch}')`;
+      console.log(chalk.green(`✔ Popped stash on ${label}`));
+      console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    }),
+);
+
+stashCommand.addCommand(
+  new Command('list')
+    .description('Show recorded dub stashes with branch context')
+    .action(runStashList),
+);
+
+async function runStashList(): Promise<void> {
+  const result = await stashList(process.cwd());
+  if (result.entries.length === 0) {
+    console.log(chalk.dim('No dub stash entries recorded.'));
+    return;
+  }
+  for (let i = 0; i < result.entries.length; i += 1) {
+    const entry = result.entries[i];
+    const prefix = `${i}:`;
+    const refLabel = entry.ref ?? '(dropped)';
+    const presence = entry.present ? chalk.green('●') : chalk.yellow('○');
+    console.log(
+      `${presence} ${chalk.bold(prefix)} ${chalk.cyan(entry.branch)}  ${chalk.dim(refLabel)}  ${chalk.dim(entry.createdAt)}`,
+    );
+    console.log(chalk.dim(`    ↳ ${entry.message}`));
+  }
+}
 
 async function runSubmit(options: {
   dryRun?: boolean;

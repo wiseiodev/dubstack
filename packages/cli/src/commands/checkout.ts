@@ -6,6 +6,7 @@ import {
   branchPickerPrompt,
 } from '../lib/branch-picker';
 import { formatBranchLabel } from '../lib/branch-picker-format';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { copyToClipboard } from '../lib/clipboard';
 import { DubError } from '../lib/errors';
 import {
@@ -100,6 +101,7 @@ export async function checkout(
   cwd: string,
 ): Promise<{ branch: string }> {
   await checkoutBranch(name, cwd);
+  await appendCheckoutHistory(cwd, name, { via: 'checkout' });
   return { branch: name };
 }
 

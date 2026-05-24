@@ -5,6 +5,7 @@
     "repo",
     "create",
     "modify",
+    "pop",
     "checkout",
     "log",
     "navigate",
@@ -18,6 +19,7 @@
     "doctor",
     "track",
     "rename",
+    "stash",
     "skills"
   ]
 }

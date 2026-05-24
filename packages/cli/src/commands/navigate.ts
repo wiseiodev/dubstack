@@ -1,3 +1,4 @@
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { DubError } from '../lib/errors';
 import { checkoutBranch, getCurrentBranch } from '../lib/git';
 import { findStackForBranch, readState, type Stack } from '../lib/state';
@@ -84,6 +85,7 @@ export async function upBySteps(
   }
 
   await checkoutBranch(target, cwd);
+  await appendCheckoutHistory(cwd, target, { via: 'up' });
   return { branch: target, changed: target !== current };
 }
 
@@ -138,6 +140,7 @@ export async function downBySteps(
   }
 
   await checkoutBranch(target, cwd);
+  await appendCheckoutHistory(cwd, target, { via: 'down' });
   return { branch: target, changed: target !== current };
 }
 
@@ -170,6 +173,7 @@ export async function top(cwd: string): Promise<NavigateResult> {
 
   if (target !== current) {
     await checkoutBranch(target, cwd);
+    await appendCheckoutHistory(cwd, target, { via: 'top' });
   }
   return { branch: target, changed: target !== current };
 }
@@ -232,6 +236,7 @@ export async function bottom(cwd: string): Promise<NavigateResult> {
 
   if (target !== current) {
     await checkoutBranch(target, cwd);
+    await appendCheckoutHistory(cwd, target, { via: 'bottom' });
   }
   return { branch: target, changed: target !== current };
 }
