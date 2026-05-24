@@ -16,6 +16,7 @@
     "split",
     "merge-next",
     "post-merge",
+    "fold",
     "move",
     "unlink",
     "undo",

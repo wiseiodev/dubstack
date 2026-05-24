@@ -1195,6 +1195,77 @@ function parseDiffCount(raw: string): number {
 }
 
 /**
+ * Returns commit subjects on `headRef` that are not on `baseRef`, oldest
+ * first. Used by `dub fold` to build a squash message that references the
+ * original commits being collapsed.
+ */
+export async function getCommitSubjectsBetween(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '--reverse', '--format=%s', `${baseRef}..${headRef}`],
+      { cwd },
+    );
+    return stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch {
+    throw new DubError(
+      `Failed to read commits between '${baseRef}' and '${headRef}'.`,
+      [
+        `Run 'git log ${baseRef}..${headRef}' manually to inspect the failure.`,
+        `Run 'git fetch origin' to fetch missing history, then retry.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Squash-merges `branch` into the currently checked-out branch and writes a
+ * single commit with the provided message. Used by `dub fold --squash` to
+ * collapse a child's history into one commit on its parent.
+ */
+export async function mergeSquashAndCommit(
+  branch: string,
+  message: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['merge', '--squash', branch], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to squash-merge '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git status' to inspect the failed merge.`,
+        `Run 'git merge --abort' if a merge is in progress, then retry.`,
+      ],
+    );
+  }
+  try {
+    await execa('git', ['commit', '-m', message], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to commit squashed changes from '${branch}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git status' to inspect uncommitted changes.`,
+        `Run 'git commit' manually to see pre-commit hook output.`,
+      ],
+    );
+  }
+}
+
+/**
  * Returns a list of all local branch names.
  */
 export async function listBranches(cwd: string): Promise<string[]> {
