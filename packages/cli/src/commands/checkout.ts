@@ -1,4 +1,5 @@
 import search from '@inquirer/search';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -80,6 +81,7 @@ export async function checkout(
   cwd: string,
 ): Promise<{ branch: string }> {
   await checkoutBranch(name, cwd);
+  await appendCheckoutHistory(cwd, name, { via: 'checkout' });
   return { branch: name };
 }
 

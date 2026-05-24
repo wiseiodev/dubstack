@@ -7,6 +7,7 @@ import {
   type AiMetadataDependencies,
   generateCreateMetadata,
 } from '../lib/ai-metadata';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import {
@@ -235,6 +236,7 @@ export async function create(
 
   const parentRevision = await getBranchTip(parent, cwd);
   await createBranch(branchName, cwd);
+  await appendCheckoutHistory(cwd, branchName, { via: 'create' });
   addBranchToStack(state, branchName, parent, parentRevision);
   await writeState(state, cwd);
 
