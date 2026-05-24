@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -263,6 +264,10 @@ async function executeRestackSteps(
     await writeState(state, cwd);
     await clearProgress(cwd);
     await checkoutBranch(progress.originalBranch, cwd);
+    await appendCheckoutHistory(cwd, progress.originalBranch, {
+      via: 'restack',
+      transient: true,
+    });
 
     const allSkipped = progress.steps.every(
       (s) => s.status === 'skipped' || s.status === 'done',

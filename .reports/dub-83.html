@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-83 - Checkout history infrastructure (foundational for dub back)</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-83</div>
+        <h1>DUB-83 - Checkout history infrastructure (foundational for dub back)</h1>
+        <div class="meta"><span><strong>10</strong> files</span>
+<span><span class="add">+404</span> / <span class="del">-1</span></span>
+<span>branch <strong>feature/dub-83-checkout-history-infrastructure-foundational-for-dub-back</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Build the checkout-history infrastructure that DUB-38 (`dub back`) will read: a shared lib/checkout-history.ts with a ring buffer at .git/dubstack/checkout-history.json, wired into every command that mutates HEAD, with a transient flag so internal restores (sync/post-merge/restack) do not show up as user-navigable history.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Adds lib/checkout-history.ts (ring buffer maxSize=20, atomic write-rename, transient filter) and threads appendCheckoutHistory through every HEAD-mutating command: checkout/navigate/create (user-initiated) and post-merge/restack/sync/submit-refresh (transient).</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">DUB-38 (`dub back`) needs a chronological record of branches HEAD has visited. Today nothing writes one — checkoutBranch fires and the previous branch is lost.</p>
+<p class="lede">Internal restores (sync&#39;s restoreTarget, post-merge&#39;s checkout(root), restack&#39;s final checkout) move HEAD too, but should not appear in `dub back` as a navigable target. The lib needs an opt-out signal.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>.git/dubstack/checkout-history.json does not exist.</li>
+<li>dub co, dub checkout, dub up/down/top/bottom, and dub create change HEAD with no persisted trail.</li>
+<li>Internal HEAD restores in sync, post-merge, restack, and the shared submitRefreshedStacks helper move HEAD without distinction from user navigation.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>Every HEAD-mutating checkout writes a {branch, at, via, transient?} entry to a 20-slot ring buffer at .git/dubstack/checkout-history.json.</li>
+<li>User-initiated checkouts (checkout, up, down, top, bottom, create) record with transient: false; internal restores (post-merge, restack, sync, submit-refresh) record with transient: true.</li>
+<li>readCheckoutHistory(cwd) defaults to filtering out transient entries; DUB-38 can read this directly.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/checkout-history.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+118</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Core lib. Exports CheckoutEntry, appendCheckoutHistory, readCheckoutHistory, clearCheckoutHistory, getCheckoutHistoryPath. Ring buffer at maxSize=20, atomic write via temp file + rename, internal try/catch swallows I/O errors so a transient disk problem cannot break a checkout that already succeeded. transient flag is stored but stripped from the default read.</p>
+    <div class="code"><pre>export async function appendCheckoutHistory(
+  cwd: string,
+  branch: string,
+  opts: { via: string; transient?: boolean },
+): Promise&lt;void&gt; {
+  try {
+    const entries = await readStored(cwd);
+    const entry: StoredCheckoutEntry = {
+      branch,
+      at: new Date().toISOString(),
+      via: opts.via,
+    };
+    if (opts.transient) entry.transient = true;
+    entries.push(entry);
+    const trimmed =
+      entries.length &gt; MAX_SIZE ? entries.slice(-MAX_SIZE) : entries;
+    await writeStored(cwd, trimmed);
+  } catch {
+    // best-effort; never let history failures break a checkout
+  }
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/checkout-history.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+132</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>10 unit tests covering append + newest-first read, default empty result, transient filter, ring eviction at 20, custom limit, zero/negative limit, clear, corrupt-JSON tolerance, no temp files left behind, and transient entries consuming ring slots.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/checkout.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+2</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>After checkoutBranch in `checkout()` (the single funnel for `dub co`, `dub checkout &lt;branch&gt;`, and `dub checkout --trunk`), appendCheckoutHistory(cwd, name, { via: &#39;checkout&#39; }).</p>
+    <div class="code"><pre>await checkoutBranch(name, cwd);
+await appendCheckoutHistory(cwd, name, { via: &#39;checkout&#39; });</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/navigate.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+5</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Four wire points — up/down/top/bottom — each tagged with its own `via` so the future `dub back` UI can show navigation provenance.</p>
+    <div class="code"><pre>await checkoutBranch(target, cwd);
+await appendCheckoutHistory(cwd, target, { via: &#39;up&#39; });</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/create.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+2</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>After createBranch (which uses `git checkout -b` and so changes HEAD), record the new branch with via: &#39;create&#39;. This also covers `dub flow`, which composes create + submit.</p>
+    <div class="code"><pre>await createBranch(branchName, cwd);
+await appendCheckoutHistory(cwd, branchName, { via: &#39;create&#39; });</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/post-merge.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+13</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Three internal HEAD restores wired as transient: true — checkout(root) before restack, and the two checkout(preferredBranch) destinations after the cleanup + submit pass.</p>
+    <div class="code"><pre>await checkoutBranch(root, cwd);
+await appendCheckoutHistory(cwd, root, {
+  via: &#39;post-merge&#39;,
+  transient: true,
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/restack.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+5</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>After the final restoration to progress.originalBranch, record via: &#39;restack&#39;, transient: true so the temporary moves restack does mid-rebase do not pollute `dub back`.</p>
+    <div class="code"><pre>await checkoutBranch(progress.originalBranch, cwd);
+await appendCheckoutHistory(cwd, progress.originalBranch, {
+  via: &#39;restack&#39;,
+  transient: true,
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+19</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Four wire points, all transient: the fallback checkout during squash-merged cleanup, the per-root checkout before restack, the preferredBranch checkout before submit refresh, and the final restoreTarget at the end of sync. All carry via: &#39;sync&#39;.</p>
+    <div class="code"><pre>await checkoutBranch(restoreTarget, cwd);
+await appendCheckoutHistory(cwd, restoreTarget, {
+  via: &#39;sync&#39;,
+  transient: true,
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/stack-maintenance.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+5</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adversarial-review catch: submitRefreshedStacks (called from both post-merge and sync to refresh PRs after cleanup) calls checkoutBranch in a loop without going through the command-level wire points. Wired here with via: &#39;submit-refresh&#39;, transient: true so the per-stack HEAD moves don&#39;t surface in `dub back`.</p>
+    <div class="code"><pre>await checkoutBranch(branchName, cwd);
+await appendCheckoutHistory(cwd, branchName, {
+  via: &#39;submit-refresh&#39;,
+  transient: true,
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-83-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+103</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback (no .tsx changed, no UI surface). Documents the acceptance-criteria mapping, the call-site inventory, and the green gate output.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Best-effort error swallow in appendCheckoutHistory</div>
+    <div class="note"><code>packages/cli/src/lib/checkout-history.ts (appendCheckoutHistory)</code> The first draft let writeStored throw. That caused sync&#39;s existing try/catch around checkoutBranch + restoreTarget to swallow the history error and re-throw a misleading &#39;could not restore branch&#39; DubError, breaking three unrelated sync tests. The fix is an internal try/catch in appendCheckoutHistory — the auxiliary log can never break the underlying checkout. Reviewers should confirm this trade-off (silent failure vs. surfacing disk problems) is acceptable for a sidecar log.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Transient flag plumbing at every internal restore</div>
+    <div class="note"><code>packages/cli/src/commands/{post-merge,restack,sync,stack-maintenance}.ts</code> Every checkoutBranch in these four files is wired as transient: true. If any are missed, `dub back` (DUB-38) will offer the user a restore target that was never user-meaningful. The adversarial reviewer caught stack-maintenance.ts:106 on the first pass; reviewers should confirm no other internal-restore call site escaped.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Out-of-scope commands left unwired</div>
+    <div class="note"><code>packages/cli/src/commands/{undo,delete}.ts and lib/restack-rollback.ts</code> undo, delete, and restack-rollback also call checkoutBranch but were not listed in the DUB-83 spec. They are left unwired by design. If DUB-38 wants to surface undo restores, that wiring can be added then. Confirm this scoping aligns with the product intent for `dub back`.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">checkout-history.test.ts (10 tests) — append, read, default-empty, transient filter, ring eviction at 20, custom limit, zero/negative limit, clear, corrupt-JSON tolerance, no temp leftover</div>
+      <div class="note">src/lib/checkout-history.test.ts (10 tests) 822ms — all passed.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Full CLI suite — verifies no regression in the six modified commands</div>
+      <div class="note">Test Files 98 passed (98); Tests 924 passed (924).</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pnpm typecheck</div>
+      <div class="note">Tasks: 2 successful, 2 total.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pnpm checks (biome incl. lint plugins)</div>
+      <div class="note">Checked 301 files in 957ms. No fixes applied.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest suite</div>
+      <div class="note">Command: pnpm vitest run (in packages/cli). 924 tests passed across 98 files; new file contributes 10 tests.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. Tasks: 2 successful, 2 total.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome check (incl. Tier 3 lint plugins)</div>
+      <div class="note">Command: pnpm checks. Checked 301 files in 957ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback: acceptance criteria mapping, call-site inventory, and green gate output documented in .reports/dub-83-qa.md.</div>
+      <div class="note">DUB-83 ships a CLI lib and command wiring. No committed .tsx file changed and there is no user-visible output to demo (the only artifact is a JSON file under .git/dubstack/).</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-83-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Append three entries with different `via` values — readCheckoutHistory returns them newest-first.</li>
+<li>Append 25 entries — read returns the most-recent 20; the oldest 5 are dropped silently.</li>
+<li>Append a mix of transient and non-transient entries — default read filters out the transient ones.</li>
+<li>Corrupt the JSON file on disk — read returns []; subsequent append succeeds and rewrites the file.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">lib/checkout-history.ts exists with appendCheckoutHistory, readCheckoutHistory, clearCheckoutHistory</div>
+      <div class="note">packages/cli/src/lib/checkout-history.ts — three exported functions matching the issue signatures, plus the CheckoutEntry interface.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Ring buffer at maxSize = 20</div>
+      <div class="note">MAX_SIZE = 20 constant; the &#39;enforces a ring buffer of size 20&#39; unit test verifies 25 inserts yield 20 entries with the oldest 5 dropped.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">All HEAD-changing commands call appendCheckoutHistory</div>
+      <div class="note">checkout.ts, navigate.ts (×4), create.ts, post-merge.ts (×3), restack.ts, sync.ts (×4), stack-maintenance.ts (×1) — every checkoutBranch in the scope of the issue has a paired appendCheckoutHistory.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">transient: true entries are filtered from default reads</div>
+      <div class="note">readCheckoutHistory filters !entry.transient; verified by two unit tests including a worst-case where 20 transient entries precede a single visible one.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Atomic write-rename for the JSON</div>
+      <div class="note">writeStored writes to `${target}.${pid}.${ts}.tmp` and renames; on rename failure the temp is unlinked. Verified by the &#39;writes atomically and leaves no temp files behind&#39; unit test.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests cover append, read, filter, ring eviction, transient filter</div>
+      <div class="note">checkout-history.test.ts has dedicated tests for each of those five behaviors plus four additional edge cases (empty, custom limit, clear, corrupt-JSON tolerance).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">No regression in existing tests for modified commands</div>
+      <div class="note">Full CLI suite green: Test Files 98 passed (98); Tests 924 passed (924).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Reviewer flagged stack-maintenance.ts:105 (submitRefreshedStacks) as an unwired checkoutBranch reachable from both post-merge and sync. Fixed by adding appendCheckoutHistory(cwd, branchName, { via: &#39;submit-refresh&#39;, transient: true }) after the checkout.</li>
+<li>Reviewer noted undo.ts and delete.ts also call checkoutBranch but are not listed in the issue spec. Confirmed scope-out is intentional and called out in `reviewFocus` for future DUB-38 follow-up.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">No external dependencies detected</div>
+  <div class="note">n/a</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Pure additive infrastructure. The new lib only writes; no consumer reads from it yet. End-user UX is unchanged until DUB-38 (`dub back`) ships and starts consuming readCheckoutHistory.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Background recording begins</div>
+  <div class="note">Every HEAD-mutating command starts appending to .git/dubstack/checkout-history.json. No user-visible change.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">When DUB-38 lands</div>
+  <div class="label">dub back goes live</div>
+  <div class="note">dub back calls readCheckoutHistory(cwd) and shows the most recent non-transient entries as restore targets.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">When DUB-60 (lockfile) lands</div>
+  <div class="label">Concurrency hardening</div>
+  <div class="note">Step 5 of the issue calls for routing writes through the optimistic-concurrency lockfile. Tracked as future work — atomic write-rename is sufficient until then.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>1d37e89</strong> <code>1d37e8952fbe21ecbd7c202603dc245a85a75b90</code></div>
+  <pre>feat(checkout-history): ring-buffer infrastructure for dub back [DUB-83]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">checkout-history.ts</a>
+<a href="#tour" class="sub">checkout-history.test.ts</a>
+<a href="#tour" class="sub">checkout.ts</a>
+<a href="#tour" class="sub">navigate.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,115 @@
+---
+title: dub stash
+description: Branch-aware stashing. Captures the working tree (staged + unstaged + untracked) and records which branch the stash was created on, so `dub stash pop` refuses to apply onto a different branch unless you opt in with `--on <branch>` or `--force`.
+---
+
+## Usage
+
+```bash
+# Stash the current working tree on the current branch
+dub stash
+
+# Stash with a custom message
+dub stash -m "wip: refactor auth flow"
+
+# Pop the most recent stash (must be on the same branch it was created on)
+dub stash pop
+
+# Checkout another branch first, then pop the stash there
+dub stash pop --on feat/auth-login
+
+# Pop onto the current branch regardless of where the stash was created
+dub stash pop --force
+
+# List recorded dub stashes with branch context
+dub stash list
+```
+
+## Why this exists
+
+Plain `git stash` doesn't remember which branch a stash was created on. If you
+stash on `feat/a`, switch to `feat/b`, and pop, you'll silently apply work onto
+the wrong branch and lose minutes (or hours) untangling the mistake.
+
+`dub stash` records the source branch in `.git/dubstack/stash-log.json` and
+uses that record to:
+
+* Refuse a pop when the current branch differs from the source branch.
+* Offer `--on <branch>` to move work between stacks intentionally.
+* Show branch context in `dub stash list` so you can locate "the API stash"
+  without scrolling through `git stash list`.
+
+This is a Dubstack-only command — there's no Graphite equivalent.
+
+## Behavior
+
+`dub stash`:
+
+1. Verifies the working tree has changes (errors with a recovery hint if clean).
+2. Runs `git stash push --include-untracked -m "<message>"`. The default
+   message is `dub stash: <branch> @ <ISO-8601 timestamp>`.
+3. Records the new stash in `.git/dubstack/stash-log.json` (most-recent first,
+   ring buffer of 50 entries).
+
+`dub stash pop`:
+
+1. Reads the most recent entry from the dub stash log.
+2. Locates the corresponding `stash@{N}` ref by SHA (git stash indexes shift
+   when other stashes are dropped — looking up by SHA avoids that footgun).
+3. Branch check:
+    * If the current branch matches the recorded branch, pop immediately.
+    * If `--on <branch>` is passed, checkout `<branch>` first, then pop.
+    * If `--force` is passed, pop onto the current branch regardless.
+    * Otherwise, refuse with a `DubError` suggesting both overrides.
+4. Pops via `git stash pop stash@{N}` and removes the entry from the log.
+
+`dub stash list`:
+
+* Shows recorded stashes with branch + timestamp + message.
+* Annotates each entry's presence in `git stash list` so dangling entries
+  (popped/dropped outside DubStack) are visible.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-m, --message <message>` | Override the default `dub stash` message |
+| `--list` | Alias for `dub stash list` |
+| `--on <branch>` (pop) | Checkout `<branch>` first, then pop |
+| `--force` (pop) | Pop onto the current branch even if it doesn't match the recorded branch |
+
+When both `--on <branch>` and `--force` are passed, `--on` wins — the stash
+is applied on `<branch>` after checkout, and `--force` is a no-op. Pass only
+`--force` when you genuinely want the apply to happen on the current branch.
+
+## Errors
+
+| Condition | Behavior |
+|---|---|
+| `dub stash` with a clean working tree | `DubError` pointing at `git status` |
+| `dub stash pop` with no recorded entries | `DubError` suggesting `dub stash` first |
+| Recorded stash dropped externally | `DubError`; the dangling log entry is auto-removed so the next pop can proceed |
+| `dub stash pop` on the wrong branch with no override | `DubError` with both `--on <branch>` and `--force` hints |
+| `--on <branch>` where the branch doesn't exist | `DubError` pointing at `git branch --list` |
+
+## State
+
+`.git/dubstack/stash-log.json` — most-recent-first ring buffer of:
+
+```json
+{
+  "version": 1,
+  "entries": [
+    {
+      "sha": "<git stash commit SHA>",
+      "branch": "feat/auth-login",
+      "message": "dub stash: feat/auth-login @ 2026-05-24T12:34:56.000Z",
+      "createdAt": "2026-05-24T12:34:56.000Z"
+    }
+  ]
+}
+```
+
+A corrupt log file is treated as empty rather than throwing — the log is
+contextual metadata, not authoritative state. The underlying `git stash` stack
+remains the source of truth for the stash contents themselves.

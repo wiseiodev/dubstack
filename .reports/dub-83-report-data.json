@@ -1,0 +1,298 @@
+{
+  "meta": {
+    "workId": "DUB-83",
+    "title": "Checkout history infrastructure (foundational for dub back)",
+    "artifactId": "dub-83",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-83-checkout-history-infrastructure-foundational-for-dub-back",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-83",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 10,
+    "additions": 404,
+    "deletions": 1,
+    "diffStat": "10 files changed, 404 insertions(+), 1 deletion(-)"
+  },
+  "prompt": "Build the checkout-history infrastructure that DUB-38 (`dub back`) will read: a shared lib/checkout-history.ts with a ring buffer at .git/dubstack/checkout-history.json, wired into every command that mutates HEAD, with a transient flag so internal restores (sync/post-merge/restack) do not show up as user-navigable history.",
+  "tldr": "Adds lib/checkout-history.ts (ring buffer maxSize=20, atomic write-rename, transient filter) and threads appendCheckoutHistory through every HEAD-mutating command: checkout/navigate/create (user-initiated) and post-merge/restack/sync/submit-refresh (transient).",
+  "why": {
+    "motivation": [
+      "DUB-38 (`dub back`) needs a chronological record of branches HEAD has visited. Today nothing writes one — checkoutBranch fires and the previous branch is lost.",
+      "Internal restores (sync's restoreTarget, post-merge's checkout(root), restack's final checkout) move HEAD too, but should not appear in `dub back` as a navigable target. The lib needs an opt-out signal."
+    ],
+    "before": [
+      ".git/dubstack/checkout-history.json does not exist.",
+      "dub co, dub checkout, dub up/down/top/bottom, and dub create change HEAD with no persisted trail.",
+      "Internal HEAD restores in sync, post-merge, restack, and the shared submitRefreshedStacks helper move HEAD without distinction from user navigation."
+    ],
+    "after": [
+      "Every HEAD-mutating checkout writes a {branch, at, via, transient?} entry to a 20-slot ring buffer at .git/dubstack/checkout-history.json.",
+      "User-initiated checkouts (checkout, up, down, top, bottom, create) record with transient: false; internal restores (post-merge, restack, sync, submit-refresh) record with transient: true.",
+      "readCheckoutHistory(cwd) defaults to filtering out transient entries; DUB-38 can read this directly."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/checkout-history.ts",
+      "changeType": "new",
+      "additions": 118,
+      "deletions": 0,
+      "explanation": "Core lib. Exports CheckoutEntry, appendCheckoutHistory, readCheckoutHistory, clearCheckoutHistory, getCheckoutHistoryPath. Ring buffer at maxSize=20, atomic write via temp file + rename, internal try/catch swallows I/O errors so a transient disk problem cannot break a checkout that already succeeded. transient flag is stored but stripped from the default read.",
+      "snippet": "export async function appendCheckoutHistory(\n  cwd: string,\n  branch: string,\n  opts: { via: string; transient?: boolean },\n): Promise<void> {\n  try {\n    const entries = await readStored(cwd);\n    const entry: StoredCheckoutEntry = {\n      branch,\n      at: new Date().toISOString(),\n      via: opts.via,\n    };\n    if (opts.transient) entry.transient = true;\n    entries.push(entry);\n    const trimmed =\n      entries.length > MAX_SIZE ? entries.slice(-MAX_SIZE) : entries;\n    await writeStored(cwd, trimmed);\n  } catch {\n    // best-effort; never let history failures break a checkout\n  }\n}",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/checkout-history.test.ts",
+      "changeType": "new",
+      "additions": 132,
+      "deletions": 0,
+      "explanation": "10 unit tests covering append + newest-first read, default empty result, transient filter, ring eviction at 20, custom limit, zero/negative limit, clear, corrupt-JSON tolerance, no temp files left behind, and transient entries consuming ring slots.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/checkout.ts",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 0,
+      "explanation": "After checkoutBranch in `checkout()` (the single funnel for `dub co`, `dub checkout <branch>`, and `dub checkout --trunk`), appendCheckoutHistory(cwd, name, { via: 'checkout' }).",
+      "snippet": "await checkoutBranch(name, cwd);\nawait appendCheckoutHistory(cwd, name, { via: 'checkout' });",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/navigate.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 0,
+      "explanation": "Four wire points — up/down/top/bottom — each tagged with its own `via` so the future `dub back` UI can show navigation provenance.",
+      "snippet": "await checkoutBranch(target, cwd);\nawait appendCheckoutHistory(cwd, target, { via: 'up' });",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/create.ts",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 0,
+      "explanation": "After createBranch (which uses `git checkout -b` and so changes HEAD), record the new branch with via: 'create'. This also covers `dub flow`, which composes create + submit.",
+      "snippet": "await createBranch(branchName, cwd);\nawait appendCheckoutHistory(cwd, branchName, { via: 'create' });",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/post-merge.ts",
+      "changeType": "mod",
+      "additions": 13,
+      "deletions": 0,
+      "explanation": "Three internal HEAD restores wired as transient: true — checkout(root) before restack, and the two checkout(preferredBranch) destinations after the cleanup + submit pass.",
+      "snippet": "await checkoutBranch(root, cwd);\nawait appendCheckoutHistory(cwd, root, {\n  via: 'post-merge',\n  transient: true,\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/restack.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 0,
+      "explanation": "After the final restoration to progress.originalBranch, record via: 'restack', transient: true so the temporary moves restack does mid-rebase do not pollute `dub back`.",
+      "snippet": "await checkoutBranch(progress.originalBranch, cwd);\nawait appendCheckoutHistory(cwd, progress.originalBranch, {\n  via: 'restack',\n  transient: true,\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 19,
+      "deletions": 1,
+      "explanation": "Four wire points, all transient: the fallback checkout during squash-merged cleanup, the per-root checkout before restack, the preferredBranch checkout before submit refresh, and the final restoreTarget at the end of sync. All carry via: 'sync'.",
+      "snippet": "await checkoutBranch(restoreTarget, cwd);\nawait appendCheckoutHistory(cwd, restoreTarget, {\n  via: 'sync',\n  transient: true,\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/stack-maintenance.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 0,
+      "explanation": "Adversarial-review catch: submitRefreshedStacks (called from both post-merge and sync to refresh PRs after cleanup) calls checkoutBranch in a loop without going through the command-level wire points. Wired here with via: 'submit-refresh', transient: true so the per-stack HEAD moves don't surface in `dub back`.",
+      "snippet": "await checkoutBranch(branchName, cwd);\nawait appendCheckoutHistory(cwd, branchName, {\n  via: 'submit-refresh',\n  transient: true,\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-83-qa.md",
+      "changeType": "new",
+      "additions": 103,
+      "deletions": 0,
+      "explanation": "Self-QA fallback (no .tsx changed, no UI surface). Documents the acceptance-criteria mapping, the call-site inventory, and the green gate output.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Best-effort error swallow in appendCheckoutHistory",
+      "location": "packages/cli/src/lib/checkout-history.ts (appendCheckoutHistory)",
+      "rationale": "The first draft let writeStored throw. That caused sync's existing try/catch around checkoutBranch + restoreTarget to swallow the history error and re-throw a misleading 'could not restore branch' DubError, breaking three unrelated sync tests. The fix is an internal try/catch in appendCheckoutHistory — the auxiliary log can never break the underlying checkout. Reviewers should confirm this trade-off (silent failure vs. surfacing disk problems) is acceptable for a sidecar log."
+    },
+    {
+      "title": "Transient flag plumbing at every internal restore",
+      "location": "packages/cli/src/commands/{post-merge,restack,sync,stack-maintenance}.ts",
+      "rationale": "Every checkoutBranch in these four files is wired as transient: true. If any are missed, `dub back` (DUB-38) will offer the user a restore target that was never user-meaningful. The adversarial reviewer caught stack-maintenance.ts:106 on the first pass; reviewers should confirm no other internal-restore call site escaped."
+    },
+    {
+      "title": "Out-of-scope commands left unwired",
+      "location": "packages/cli/src/commands/{undo,delete}.ts and lib/restack-rollback.ts",
+      "rationale": "undo, delete, and restack-rollback also call checkoutBranch but were not listed in the DUB-83 spec. They are left unwired by design. If DUB-38 wants to surface undo restores, that wiring can be added then. Confirm this scoping aligns with the product intent for `dub back`."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "checkout-history.test.ts (10 tests) — append, read, default-empty, transient filter, ring eviction at 20, custom limit, zero/negative limit, clear, corrupt-JSON tolerance, no temp leftover",
+      "status": "done",
+      "evidence": "src/lib/checkout-history.test.ts (10 tests) 822ms — all passed."
+    },
+    {
+      "kind": "unit",
+      "label": "Full CLI suite — verifies no regression in the six modified commands",
+      "status": "done",
+      "evidence": "Test Files 98 passed (98); Tests 924 passed (924)."
+    },
+    {
+      "kind": "build",
+      "label": "pnpm typecheck",
+      "status": "done",
+      "evidence": "Tasks: 2 successful, 2 total."
+    },
+    {
+      "kind": "build",
+      "label": "pnpm checks (biome incl. lint plugins)",
+      "status": "done",
+      "evidence": "Checked 301 files in 957ms. No fixes applied."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Vitest suite",
+      "command": "pnpm vitest run (in packages/cli)",
+      "status": "passed",
+      "evidence": "924 tests passed across 98 files; new file contributes 10 tests."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Tasks: 2 successful, 2 total."
+    },
+    {
+      "name": "Biome check (incl. Tier 3 lint plugins)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 301 files in 957ms. No fixes applied."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "DUB-83 ships a CLI lib and command wiring. No committed .tsx file changed and there is no user-visible output to demo (the only artifact is a JSON file under .git/dubstack/).",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-83-qa.md",
+    "caption": "Self-QA fallback: acceptance criteria mapping, call-site inventory, and green gate output documented in .reports/dub-83-qa.md.",
+    "scenarios": [
+      "Append three entries with different `via` values — readCheckoutHistory returns them newest-first.",
+      "Append 25 entries — read returns the most-recent 20; the oldest 5 are dropped silently.",
+      "Append a mix of transient and non-transient entries — default read filters out the transient ones.",
+      "Corrupt the JSON file on disk — read returns []; subsequent append succeeds and rewrites the file."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "lib/checkout-history.ts exists with appendCheckoutHistory, readCheckoutHistory, clearCheckoutHistory",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/checkout-history.ts — three exported functions matching the issue signatures, plus the CheckoutEntry interface."
+    },
+    {
+      "criterion": "Ring buffer at maxSize = 20",
+      "status": "satisfied",
+      "evidence": "MAX_SIZE = 20 constant; the 'enforces a ring buffer of size 20' unit test verifies 25 inserts yield 20 entries with the oldest 5 dropped."
+    },
+    {
+      "criterion": "All HEAD-changing commands call appendCheckoutHistory",
+      "status": "satisfied",
+      "evidence": "checkout.ts, navigate.ts (×4), create.ts, post-merge.ts (×3), restack.ts, sync.ts (×4), stack-maintenance.ts (×1) — every checkoutBranch in the scope of the issue has a paired appendCheckoutHistory."
+    },
+    {
+      "criterion": "transient: true entries are filtered from default reads",
+      "status": "satisfied",
+      "evidence": "readCheckoutHistory filters !entry.transient; verified by two unit tests including a worst-case where 20 transient entries precede a single visible one."
+    },
+    {
+      "criterion": "Atomic write-rename for the JSON",
+      "status": "satisfied",
+      "evidence": "writeStored writes to `${target}.${pid}.${ts}.tmp` and renames; on rename failure the temp is unlinked. Verified by the 'writes atomically and leaves no temp files behind' unit test."
+    },
+    {
+      "criterion": "Tests cover append, read, filter, ring eviction, transient filter",
+      "status": "satisfied",
+      "evidence": "checkout-history.test.ts has dedicated tests for each of those five behaviors plus four additional edge cases (empty, custom limit, clear, corrupt-JSON tolerance)."
+    },
+    {
+      "criterion": "No regression in existing tests for modified commands",
+      "status": "satisfied",
+      "evidence": "Full CLI suite green: Test Files 98 passed (98); Tests 924 passed (924)."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer flagged stack-maintenance.ts:105 (submitRefreshedStacks) as an unwired checkoutBranch reachable from both post-merge and sync. Fixed by adding appendCheckoutHistory(cwd, branchName, { via: 'submit-refresh', transient: true }) after the checkout.",
+      "Reviewer noted undo.ts and delete.ts also call checkoutBranch but are not listed in the issue spec. Confirmed scope-out is intentional and called out in `reviewFocus` for future DUB-38 follow-up."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies detected",
+      "status": "n/a"
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive infrastructure. The new lib only writes; no consumer reads from it yet. End-user UX is unchanged until DUB-38 (`dub back`) ships and starts consuming readCheckoutHistory.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Background recording begins",
+        "details": "Every HEAD-mutating command starts appending to .git/dubstack/checkout-history.json. No user-visible change."
+      },
+      {
+        "when": "When DUB-38 lands",
+        "label": "dub back goes live",
+        "details": "dub back calls readCheckoutHistory(cwd) and shows the most recent non-transient entries as restore targets."
+      },
+      {
+        "when": "When DUB-60 (lockfile) lands",
+        "label": "Concurrency hardening",
+        "details": "Step 5 of the issue calls for routing writes through the optimistic-concurrency lockfile. Tracked as future work — atomic write-rename is sufficient until then."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "1d37e8952fbe21ecbd7c202603dc245a85a75b90",
+    "shortSha": "1d37e89",
+    "message": "feat(checkout-history): ring-buffer infrastructure for dub back [DUB-83]"
+  }
+}
