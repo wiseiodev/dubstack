@@ -204,6 +204,7 @@ async function executeRestackSteps(
         step.status = 'skipped';
         updateParentRevision(state, step.branch, parentNewTip);
         await writeProgress(progress, cwd);
+        await writeState(state, cwd);
         continue;
       }
 
@@ -224,6 +225,9 @@ async function executeRestackSteps(
         rebased.push(step.branch);
         updateParentRevision(state, step.branch, parentNewTip);
         await writeProgress(progress, cwd);
+        // Persist parent_revision immediately so a later conflict does not
+        // discard already-completed cascades (continue cannot recompute them).
+        await writeState(state, cwd);
       } catch (error) {
         if (error instanceof DubError && error.message.includes('Conflict')) {
           step.status = 'conflicted';
