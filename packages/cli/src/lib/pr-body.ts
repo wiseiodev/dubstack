@@ -44,10 +44,12 @@ interface TreeNode {
  * Renders the stack as an indented tree (2 spaces per level) with siblings
  * sorted alphabetically by branch name. The `currentBranch` gets a 👈 marker.
  *
- * For stacks with more than {@link TRUNCATION_THRESHOLD} branches, only the
- * current branch, its ancestors and their direct children (siblings + aunts/
- * uncles), and its descendants are shown. A summary line tags the number of
- * hidden branches.
+ * For stacks with more than {@link TRUNCATION_THRESHOLD} *non-root* branches
+ * (i.e. PR-carrying branches), only the current branch, its ancestors and
+ * their direct children (siblings + aunts/uncles), and its descendants are
+ * shown. A single summary line at the bottom of the list tags the total
+ * number of hidden branches — locating each hidden subtree at its own indent
+ * level was rejected as too noisy for the PR description.
  *
  * @param branches - All branches in the stack (root + children). Tree shape is
  *   derived from each branch's `parent` link.
@@ -61,7 +63,14 @@ export function buildStackTable(
   currentBranch: string,
 ): string {
   const root = buildTree(branches);
-  const truncate = branches.length > TRUNCATION_THRESHOLD;
+  // Count only non-root branches so the threshold matches the user-visible
+  // "branches in a stack" concept (PR-carrying branches), independent of how
+  // many root nodes the input happens to contain.
+  const nonRootCount = branches.reduce(
+    (n, b) => (b.type === 'root' ? n : n + 1),
+    0,
+  );
+  const truncate = nonRootCount > TRUNCATION_THRESHOLD;
 
   const lines: string[] = [];
   let hiddenCount = 0;
@@ -390,6 +399,11 @@ function computeVisibleNames(
   }
 
   // Ancestor path (root → current) — also gives us "ancestors of current".
+  // The walk reads `Branch.parent` (the persisted parent name), so it
+  // terminates at the first node whose parent is not in `branches`. In a
+  // well-formed stack that is the tree root; for orphan fragments the chain
+  // stops short, in which case the root is still emitted unconditionally by
+  // the caller's `render(root)` to keep the table self-rooted.
   const ancestors: TreeNode[] = [];
   let cursor: TreeNode | undefined = current;
   while (cursor) {
@@ -397,6 +411,10 @@ function computeVisibleNames(
     const parentName: string | null = cursor.branch.parent;
     cursor = parentName ? byName.get(parentName) : undefined;
   }
+  // Always include the tree root in the visible set so a deep `currentBranch`
+  // whose ancestor chain unexpectedly terminates short still renders a
+  // self-consistent tree (matches the unconditional `render(root)`).
+  visible.add(root.branch.name);
   for (const a of ancestors) visible.add(a.branch.name);
 
   // Direct children of each ancestor (siblings + aunts/uncles).

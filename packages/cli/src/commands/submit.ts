@@ -368,6 +368,11 @@ async function updateAllPrBodies(
   // Build the PR table from both this run's prMap AND any PR numbers persisted
   // in state for other branches in the stack — so siblings submitted in prior
   // runs still appear with their PR numbers in the tree table.
+  //
+  // For prior-run branches we don't have the PR title cached locally, so the
+  // branch name is used as the table label. That matches the issue spec's
+  // target example (which labels rows like `feat/auth-base` rather than a
+  // free-form title) and keeps submit free of extra GitHub API calls.
   const tableEntries = new Map<string, { number: number; title: string }>();
   for (const branch of stackBranches) {
     const pr = prMap.get(branch.name);

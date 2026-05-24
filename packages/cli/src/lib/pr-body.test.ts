@@ -162,6 +162,25 @@ describe('buildStackTable', () => {
     expect(result).not.toContain('branches hidden');
   });
 
+  it('does not truncate a stack with exactly 40 non-root branches', () => {
+    // The threshold is intentionally `> 40 non-root branches`. A stack with
+    // 40 PR-carrying branches must render in full so there is no off-by-one
+    // confusion between "stacks > 40 branches" and array length.
+    const branches: Branch[] = [root('main')];
+    const prMap = new Map<string, { number: number; title: string }>();
+    for (let i = 0; i < 40; i++) {
+      const name = `feat/b${String(i).padStart(2, '0')}`;
+      branches.push(branch(name, 'main'));
+      prMap.set(name, { number: 100 + i, title: name });
+    }
+
+    const result = buildStackTable(branches, prMap, 'feat/b00');
+
+    expect(result).not.toContain('branches hidden');
+    expect(result).toContain('  - #100 feat/b00 👈');
+    expect(result).toContain('  - #139 feat/b39');
+  });
+
   it('shows hidden-count summary when siblings have hidden descendants', () => {
     // 41 siblings, each with a hidden grandchild → 41 hidden descendants
     const branches: Branch[] = [root('main')];
@@ -263,6 +282,43 @@ describe('buildMetadataTree', () => {
     const result = buildMetadataTree(branches, prMap, 'feat/b');
 
     expect(result).toEqual([
+      { name: 'main', depth: 0 },
+      { name: 'feat/a', depth: 1, pr_number: 1 },
+      { name: 'feat/b', depth: 2, pr_number: 2, is_current: true },
+      { name: 'feat/c', depth: 2, pr_number: 3 },
+    ]);
+  });
+
+  it('returns an empty array when no root is present', () => {
+    expect(buildMetadataTree([], new Map(), 'feat/missing')).toEqual([]);
+  });
+
+  it('marks the root as current when currentBranch is the root', () => {
+    const branches = [root('main'), branch('feat/a', 'main')];
+    const prMap = new Map([['feat/a', { number: 1, title: 'a' }]]);
+
+    expect(buildMetadataTree(branches, prMap, 'main')).toEqual([
+      { name: 'main', depth: 0, is_current: true },
+      { name: 'feat/a', depth: 1, pr_number: 1 },
+    ]);
+  });
+
+  it('is insensitive to input branch ordering', () => {
+    // Branches deliberately shuffled — buildTree should derive shape from
+    // parent links, not array order.
+    const shuffled = [
+      branch('feat/b', 'feat/a'),
+      root('main'),
+      branch('feat/a', 'main'),
+      branch('feat/c', 'feat/a'),
+    ];
+    const prMap = new Map([
+      ['feat/a', { number: 1, title: 'a' }],
+      ['feat/b', { number: 2, title: 'b' }],
+      ['feat/c', { number: 3, title: 'c' }],
+    ]);
+
+    expect(buildMetadataTree(shuffled, prMap, 'feat/b')).toEqual([
       { name: 'main', depth: 0 },
       { name: 'feat/a', depth: 1, pr_number: 1 },
       { name: 'feat/b', depth: 2, pr_number: 2, is_current: true },
