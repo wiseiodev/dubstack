@@ -156,6 +156,7 @@ export async function submit(
   };
   const prMap = new Map<string, PrInfo>();
   const progress = createProgress();
+  const subTreeTagger = createSubTreeTagger(plan.stack, plan.rootBranch);
 
   try {
     if (!dryRun && plan.branches.length > 0) {
@@ -167,7 +168,11 @@ export async function submit(
         console.log(`[dry-run] would push ${branch.name}`);
       } else {
         pushIndex += 1;
-        progress.update('🚀 Pushing branches', pushIndex, branch.name);
+        progress.update(
+          '🚀 Pushing branches',
+          pushIndex,
+          subTreeTagger(branch.name),
+        );
         await pushBranch(branch.name, cwd);
       }
       result.pushed.push(branch.name);
@@ -190,7 +195,7 @@ export async function submit(
         continue;
       }
       prIndex += 1;
-      progress.update('📬 Syncing PRs', prIndex, branch.name);
+      progress.update('📬 Syncing PRs', prIndex, subTreeTagger(branch.name));
 
       const existing = await getPr(branch.name, cwd);
       if (existing) {
@@ -483,6 +488,69 @@ function getDownstackBranches(stack: Stack, currentBranch: string): Branch[] {
   }
 
   return path.reverse();
+}
+
+/**
+ * Returns a function that formats a branch name with its sub-tree context for
+ * the progress bar `detail` field.
+ *
+ * The sub-tree root is the deepest ancestor that has siblings in the stack —
+ * i.e., the closest fork point above the branch. For branches directly on
+ * trunk (no ancestor besides trunk) and for purely linear stacks (no fork
+ * anywhere), the helper returns the branch name unchanged.
+ *
+ * Format with tag: `subtreeRoot · branchName`
+ * Format without: `branchName`
+ */
+export function createSubTreeTagger(
+  stack: Stack,
+  trunkName: string,
+): (branchName: string) => string {
+  const branchByName = new Map(stack.branches.map((b) => [b.name, b]));
+  const childCountByParent = new Map<string, number>();
+  for (const branch of stack.branches) {
+    if (branch.parent != null) {
+      childCountByParent.set(
+        branch.parent,
+        (childCountByParent.get(branch.parent) ?? 0) + 1,
+      );
+    }
+  }
+
+  return (branchName: string): string => {
+    const tag = deriveSubTreeTag(
+      branchName,
+      branchByName,
+      childCountByParent,
+      trunkName,
+    );
+    return tag ? `${tag} · ${branchName}` : branchName;
+  };
+}
+
+/**
+ * Walks ancestors of `branchName` (starting at its parent) and returns the
+ * deepest ancestor that has at least one sibling in the stack. Returns `null`
+ * for direct children of trunk and for linear stacks.
+ */
+export function deriveSubTreeTag(
+  branchName: string,
+  branchByName: Map<string, Branch>,
+  childCountByParent: Map<string, number>,
+  trunkName: string,
+): string | null {
+  const branch = branchByName.get(branchName);
+  if (!branch || !branch.parent || branch.parent === trunkName) return null;
+
+  let cursor = branchByName.get(branch.parent);
+  const seen = new Set<string>();
+  while (cursor?.parent && !seen.has(cursor.name)) {
+    seen.add(cursor.name);
+    const siblingCount = (childCountByParent.get(cursor.parent) ?? 0) - 1;
+    if (siblingCount > 0) return cursor.name;
+    cursor = branchByName.get(cursor.parent);
+  }
+  return null;
 }
 
 function describeScope(scope: SubmitScope, currentBranch: string): string {
