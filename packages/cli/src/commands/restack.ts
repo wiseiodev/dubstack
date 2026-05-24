@@ -44,6 +44,15 @@ interface RestackResult {
   conflictBranch?: string;
 }
 
+export interface RestackOptions {
+  /**
+   * Skip writing the `restack` undo entry. Set by callers that wrap restack
+   * (e.g. `dub move`) and want to manage the undo log themselves so a crash
+   * or conflict inside restack doesn't overwrite the outer operation's entry.
+   */
+  skipUndoEntry?: boolean;
+}
+
 /**
  * Rebases all branches in the current stack onto their updated parents.
  *
@@ -56,10 +65,14 @@ interface RestackResult {
  * `dub restack --continue` can resume.
  *
  * @param cwd - Working directory
+ * @param options - Optional behavior flags (e.g. `skipUndoEntry`)
  * @returns Result with status, list of rebased branches, and optional conflict branch
  * @throws {DubError} If not initialized, dirty tree, not in a stack, or branch missing
  */
-export async function restack(cwd: string): Promise<RestackResult> {
+export async function restack(
+  cwd: string,
+  options: RestackOptions = {},
+): Promise<RestackResult> {
   const state = await readState(cwd);
 
   if (!(await isWorkingTreeClean(cwd))) {
@@ -124,17 +137,19 @@ export async function restack(cwd: string): Promise<RestackResult> {
     return { status: 'up-to-date', rebased: [] };
   }
 
-  await saveUndoEntry(
-    {
-      operation: 'restack',
-      timestamp: new Date().toISOString(),
-      previousBranch: originalBranch,
-      previousState: structuredClone(state),
-      branchTips,
-      createdBranches: [],
-    },
-    cwd,
-  );
+  if (!options.skipUndoEntry) {
+    await saveUndoEntry(
+      {
+        operation: 'restack',
+        timestamp: new Date().toISOString(),
+        previousBranch: originalBranch,
+        previousState: structuredClone(state),
+        branchTips,
+        createdBranches: [],
+      },
+      cwd,
+    );
+  }
 
   const progress: RestackProgress = { originalBranch, steps };
   await writeProgress(progress, cwd);

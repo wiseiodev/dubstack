@@ -40,14 +40,17 @@ import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
+import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { ready } from './commands/ready';
+import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
@@ -529,6 +532,66 @@ Examples:
   );
 
 program
+  .command('move')
+  .argument('<branch>', 'Branch to move within the stack')
+  .option('--before <target>', 'Insert <branch> as the new parent of <target>')
+  .option('--after <target>', 'Insert <branch> as the new child of <target>')
+  .description(
+    'Reorder a tracked branch within its stack (insert before or after another branch)',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub move feat/inserted --before feat/auth-login    Insert before <target>
+  $ dub move feat/inserted --after feat/auth-base      Insert after <target>`,
+  )
+  .action(
+    async (branch: string, options: { before?: string; after?: string }) => {
+      const result = await move(process.cwd(), branch, options);
+      if (result.noOp) {
+        console.log(
+          chalk.yellow(
+            `⚠ Nothing to do: ${result.noOpReason ?? 'branch already in requested position'}.`,
+          ),
+        );
+        return;
+      }
+      if (result.conflictBranch) {
+        console.log(
+          chalk.green(
+            `✔ Moved '${result.branch}' ${result.position} '${result.target}'`,
+          ),
+        );
+        console.log(
+          chalk.yellow(
+            `⚠ Conflict while restacking '${result.conflictBranch}'`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub restack --continue)',
+          ),
+        );
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Moved '${result.branch}' ${result.position} '${result.target}' (new parent: '${result.newParent}')`,
+        ),
+      );
+      if (result.retargeted.length > 0) {
+        console.log(
+          chalk.dim(`  ↳ retargeted PRs: ${result.retargeted.join(', ')}`),
+        );
+      }
+      if (result.rebased.length > 0) {
+        console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
+      }
+    },
+  );
+
+program
   .command('parent')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .description('Show the direct parent branch')
@@ -727,7 +790,7 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create or dub restack operation')
+  .description('Undo the last dub create, dub restack, or dub rename operation')
   .addHelpText(
     'after',
     `
@@ -997,6 +1060,35 @@ program
         console.log(chalk.dim(`  ↳ ${fix}`));
       }
     }
+  });
+
+program
+  .command('status')
+  .description(
+    'Print a one-line status snapshot or structured JSON for the current branch',
+  )
+  .option('--json', 'Output the status snapshot as JSON')
+  .option('--live', 'Bypass the overview cache and hit gh fresh')
+  .option('--no-pr', 'Skip PR fetch (for fast prompts without gh)')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub status                Print a one-line status (cache-only, fast)
+  $ dub status --json         Emit structured JSON
+  $ dub status --live         Refresh PR/CI data via gh
+  $ dub status --no-pr        Skip the PR fetch (shell prompts without gh)`,
+  )
+  .action(async (options: { json?: boolean; live?: boolean; pr?: boolean }) => {
+    const result = await status(process.cwd(), {
+      live: options.live,
+      pr: options.pr,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(formatStatus(result));
   });
 
 program
@@ -1536,6 +1628,58 @@ program
   .action(async (branch?: string) => {
     await pr(process.cwd(), branch);
   });
+
+program
+  .command('rename')
+  .argument('<firstName>', 'New name (current branch) or old name')
+  .argument('[secondName]', 'New name when renaming a specific tracked branch')
+  .description(
+    'Rename a tracked branch and propagate the change through state, children, and remote',
+  )
+  .option('--no-push', 'Skip pushing the renamed branch even if a PR exists')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub rename feat/new-name              Rename the current tracked branch
+  $ dub rename feat/old feat/new          Rename a specific tracked branch
+  $ dub rename --no-push feat/new-name    Rename without pushing the renamed branch`,
+  )
+  .action(
+    async (
+      firstName: string,
+      secondName: string | undefined,
+      options: { push?: boolean },
+    ) => {
+      const result = await rename(process.cwd(), firstName, secondName, {
+        noPush: options.push === false,
+      });
+      console.log(
+        chalk.green(`✔ Renamed '${result.oldName}' to '${result.newName}'`),
+      );
+      if (result.reparentedChildren.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Re-parented ${result.reparentedChildren.length} child branch(es): ${result.reparentedChildren.join(', ')}`,
+          ),
+        );
+      }
+      if (result.pushed && result.prNumber != null) {
+        console.log(
+          chalk.dim(
+            `  ↳ Pushed '${result.newName}' to origin (PR #${result.prNumber} still points at '${result.oldName}' — GitHub doesn't allow editing a PR's head, so close it and rerun 'dub submit' to open a fresh PR on the renamed branch)`,
+          ),
+        );
+      }
+      if (result.oldRemoteCleanupHint) {
+        console.log(
+          chalk.dim(
+            `  ℹ Old remote branch '${result.oldName}' may still exist. Run 'git push origin --delete ${result.oldName}' to clean it up.`,
+          ),
+        );
+      }
+    },
+  );
 
 async function runSubmit(options: {
   dryRun?: boolean;
