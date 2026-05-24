@@ -101,6 +101,8 @@ describe('mcp command', () => {
       'dubstack.submit',
       'dubstack.sync',
       'dubstack.checkout',
+      'dubstack.freeze',
+      'dubstack.unfreeze',
       'dubstack.delete',
       'dubstack.stash',
       'dubstack.stash-pop',

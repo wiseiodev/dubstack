@@ -9,6 +9,7 @@ coverage
 .dispatch
 .evalite
 .evalite-export
+.reports
 
 # Turborepo
 .turbo

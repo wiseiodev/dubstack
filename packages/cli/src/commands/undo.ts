@@ -18,12 +18,20 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop';
+  undone:
+    | 'create'
+    | 'restack'
+    | 'rename'
+    | 'move'
+    | 'pop'
+    | 'freeze'
+    | 'unfreeze';
   details: string;
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, or `dub pop` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
+ * `dub pop`, `dub freeze`, or `dub unfreeze` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -36,6 +44,8 @@ interface UndoResult {
  *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
  * - **pop**: Hard-resets the popped branch to its pre-pop tip, discarding the staged
  *   changes left behind by the pop and restoring the popped commits.
+ * - **freeze** or **unfreeze**: Restores `previousState` — these operations only mutate
+ *   the `frozen` flag in state.json, so no git refs need to be rewound.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *
@@ -157,6 +167,20 @@ export async function undo(cwd: string): Promise<UndoResult> {
     return {
       undone: 'rename',
       details: `Renamed '${renameTo}' back to '${renameFrom}'${remoteHint}`,
+    };
+  }
+
+  if (entry.operation === 'freeze' || entry.operation === 'unfreeze') {
+    // freeze/unfreeze only mutate state.json; nothing to reset in git.
+    await writeState(entry.previousState, cwd);
+    if (currentBranch !== entry.previousBranch) {
+      await checkoutBranch(entry.previousBranch, cwd);
+    }
+    await clearUndoEntry(cwd);
+    const verb = entry.operation === 'freeze' ? 'freeze' : 'unfreeze';
+    return {
+      undone: entry.operation,
+      details: `Restored pre-${verb} frozen flags in DubStack state`,
     };
   }
 

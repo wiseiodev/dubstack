@@ -44,6 +44,15 @@ export interface Branch {
   last_synced_at?: string | null;
   /** Source of the branch's current sync baseline metadata. */
   sync_source?: ReconcileSource | null;
+  /**
+   * Marker set/cleared by `dub freeze` / `dub unfreeze` and surfaced in
+   * `dub log` (🔒) and `dub doctor`.
+   *
+   * Note: this is currently a passive marker only. `dub restack` and
+   * `dub sync` do NOT yet read this field — the enforcement wiring is
+   * tracked separately as DUB-82.
+   */
+  frozen?: boolean;
 }
 
 /** A stack of dependent branches. */
