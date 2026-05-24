@@ -21,6 +21,7 @@ import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
+import { unlink } from './unlink';
 
 type JsonValue =
   | null
@@ -95,6 +96,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
   'dubstack.stash-list': [],
@@ -343,6 +345,33 @@ const TOOLS: ToolDefinition[] = [
         branch: {
           type: 'string',
           description: 'Branch to checkout.',
+        },
+      },
+      required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.unlink',
+    description:
+      'Detach a tracked branch from its parent and promote it to the root of a new stack (no git branches are deleted).',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Tracked branch to detach.',
+        },
+        noRetarget: {
+          type: 'boolean',
+          description:
+            'Skip retargeting the PR base to trunk and warn that the PR will be out of sync.',
+        },
+        orphanChildren: {
+          type: 'boolean',
+          description:
+            'Re-parent direct children onto the original parent instead of moving them with <branch>.',
         },
       },
       required: ['branch'],
@@ -798,6 +827,21 @@ async function callTool(
           interactive: false,
         }),
       );
+    case 'dubstack.unlink': {
+      const target = optionalString(args.branch);
+      if (!target) {
+        throw new DubError("'branch' is required for dubstack.unlink.", [
+          "Pass {'branch': '<name>'} in the tool arguments.",
+          'Call dubstack.log to discover tracked branch names.',
+        ]);
+      }
+      return mutatingToolResult(() =>
+        unlink(cwd, target, {
+          noRetarget: optionalBoolean(args.noRetarget),
+          orphanChildren: optionalBoolean(args.orphanChildren),
+        }),
+      );
+    }
     case 'dubstack.stash':
       return mutatingToolResult(() =>
         stashPush(cwd, { message: optionalString(args.message) }),

@@ -17,6 +17,13 @@ export interface Branch {
   name: string;
   /** Set to "root" for the base branch (e.g. main). Omitted for children. */
   type?: 'root';
+  /**
+   * True when the branch was promoted to a root by `dub unlink` rather than
+   * tracked as a real git trunk. `dub sync` must skip the trunk fast-forward
+   * loop for these — they're feature branches, and FFing them from
+   * `origin/<branch>` would silently overwrite local commits under `--force`.
+   */
+  detached_root?: boolean;
   /** Name of the parent branch. `null` only for root branches. */
   parent: string | null;
   /** SHA of parent branch tip when this branch was created/last rebased */
