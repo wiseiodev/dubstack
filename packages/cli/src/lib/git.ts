@@ -422,6 +422,74 @@ export async function getLastCommitMessage(
   }
 }
 
+/** Per-branch commit metadata returned by {@link getBranchCommitMetaBatch}. */
+export interface BranchCommitMeta {
+  /** `git for-each-ref %(committerdate:relative)`, e.g. "3 hours ago". */
+  committedRel: string;
+  /** Tip-commit author email (angle brackets stripped). */
+  authorEmail: string;
+  /** Tip-commit short SHA (8 chars). */
+  shortSha: string;
+}
+
+const COMMIT_META_FIELD_SEP = '\x1f';
+
+/**
+ * Fetches tip-commit metadata for many branches in one `git for-each-ref`
+ * call. Used by the stack overview pipeline so `dub log` / `dub co` /
+ * `dub status` don't pay an N-round-trip cost.
+ *
+ * Branches missing locally (e.g. never fetched) are simply absent from
+ * the returned map — callers should treat missing entries as "no commit
+ * metadata available" rather than an error.
+ *
+ * Format fields are joined by ASCII unit separator (`\x1f`) so that
+ * spaces inside `committerdate:relative` and angle brackets inside
+ * `authoremail` don't break parsing.
+ */
+export async function getBranchCommitMetaBatch(
+  cwd: string,
+  branchNames: readonly string[],
+): Promise<Map<string, BranchCommitMeta>> {
+  const result = new Map<string, BranchCommitMeta>();
+  if (branchNames.length === 0) return result;
+
+  const refs = branchNames.map((name) => `refs/heads/${name}`);
+  const format =
+    `%(refname:short)${COMMIT_META_FIELD_SEP}` +
+    `%(committerdate:relative)${COMMIT_META_FIELD_SEP}` +
+    `%(authoremail)${COMMIT_META_FIELD_SEP}` +
+    '%(objectname:short=8)';
+
+  let stdout: string;
+  try {
+    const out = await execa(
+      'git',
+      ['for-each-ref', `--format=${format}`, ...refs],
+      {
+        cwd,
+      },
+    );
+    stdout = out.stdout;
+  } catch {
+    throw new DubError('Failed to read branch commit metadata.', [
+      "Run 'git for-each-ref refs/heads/' manually to inspect the failure.",
+      "Run 'git status' to confirm the repository is healthy, then retry.",
+    ]);
+  }
+
+  for (const line of stdout.split('\n')) {
+    if (!line) continue;
+    const parts = line.split(COMMIT_META_FIELD_SEP);
+    if (parts.length !== 4) continue;
+    const [name, committedRel, authorEmailRaw, shortSha] = parts;
+    // `authoremail` is wrapped in `<>` (e.g. `<test@example.com>`).
+    const authorEmail = authorEmailRaw.replace(/^<|>$/g, '');
+    result.set(name, { committedRel, authorEmail, shortSha });
+  }
+  return result;
+}
+
 /**
  * Returns the local ref path used to track the last SHA we successfully
  * pushed to `origin/<branch>`. We maintain this ourselves rather than

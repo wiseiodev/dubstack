@@ -402,6 +402,181 @@ function classifyPrState(
   return 'NONE';
 }
 
+/** Rolled-up CI state across all checks on a PR's head commit. */
+export type CiStatusRollup = 'SUCCESS' | 'FAILURE' | 'PENDING' | 'NONE';
+
+/**
+ * Per-branch PR snapshot used by the stack overview pipeline. Richer than
+ * {@link BranchPrSyncInfo} — adds title, draft, review decision, and a
+ * rolled-up CI status so `dub log` / `dub co` / `dub status` can render
+ * the whole stack from one batched call.
+ */
+export interface StackOverviewPrInfo {
+  number: number;
+  title: string;
+  state: BranchPrLifecycleState;
+  baseRefName: string | null;
+  mergedAt: string | null;
+  /** `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or null. */
+  reviewDecision: string | null;
+  ciRollup: CiStatusRollup;
+  isDraft: boolean;
+}
+
+export interface StackOverviewPrBatch {
+  byBranch: Map<string, StackOverviewPrInfo>;
+  /** True when `gh pr list` likely truncated results (page-limit hit). */
+  truncated: boolean;
+}
+
+/**
+ * Batched, richer cousin of {@link getAllPrSyncInfoBatch} for the stack
+ * overview pipeline. One `gh pr list` call returns title, draft, review
+ * decision, and `statusCheckRollup` per PR; this helper rolls the latter
+ * up to a single {@link CiStatusRollup}.
+ *
+ * Kept separate from {@link getAllPrSyncInfoBatch} so sync — which only
+ * needs `{state, baseRefName}` — doesn't pay the wider `--json` cost and
+ * its existing parser tests stay untouched.
+ */
+export async function getStackOverviewPrBatch(
+  cwd: string,
+): Promise<StackOverviewPrBatch> {
+  let stdout: string;
+  try {
+    const result = await runGh(
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--json',
+        'number,title,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,isDraft',
+        '--limit',
+        String(BATCH_PR_LIST_LIMIT),
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(`Failed to list PRs: ${message}`, [
+      "Run 'gh pr list --state all' manually to inspect the failure.",
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
+
+  const trimmed = stdout.trim();
+  const byBranch = new Map<string, StackOverviewPrInfo>();
+  if (!trimmed || trimmed === 'null') {
+    return { byBranch, truncated: false };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new DubError('Failed to parse batched PR list response.', [
+      "Run 'gh pr list --state all --json state' to inspect the raw response.",
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+  if (!Array.isArray(parsed)) {
+    return { byBranch, truncated: false };
+  }
+
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as {
+      number?: number;
+      title?: string;
+      headRefName?: string;
+      baseRefName?: string | null;
+      state?: string;
+      mergedAt?: string | null;
+      reviewDecision?: string | null;
+      statusCheckRollup?: unknown;
+      isDraft?: boolean;
+    };
+    const head = record.headRefName;
+    if (!head) continue;
+    // Skip entries missing required fields so callers don't render
+    // placeholder rows (`#0`, blank title) for malformed PR records.
+    if (typeof record.number !== 'number' || typeof record.title !== 'string') {
+      continue;
+    }
+    // Mirror getAllPrSyncInfoBatch: first PR per branch wins (newest-first).
+    if (byBranch.has(head)) continue;
+    const reviewDecision =
+      typeof record.reviewDecision === 'string' && record.reviewDecision
+        ? record.reviewDecision
+        : null;
+    byBranch.set(head, {
+      number: record.number,
+      title: record.title,
+      state: classifyPrState(record.state, record.mergedAt),
+      baseRefName: record.baseRefName ?? null,
+      mergedAt: record.mergedAt ?? null,
+      reviewDecision,
+      ciRollup: computeCiRollup(record.statusCheckRollup),
+      isDraft: record.isDraft === true,
+    });
+  }
+
+  return { byBranch, truncated: parsed.length >= BATCH_PR_LIST_LIMIT };
+}
+
+/**
+ * Collapses GitHub's mixed `statusCheckRollup` (check runs + status
+ * contexts) into a single coarse rollup. Failure dominates pending,
+ * pending dominates success.
+ */
+function computeCiRollup(checks: unknown): CiStatusRollup {
+  if (!Array.isArray(checks) || checks.length === 0) return 'NONE';
+  let hasPending = false;
+  let hasFailure = false;
+  let hasSuccess = false;
+  for (const c of checks) {
+    if (!c || typeof c !== 'object') continue;
+    const entry = c as {
+      status?: string;
+      conclusion?: string;
+      state?: string;
+    };
+    const status = (entry.status ?? '').toUpperCase();
+    const conclusion = (entry.conclusion ?? '').toUpperCase();
+    const state = (entry.state ?? '').toUpperCase();
+
+    // CheckRun: status='COMPLETED' means terminal; anything else is in-flight.
+    if (status && status !== 'COMPLETED') {
+      hasPending = true;
+      continue;
+    }
+    const outcome = conclusion || state;
+    if (
+      outcome === 'SUCCESS' ||
+      outcome === 'NEUTRAL' ||
+      outcome === 'SKIPPED'
+    ) {
+      hasSuccess = true;
+    } else if (
+      outcome === 'PENDING' ||
+      outcome === 'EXPECTED' ||
+      outcome === 'QUEUED'
+    ) {
+      hasPending = true;
+    } else if (outcome) {
+      // FAILURE, TIMED_OUT, ACTION_REQUIRED, CANCELLED, ERROR, STARTUP_FAILURE
+      hasFailure = true;
+    }
+  }
+  if (hasFailure) return 'FAILURE';
+  if (hasPending) return 'PENDING';
+  if (hasSuccess) return 'SUCCESS';
+  return 'NONE';
+}
+
 /**
  * Returns coarse lifecycle state of a PR by number.
  */

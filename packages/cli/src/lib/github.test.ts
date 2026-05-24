@@ -25,6 +25,7 @@ import {
   getPrMergeStatusByNumber,
   getPrStateByNumber,
   getRepositoryWebUrl,
+  getStackOverviewPrBatch,
   mergePr,
   openPrInBrowser,
   retargetPrBase,
@@ -339,6 +340,243 @@ describe('getAllPrSyncInfoBatch', () => {
     await expect(getAllPrSyncInfoBatch('/repo')).rejects.toThrow(
       'Failed to list PRs',
     );
+  });
+});
+
+describe('getStackOverviewPrBatch', () => {
+  it('parses rich PR fields and rolls up CI status', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 11,
+          title: 'feat: a',
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: 'APPROVED',
+          isDraft: false,
+          statusCheckRollup: [
+            { status: 'COMPLETED', conclusion: 'SUCCESS' },
+            { status: 'COMPLETED', conclusion: 'SKIPPED' },
+          ],
+        },
+        {
+          number: 12,
+          title: 'feat: b',
+          headRefName: 'feat/b',
+          baseRefName: 'feat/a',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: '',
+          isDraft: true,
+          statusCheckRollup: [
+            { status: 'COMPLETED', conclusion: 'FAILURE' },
+            { status: 'IN_PROGRESS' },
+          ],
+        },
+      ]),
+    });
+
+    const result = await getStackOverviewPrBatch('/repo');
+
+    expect(result.truncated).toBe(false);
+    expect(result.byBranch.get('feat/a')).toEqual({
+      number: 11,
+      title: 'feat: a',
+      state: 'OPEN',
+      baseRefName: 'main',
+      mergedAt: null,
+      reviewDecision: 'APPROVED',
+      ciRollup: 'SUCCESS',
+      isDraft: false,
+    });
+    expect(result.byBranch.get('feat/b')).toEqual({
+      number: 12,
+      title: 'feat: b',
+      state: 'OPEN',
+      baseRefName: 'feat/a',
+      mergedAt: null,
+      reviewDecision: null,
+      ciRollup: 'FAILURE',
+      isDraft: true,
+    });
+  });
+
+  it('issues exactly one gh pr list call with the richer field set', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '[]' });
+    await getStackOverviewPrBatch('/repo');
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--state',
+        'all',
+        '--json',
+        'number,title,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,isDraft',
+        '--limit',
+        '100',
+      ],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('rolls CI status up with FAILURE > PENDING > SUCCESS', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 1,
+          title: 't',
+          headRefName: 'pending',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [
+            { status: 'COMPLETED', conclusion: 'SUCCESS' },
+            { status: 'QUEUED' },
+          ],
+        },
+        {
+          number: 2,
+          title: 't',
+          headRefName: 'success',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [
+            { status: 'COMPLETED', conclusion: 'NEUTRAL' },
+            { state: 'SUCCESS' },
+          ],
+        },
+        {
+          number: 3,
+          title: 't',
+          headRefName: 'none',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+      ]),
+    });
+
+    const result = await getStackOverviewPrBatch('/repo');
+    expect(result.byBranch.get('pending')?.ciRollup).toBe('PENDING');
+    expect(result.byBranch.get('success')?.ciRollup).toBe('SUCCESS');
+    expect(result.byBranch.get('none')?.ciRollup).toBe('NONE');
+  });
+
+  it('flags truncated when the page limit is hit', async () => {
+    const entries = Array.from({ length: 100 }, (_, i) => ({
+      number: i + 1,
+      title: `pr-${i}`,
+      headRefName: `feat/${i}`,
+      baseRefName: 'main',
+      state: 'OPEN',
+      mergedAt: null,
+      reviewDecision: null,
+      isDraft: false,
+      statusCheckRollup: [],
+    }));
+    mockExeca.mockResolvedValueOnce({ stdout: JSON.stringify(entries) });
+
+    const result = await getStackOverviewPrBatch('/repo');
+    expect(result.truncated).toBe(true);
+    expect(result.byBranch.size).toBe(100);
+  });
+
+  it('keeps the first PR per branch when gh returns duplicates', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          number: 9,
+          title: 'newer',
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+        {
+          number: 8,
+          title: 'older',
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'CLOSED',
+          mergedAt: '2026-01-01T00:00:00Z',
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+      ]),
+    });
+
+    const result = await getStackOverviewPrBatch('/repo');
+    expect(result.byBranch.get('feat/a')?.number).toBe(9);
+    expect(result.byBranch.get('feat/a')?.state).toBe('OPEN');
+  });
+
+  it('throws a DubError when gh fails', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('network down'));
+    await expect(getStackOverviewPrBatch('/repo')).rejects.toThrow(
+      'Failed to list PRs',
+    );
+  });
+
+  it('skips records missing required number/title fields', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          // valid
+          number: 1,
+          title: 'feat: a',
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+        {
+          // missing number
+          title: 'no number',
+          headRefName: 'feat/no-number',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+        {
+          // missing title
+          number: 99,
+          headRefName: 'feat/no-title',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+      ]),
+    });
+
+    const result = await getStackOverviewPrBatch('/repo');
+    expect(result.byBranch.has('feat/a')).toBe(true);
+    expect(result.byBranch.has('feat/no-number')).toBe(false);
+    expect(result.byBranch.has('feat/no-title')).toBe(false);
   });
 });
 
