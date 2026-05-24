@@ -180,11 +180,15 @@ export async function sync(
     scopeStacks.flatMap((stack) => stack.branches.map((b) => [b.name, b])),
   );
 
+  // Real trunks only. `detached_root` entries are feature branches that `dub
+  // unlink` promoted to a root in their own stack — running the trunk
+  // fast-forward loop against them would `git branch -f <feat> origin/<feat>`
+  // and silently overwrite local commits when `--force` is set.
   const roots = Array.from(
     new Set(
       scopeStacks
         .flatMap((s) => s.branches)
-        .filter((b) => b.type === 'root')
+        .filter((b) => b.type === 'root' && !b.detached_root)
         .map((b) => b.name),
     ),
   );

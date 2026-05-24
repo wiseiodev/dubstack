@@ -22,7 +22,8 @@ interface UndoResult {
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, or `dub move` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, or
+ * `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -33,6 +34,9 @@ interface UndoResult {
  *   branch with the original name has been re-created in the meantime. Any push that
  *   happened during the rename is NOT reverted — the local branch is restored, but the
  *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
+ * - **unlink**: Restores the previous stack split via `writeState` (no branch tips
+ *   change). Additionally discards any pending cleanup journal so a subsequent
+ *   `dub continue` doesn't fire a stale retarget against the now-restored stack.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *

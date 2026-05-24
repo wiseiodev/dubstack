@@ -154,6 +154,12 @@ describe('unlink command (unit)', () => {
     );
     expect(newRoot?.type).toBe('root');
     expect(newRoot?.parent).toBeNull();
+    // Detached_root marker — sync's trunk FF loop must skip this branch.
+    expect(newRoot?.detached_root).toBe(true);
+    // Submit/reconcile baselines cleared so the next `dub submit` doesn't
+    // write `base_branch: null` from the now-null parent.
+    expect(newRoot?.last_submitted_version).toBeNull();
+    expect(newRoot?.last_reconciled_version).toBeNull();
 
     expect(saveUndoEntry).toHaveBeenCalledWith(
       expect.objectContaining({ operation: 'unlink' }),
@@ -191,16 +197,56 @@ describe('unlink command (unit)', () => {
     expect(newStack?.branches.map((b) => b.name)).toEqual(['feat/auth-login']);
   });
 
-  it('--orphan-children leaves descendants on the original parent', async () => {
-    vi.mocked(readState).mockResolvedValue(
-      makeState([
-        { name: 'main', parent: null, type: 'root' },
-        { name: 'feat/auth-base', parent: 'main' },
-        { name: 'feat/auth-login', parent: 'feat/auth-base' },
-        { name: 'feat/auth-mfa', parent: 'feat/auth-login' },
-        { name: 'feat/auth-totp', parent: 'feat/auth-mfa' },
-      ]),
-    );
+  it('--orphan-children leaves descendants on the original parent and clears their parent_revision', async () => {
+    // Seed parent_revision values so we can prove the orphaned child's stale
+    // pointer is cleared. `dub restack` uses parent_revision as the `--onto`
+    // cut point; leaving it pointing at the now-removed parent's tip would
+    // cause restack to drop the unlinked branch's commits from the child.
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/auth-base',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              parent_revision: 'main-tip-sha',
+            },
+            {
+              name: 'feat/auth-login',
+              parent: 'feat/auth-base',
+              pr_number: null,
+              pr_link: null,
+              parent_revision: 'base-tip-sha',
+            },
+            {
+              name: 'feat/auth-mfa',
+              parent: 'feat/auth-login',
+              pr_number: null,
+              pr_link: null,
+              parent_revision: 'login-tip-sha',
+            },
+            {
+              name: 'feat/auth-totp',
+              parent: 'feat/auth-mfa',
+              pr_number: null,
+              pr_link: null,
+              parent_revision: 'mfa-tip-sha',
+            },
+          ],
+        },
+      ],
+    };
+    vi.mocked(readState).mockResolvedValue(state);
 
     const result = await unlink(cwd, 'feat/auth-login', {
       orphanChildren: true,
@@ -219,12 +265,16 @@ describe('unlink command (unit)', () => {
       'feat/auth-totp',
     ]);
     // Direct child reparented onto the old parent; grandchild stays put.
-    expect(
-      original?.branches.find((b) => b.name === 'feat/auth-mfa')?.parent,
-    ).toBe('feat/auth-base');
-    expect(
-      original?.branches.find((b) => b.name === 'feat/auth-totp')?.parent,
-    ).toBe('feat/auth-mfa');
+    const mfa = original?.branches.find((b) => b.name === 'feat/auth-mfa');
+    expect(mfa?.parent).toBe('feat/auth-base');
+    // parent_revision MUST be cleared on the orphaned child — its previous
+    // value pointed at feat/auth-login's tip, which restack would treat as
+    // the `--onto` cut point and silently drop feat/auth-login's commits.
+    expect(mfa?.parent_revision).toBeNull();
+    // Grandchild stays put with its existing parent_revision intact.
+    const totp = original?.branches.find((b) => b.name === 'feat/auth-totp');
+    expect(totp?.parent).toBe('feat/auth-mfa');
+    expect(totp?.parent_revision).toBe('mfa-tip-sha');
 
     const newStack = writtenState.stacks.find((s) => s.id !== 'stack-1');
     expect(newStack?.branches.map((b) => b.name)).toEqual(['feat/auth-login']);
@@ -252,8 +302,10 @@ describe('unlink command (unit)', () => {
     expect(result.retargeted).toBe(false);
     expect(result.retargetSkipped).toBe(true);
     expect(result.prNumber).toBe(11);
-    // Journal still cleared (we opened it but recorded no ops).
-    expect(clearCleanupJournal).toHaveBeenCalled();
+    // No retarget op means no journal file should be created at all — an
+    // empty journal would block subsequent dub commands.
+    expect(startCleanupJournal).not.toHaveBeenCalled();
+    expect(clearCleanupJournal).not.toHaveBeenCalled();
   });
 
   it('leaves the cleanup journal in place when retarget fails so dub continue can resume', async () => {
@@ -375,5 +427,7 @@ describe('unlink command (unit)', () => {
     expect(appendCleanupOperation).not.toHaveBeenCalled();
     expect(result.retargeted).toBe(false);
     expect(result.retargetSkipped).toBe(false);
+    // No retarget needed → no journal created.
+    expect(startCleanupJournal).not.toHaveBeenCalled();
   });
 });

@@ -668,12 +668,12 @@ Examples:
       } else if (result.retargetSkipped && result.prNumber != null) {
         console.log(
           chalk.yellow(
-            `⚠ PR #${result.prNumber} base unchanged (--no-retarget). It will diverge from the new stack root '${result.branch}'.`,
+            `⚠ PR #${result.prNumber} not retargeted (--no-retarget). If its base is no longer correct after the split, retarget manually.`,
           ),
         );
         console.log(
           chalk.dim(
-            `  Run 'gh pr edit ${result.prNumber} --base ${result.trunk}' to retarget manually.`,
+            `  Run 'gh pr edit ${result.prNumber} --base ${result.trunk}' to retarget to '${result.trunk}'.`,
           ),
         );
       }

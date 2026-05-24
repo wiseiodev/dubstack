@@ -2113,4 +2113,87 @@ describe('sync', () => {
       ).rejects.toThrow(/Sync completed with errors on 1 branch\(es\)/);
     });
   });
+
+  describe('detached_root handling', () => {
+    it('does NOT fast-forward a root marked detached_root (would clobber feature branch commits)', async () => {
+      // After `dub unlink feat/x`, feat/x lives in its own stack as
+      // type: 'root', detached_root: true. The trunk FF loop must skip it —
+      // otherwise sync would `git branch -f feat/x origin/feat/x` under
+      // --force and silently overwrite local commits.
+      mockReadState.mockResolvedValue({
+        stacks: [
+          {
+            id: 'stack-1',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: {
+                  head_sha: 'feat/a-sha',
+                  base_sha: 'main-sha',
+                  base_branch: 'main',
+                  version_number: null,
+                  source: 'submit',
+                },
+                last_synced_at: null,
+                sync_source: 'submit',
+              },
+            ],
+          },
+          {
+            id: 'stack-2',
+            branches: [
+              {
+                name: 'feat/unlinked',
+                type: 'root',
+                detached_root: true,
+                parent: null,
+                pr_number: 99,
+                pr_link: 'https://x/99',
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+      // Force the FF check to "needs reset" so we'd see hardReset called if
+      // sync mistakenly included the detached root in the trunk loop.
+      mockFastForwardBranchToRef.mockResolvedValue(false);
+
+      const result = await sync('/repo', {
+        interactive: false,
+        all: true,
+        force: true,
+        restack: false,
+      });
+
+      // FF and hardReset must NEVER be called for the detached root.
+      expect(mockFastForwardBranchToRef).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        'origin/feat/unlinked',
+        '/repo',
+      );
+      expect(mockHardResetBranchToRef).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        'origin/feat/unlinked',
+        '/repo',
+      );
+      // Real trunk (main) WAS treated as a trunk.
+      expect(result.trunksSynced).not.toContain('feat/unlinked');
+    });
+  });
 });

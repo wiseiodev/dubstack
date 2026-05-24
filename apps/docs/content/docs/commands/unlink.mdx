@@ -82,6 +82,19 @@ If `dub unlink` is interrupted between `writeState` and the `gh pr edit`,
 `dub continue` replays the cleanup journal idempotently: it re-reads the
 current PR base and retargets only if it still differs from the new base.
 
+The journal is only created when a retarget is actually needed — if the
+branch has no PR, the PR is already on trunk, or `--no-retarget` is passed,
+no journal is written, so unrelated commands aren't blocked by an empty
+in-flight operation marker.
+
+## How `dub sync` treats a detached root
+
+The promoted root carries a `detached_root: true` flag in state. `dub sync`
+skips its trunk fast-forward loop for these branches — they're feature
+branches, and FFing them from `origin/<branch>` would silently overwrite
+local commits under `--force`. Use `dub restack` / `git pull` to update a
+detached root as you would any other feature branch.
+
 ## Errors
 
 | Situation | Behavior |

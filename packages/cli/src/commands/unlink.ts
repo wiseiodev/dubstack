@@ -159,12 +159,12 @@ export async function unlink(
   const originalBranch = await getCurrentBranch(cwd);
   const previousState = structuredClone(state);
 
-  // Journal the retarget BEFORE touching state so a crash between the journal
-  // write and the actual `gh pr edit` is recoverable via `dub continue`. The
-  // state split itself is atomic (single `writeState`), so no reparent ops
-  // need journaling.
-  const journal = await startCleanupJournal(cwd);
-  if (plannedRetarget) {
+  // Only open a cleanup journal when there's something to journal. An empty
+  // journal would block subsequent DubStack commands (operation-state.ts
+  // detects any journal file as an in-flight 'cleanup' op) until the user
+  // runs `dub continue`/`dub abort` even though replay would no-op.
+  const journal = plannedRetarget ? await startCleanupJournal(cwd) : null;
+  if (journal && plannedRetarget) {
     await appendCleanupOperation(cwd, journal, {
       type: 'retarget',
       branch: plannedRetarget.branch,
@@ -177,12 +177,15 @@ export async function unlink(
   );
 
   // Orphan-children: each direct child of <branch> chains onto the old parent
-  // so the original stack stays connected. Grandchildren keep their existing
-  // (still-tracked) parent pointers.
+  // so the original stack stays connected. Clear `parent_revision` too — it
+  // pointed at <branch>'s old tip, and leaving it stale causes `dub restack`
+  // to compute the wrong `--onto` cut point and drop commits from the child.
+  // Grandchildren keep their existing (still-tracked) parent pointers.
   if (options.orphanChildren) {
     for (const b of stack.branches) {
       if (b.parent === branch) {
         b.parent = previousParent;
+        b.parent_revision = null;
       }
     }
   }
@@ -190,15 +193,24 @@ export async function unlink(
   const movedBranches = stack.branches.filter((b) => movedNames.has(b.name));
   stack.branches = stack.branches.filter((b) => !movedNames.has(b.name));
 
-  // Promote <branch> to a new root inside the new stack.
+  // Promote <branch> to a new root inside the new stack. Mark it `detached_root`
+  // so `dub sync` skips the trunk fast-forward loop — it's a feature branch,
+  // and FFing from `origin/<branch>` would silently overwrite local commits.
   for (const b of movedBranches) {
     if (b.name === branch) {
       b.parent = null;
       b.type = 'root';
+      b.detached_root = true;
       // `parent_revision` tracked the *prior* parent's tip — meaningless on a
       // root branch. Drop it so `dub restack` doesn't try to use it as the
       // rebase upstream.
       b.parent_revision = null;
+      // Drop submit/reconcile baselines that referenced the old parent. After
+      // promotion, base_branch would otherwise be a stale pointer at the
+      // pre-unlink parent, which corrupts `dub submit`'s version history
+      // (next submit writes `base_branch: null` from `branch.parent`).
+      b.last_submitted_version = null;
+      b.last_reconciled_version = null;
     }
   }
 
@@ -241,7 +253,9 @@ export async function unlink(
     prNumber = entry.pr_number;
   }
 
-  await clearCleanupJournal(cwd);
+  if (journal) {
+    await clearCleanupJournal(cwd);
+  }
 
   return {
     branch,
