@@ -64,6 +64,7 @@ import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
 import { unfreeze } from './commands/unfreeze';
+import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
 import { watch } from './commands/watch';
 import {
@@ -698,6 +699,94 @@ Examples:
   );
 
 program
+  .command('unlink')
+  .argument('<branch>', 'Branch to detach from its parent')
+  .option(
+    '--no-retarget',
+    'Leave PR base unchanged (warn that the PR will be out of sync)',
+  )
+  .option(
+    '--keep-children',
+    'Move descendants with <branch> into the new stack (default)',
+  )
+  .option(
+    '--orphan-children',
+    'Re-parent direct children onto the original parent instead of moving them',
+  )
+  .description(
+    'Detach a tracked branch from its parent, splitting it into its own stack',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub unlink feat/auth-login                Promote feat/auth-login to a new stack root
+  $ dub unlink feat/auth-login --orphan-children  Leave descendants on the original parent
+  $ dub unlink feat/auth-login --no-retarget  Skip PR retarget (warns about drift)`,
+  )
+  .action(
+    async (
+      branch: string,
+      options: {
+        retarget?: boolean;
+        keepChildren?: boolean;
+        orphanChildren?: boolean;
+      },
+    ) => {
+      if (options.keepChildren && options.orphanChildren) {
+        throw new DubError(
+          "Pass only one of '--keep-children' or '--orphan-children'.",
+          [
+            "Pass '--keep-children' (default) to move descendants with <branch>.",
+            "Pass '--orphan-children' to leave descendants on the original parent.",
+          ],
+        );
+      }
+      const result = await unlink(process.cwd(), branch, {
+        noRetarget: options.retarget === false,
+        orphanChildren: options.orphanChildren ?? false,
+      });
+      console.log(
+        chalk.green(
+          `✔ Unlinked '${result.branch}' from '${result.previousParent}'`,
+        ),
+      );
+      if (result.movedDescendants.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Moved ${result.movedDescendants.length} descendant(s) into new stack: ${result.movedDescendants.join(', ')}`,
+          ),
+        );
+      }
+      if (result.orphanedChildren.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Re-parented ${result.orphanedChildren.length} child(ren) onto '${result.previousParent}': ${result.orphanedChildren.join(', ')}`,
+          ),
+        );
+      }
+      if (result.retargeted && result.prNumber != null) {
+        console.log(
+          chalk.dim(
+            `  ↳ Retargeted PR #${result.prNumber} → '${result.trunk}'`,
+          ),
+        );
+      } else if (result.retargetSkipped && result.prNumber != null) {
+        console.log(
+          chalk.yellow(
+            `⚠ PR #${result.prNumber} not retargeted (--no-retarget). If its base is no longer correct after the split, retarget manually.`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            `  Run 'gh pr edit ${result.prNumber} --base ${result.trunk}' to retarget to '${result.trunk}'.`,
+          ),
+        );
+      }
+    },
+  );
+
+program
   .command('parent')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .description('Show the direct parent branch')
@@ -897,7 +986,7 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, restack, rename, move, pop, freeze, or unfreeze operation',
+    'Undo the last dub create, restack, rename, move, pop, freeze, unfreeze, or unlink operation',
   )
   .addHelpText(
     'after',

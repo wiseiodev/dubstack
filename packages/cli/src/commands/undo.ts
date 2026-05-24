@@ -1,3 +1,4 @@
+import { clearCleanupJournal } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -25,13 +26,14 @@ interface UndoResult {
     | 'move'
     | 'pop'
     | 'freeze'
-    | 'unfreeze';
+    | 'unfreeze'
+    | 'unlink';
   details: string;
 }
 
 /**
  * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
- * `dub pop`, `dub freeze`, or `dub unfreeze` operation.
+ * `dub pop`, `dub freeze`, `dub unfreeze`, or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -46,6 +48,9 @@ interface UndoResult {
  *   changes left behind by the pop and restoring the popped commits.
  * - **freeze** or **unfreeze**: Restores `previousState` — these operations only mutate
  *   the `frozen` flag in state.json, so no git refs need to be rewound.
+ * - **unlink**: Restores the previous stack split via `writeState` (no branch tips
+ *   change). Additionally discards any pending cleanup journal so a subsequent
+ *   `dub continue` doesn't fire a stale retarget against the now-restored stack.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *
@@ -202,12 +207,20 @@ export async function undo(cwd: string): Promise<UndoResult> {
   }
 
   await writeState(entry.previousState, cwd);
+  if (entry.operation === 'unlink') {
+    // Undoing the split must also discard any pending journaled retarget from
+    // the original unlink — otherwise a subsequent `dub continue` would
+    // retarget the PR for a branch that's now back in its original stack.
+    await clearCleanupJournal(cwd);
+  }
   await clearUndoEntry(cwd);
 
   const details =
     entry.operation === 'move'
       ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+      : entry.operation === 'unlink'
+        ? 'Restored stack metadata to pre-unlink state'
+        : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
 
   return {
     undone: entry.operation,

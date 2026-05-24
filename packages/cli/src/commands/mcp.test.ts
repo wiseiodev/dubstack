@@ -103,6 +103,7 @@ describe('mcp command', () => {
       'dubstack.checkout',
       'dubstack.freeze',
       'dubstack.unfreeze',
+      'dubstack.unlink',
       'dubstack.delete',
       'dubstack.stash',
       'dubstack.stash-pop',
