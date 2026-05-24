@@ -7,6 +7,7 @@ import { getCurrentBranch } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
 import { getStackOverviewBatch } from '../lib/stack-overview';
+import { absorb } from './absorb';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
@@ -102,6 +103,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
   'dubstack.stash-list': [],
+  'dubstack.absorb': ['ai', 'stack', 'dryRun'],
 };
 
 const BRANCH_SCHEMA = {
@@ -377,6 +379,32 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['target'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.absorb',
+    description:
+      'Distribute fixup commits to their targets — autosquash by default, AI-pick targets with `ai`, cross-branch with `stack`.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ai: {
+          type: 'boolean',
+          description:
+            'AI-pick targets for ambiguous WIP commits on the current branch.',
+        },
+        stack: {
+          type: 'boolean',
+          description:
+            'Move fixup commits whose target lives on a different branch in the stack.',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Preview the plan without mutating.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -909,6 +937,16 @@ async function callTool(
       );
     case 'dubstack.stash-list':
       return jsonToolResult(await stashList(cwd));
+    case 'dubstack.absorb':
+      return mutatingToolResult(() =>
+        absorb(cwd, {
+          ai: optionalBoolean(args.ai),
+          stack: optionalBoolean(args.stack),
+          dryRun: optionalBoolean(args.dryRun),
+          interactive: false,
+          quiet: true,
+        }),
+      );
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`, [
         'Call tools/list to discover the available dubstack.* tool names.',
