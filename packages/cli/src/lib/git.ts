@@ -314,9 +314,12 @@ export async function countCommitsAhead(
       { cwd },
     );
     return Number.parseInt(stdout.trim(), 10);
-  } catch {
+  } catch (error) {
     throw new DubError(
-      `Could not count commits between '${base}' and '${tip}'.`,
+      formatGitFailure(
+        `Could not count commits between '${base}' and '${tip}'.`,
+        readGitCommandOutput(error),
+      ),
       [
         `Run 'git log --oneline ${base}..${tip}' to inspect the range manually.`,
       ],
@@ -733,9 +736,9 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
 
 /**
  * Returns true when there are unstaged modifications to tracked files
- * (column 2 of `git status --porcelain` is not space, and the line is
- * not an untracked-file marker). Untracked files are intentionally ignored
- * because `git reset --hard` does not touch them.
+ * (column 2 of `git status --porcelain` is not space). Runs with
+ * `--untracked-files=no` so untracked files are never reported; they are
+ * intentionally ignored because `git reset --hard` does not touch them.
  */
 export async function hasUnstagedTrackedChanges(cwd: string): Promise<boolean> {
   const { stdout } = await execa(

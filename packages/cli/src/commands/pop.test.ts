@@ -82,6 +82,14 @@ describe('pop', () => {
     expect(log.trim()).toBe('');
   });
 
+  it('refuses to pop when branch has no commits above parent', async () => {
+    await create('feat/a', dir);
+
+    await expect(pop(dir, {})).rejects.toThrow(
+      "Nothing to pop: 'feat/a' has no commits above 'main'",
+    );
+  });
+
   it('refuses to pop past the parent branch', async () => {
     await create('feat/a', dir);
     await writeAndCommit(dir, 'a.txt', '1', 'feat: only commit');

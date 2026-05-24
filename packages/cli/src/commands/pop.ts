@@ -65,6 +65,15 @@ export async function pop(
   }
 
   const branchCommitCount = await countCommitsAhead(branch, parent, cwd);
+  if (branchCommitCount === 0) {
+    throw new DubError(
+      `Nothing to pop: '${branch}' has no commits above '${parent}'.`,
+      [
+        `Make at least one commit on '${branch}' before popping.`,
+        `Run 'dub log' to confirm the stack relationship between '${branch}' and '${parent}'.`,
+      ],
+    );
+  }
   if (steps > branchCommitCount) {
     throw new DubError(
       `Cannot pop ${steps} commit(s): '${branch}' has only ${branchCommitCount} commit(s) above '${parent}'.`,
