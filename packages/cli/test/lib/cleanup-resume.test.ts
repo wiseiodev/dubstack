@@ -11,14 +11,22 @@ import { createTestRepo, gitInRepo } from '../helpers';
 
 let dir: string;
 let cleanup: () => Promise<void>;
+let ensureGh: ReturnType<typeof vi.spyOn>;
+let checkGh: ReturnType<typeof vi.spyOn>;
 
 beforeEach(async () => {
   const repo = await createTestRepo();
   dir = repo.dir;
   cleanup = repo.cleanup;
+  // Retarget replay preflights gh; stub it so tests don't depend on a real
+  // gh binary or authenticated user in CI.
+  ensureGh = vi.spyOn(github, 'ensureGhInstalled').mockResolvedValue(undefined);
+  checkGh = vi.spyOn(github, 'checkGhAuth').mockResolvedValue(undefined);
 });
 
 afterEach(async () => {
+  ensureGh.mockRestore();
+  checkGh.mockRestore();
   await cleanup();
 });
 
@@ -265,6 +273,59 @@ describe('resumeCleanup', () => {
     expect(retarget).not.toHaveBeenCalled();
     getInfo.mockRestore();
     retarget.mockRestore();
+  });
+
+  it('skips the gh preflight when the journal has no retarget ops', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [{ name: 'main', parent: null, type: 'root' }],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'delete',
+      branch: 'middle',
+      reason: 'merged-pr',
+    });
+
+    await resumeCleanup(dir);
+
+    expect(ensureGh).not.toHaveBeenCalled();
+    expect(checkGh).not.toHaveBeenCalled();
+  });
+
+  it('runs the gh preflight before retarget replay', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            { name: 'feat/b', parent: 'main', pr_number: 2, pr_link: null },
+          ],
+        },
+      ],
+    });
+    vi.spyOn(github, 'getBranchPrSyncInfo').mockResolvedValue({
+      state: 'OPEN',
+      baseRefName: 'main',
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'retarget',
+      branch: 'feat/b',
+      newBase: 'main',
+    });
+
+    await resumeCleanup(dir);
+
+    expect(ensureGh).toHaveBeenCalled();
+    expect(checkGh).toHaveBeenCalled();
   });
 
   it('skips a retarget op when the PR is not OPEN (closed, merged, or absent)', async () => {

@@ -5,7 +5,12 @@ import {
   readCleanupJournal,
 } from './cleanup-journal';
 import { branchExists, deleteBranch, getCurrentBranch } from './git';
-import { getBranchPrSyncInfo, retargetPrBase } from './github';
+import {
+  checkGhAuth,
+  ensureGhInstalled,
+  getBranchPrSyncInfo,
+  retargetPrBase,
+} from './github';
 import { type Branch, readState, writeState } from './state';
 
 export interface CleanupResumeResult {
@@ -32,6 +37,14 @@ export async function resumeCleanup(cwd: string): Promise<CleanupResumeResult> {
   const journal = await readCleanupJournal(cwd);
   if (!journal) {
     return { applied: [], alreadyApplied: [] };
+  }
+  // Retarget replay hits the GitHub API. Preflight gh once up-front so the
+  // user gets a clean DubError instead of a raw execa failure mid-replay.
+  // Plain delete/reparent journals (e.g. those left by `dub sync`) don't need
+  // gh at all, so only pay the cost when a retarget is queued.
+  if (journal.operations.some((op) => op.type === 'retarget')) {
+    await ensureGhInstalled();
+    await checkGhAuth();
   }
   return replayJournal(cwd, journal);
 }
