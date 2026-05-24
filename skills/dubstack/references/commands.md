@@ -78,10 +78,16 @@ This is a concise command reference for agents using `dub`.
 
 | Command | Purpose |
 |---|---|
-| `dub submit` / `dub ss` | Push branches and create/update stack PRs |
+| `dub submit` / `dub ss` | Push current branch + ancestors and create/update stack PRs (default) |
+| `dub submit --downstack` | Same as default — current branch + ancestors to trunk |
+| `dub submit --upstack` | Current branch + all descendants |
+| `dub submit --stack` | Full tree from trunk |
+| `dub submit --branch <name>` | Exactly the named branch (no ancestors, no descendants) |
 | `dub submit --dry-run` | Preview submit actions |
 | `dub pr` | Open current branch PR in browser |
 | `dub pr <branch-or-number>` | Open specific PR target |
+
+Scope flags (`--upstack`/`--downstack`/`--stack`/`--branch`) are mutually exclusive. The legacy `--path current|stack` still works but emits a deprecation warning and is removed in v2.
 
 ## Recovery
 

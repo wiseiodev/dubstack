@@ -35,7 +35,7 @@ dub doctor
 If the stack looks healthy after restacking and you still need to refresh the PR from your current branch, follow with:
 
 ```bash
-dub submit --path current
+dub submit
 ```
 
 If `dub doctor` reports that a branch is not based on its GitHub base, refresh that base first, then replay and resubmit the branch:
@@ -43,7 +43,7 @@ If `dub doctor` reports that a branch is not based on its GitHub base, refresh t
 ```bash
 git checkout main && git pull --ff-only origin main
 dub restack
-dub submit --path current
+dub submit
 ```
 
 ## dub ready
@@ -51,7 +51,14 @@ dub submit --path current
 Run pre-submit checklist (doctor + submit preflight):
 
 ```bash
+# Default: current branch + ancestors (downstack)
 dub ready
+
+# Just the current branch
+dub ready --scope current
+
+# Every branch in the stack (siblings included)
+dub ready --scope stack
 ```
 
 ## dub prune
@@ -74,10 +81,16 @@ dub prune --all --apply
 Validate merge order and GitHub mergeability for a stack PR:
 
 ```bash
-# Check current branch PR
+# Check current branch PR (scope: current, default)
 dub merge-check
 
-# Check explicit PR number
+# Check current branch + ancestors
+dub merge-check --scope downstack
+
+# Check every branch in the stack (siblings included)
+dub merge-check --scope stack
+
+# Check an explicit PR number (scope ignored)
 dub merge-check --pr 123
 ```
 
@@ -126,7 +139,7 @@ dub prune --apply
 dub ready
 
 # 5) Submit current linear path
-dub submit --path current
+dub submit
 ```
 
 ## Hidden Conflict Recovery
@@ -144,7 +157,7 @@ dub restack
 dub doctor
 
 # 4) Refresh the current PR path if needed
-dub submit --path current
+dub submit
 
 # 5) Confirm GitHub now sees the PR as mergeable
 dub merge-check

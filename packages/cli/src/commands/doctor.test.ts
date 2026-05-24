@@ -243,7 +243,7 @@ describe('doctor', () => {
       'git checkout main && git pull --ff-only origin main',
     );
     expect(issue?.fixes).toContain('dub restack');
-    expect(issue?.fixes).toContain('dub submit --path current');
+    expect(issue?.fixes).toContain('dub submit');
     expect(result.healthy).toBe(false);
   });
 

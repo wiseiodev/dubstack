@@ -142,8 +142,17 @@ dub ss
 # preview only
 dub ss --dry-run
 
-# current-path submit (default behavior)
-dub ss --path current
+# default scope: current branch + ancestors to trunk
+dub ss
+
+# full tree from trunk
+dub ss --stack
+
+# upstack: current + all descendants
+dub ss --upstack
+
+# single named branch
+dub ss --branch feat/api
 
 # AI-generate PR description body
 dub submit --ai
