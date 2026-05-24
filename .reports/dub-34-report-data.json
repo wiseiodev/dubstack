@@ -1,0 +1,291 @@
+{
+  "meta": {
+    "workId": "DUB-34",
+    "title": "dub pop — pop the last commit(s) into staged changes",
+    "artifactId": "dub-34",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-34-dub-pop-pop-the-last-commits-into-staged-changes",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-34",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 9,
+    "additions": 549,
+    "deletions": 5,
+    "diffStat": "9 files changed, 549 insertions(+), 5 deletions(-)"
+  },
+  "prompt": "Add `dub pop [--steps N]` so users can soft-reset commits back into the staging area for re-editing — addresses Graphite's most-cited UX gap and finally retires the `git reset --soft; commit; submit` dance.",
+  "tldr": "New `dub pop` command soft-resets N commits off the current branch and leaves their changes squashed in the index. Refuses dirty trees and parent-boundary overrun. `dub undo` reverses the pop. Descendants restack lazily on the next `dub modify`.",
+  "why": {
+    "motivation": [
+      "Graphite's most-cited UX complaint: `gt modify` doesn't pop commits into the staging area.",
+      "Users today fall back to `git reset --soft; commit; gt submit`, which bypasses stack metadata."
+    ],
+    "before": [
+      "No first-class way to edit a commit you just landed without manual rebase or amend gymnastics.",
+      "Editing a middle-of-stack commit required interactive rebase or `git reset --soft` + manual descendant handling."
+    ],
+    "after": [
+      "`dub pop` soft-resets N commits into staged changes with safety checks (dirty tree, parent boundary).",
+      "`dub modify -ac -m '…'` after a pop produces a new commit and auto-restacks descendants lazily.",
+      "`dub undo` rolls the pop back when called from the original branch."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/pop.ts",
+      "changeType": "new",
+      "additions": 97,
+      "deletions": 0,
+      "explanation": "Command entrypoint. Validates steps, refuses dirty trees, computes commits-ahead via `git rev-list --count`, then `git reset --soft HEAD~N`. Writes an undo entry pinning the pre-pop branch tip.",
+      "snippet": "if (steps > branchCommitCount) {\n  throw new DubError(\n    `Cannot pop ${steps} commit(s): '${branch}' has only ${branchCommitCount} commit(s) above '${parent}'.`,\n    [...],\n  );\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/undo.ts",
+      "changeType": "mod",
+      "additions": 32,
+      "deletions": 1,
+      "explanation": "Extends undo to handle `pop`: refuses if user switched branches after the pop, allows untracked files (git hard-reset preserves them), then resets the branch to the pre-pop tip.",
+      "snippet": "if (entry.operation === 'pop') {\n  const [branch, sha] = Object.entries(entry.branchTips)[0] ?? [];\n  if (current !== branch) {\n    throw new DubError(\n      `Cannot undo pop: currently on '${current}', expected '${branch}'.`,\n      [`Run 'dub co ${branch}' to switch back, then rerun 'dub undo'.`],\n    );\n  }\n  ...\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 66,
+      "deletions": 0,
+      "explanation": "Adds three helpers: `countCommitsAhead`, `softResetHead`, and `hasUnstagedTrackedChanges` (ignores untracked files because `git reset --hard` preserves them).",
+      "snippet": "export async function hasUnstagedTrackedChanges(cwd: string): Promise<boolean> {\n  const { stdout } = await execa(\n    'git',\n    ['status', '--porcelain', '--untracked-files=no'],\n    { cwd },\n  );\n  for (const line of stdout.split('\\n')) {\n    if (line.length < 2) continue;\n    if (line[1] !== ' ') return true;\n  }\n  return false;\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/undo-log.ts",
+      "changeType": "mod",
+      "additions": 2,
+      "deletions": 2,
+      "explanation": "Adds `'pop'` to the `operation` union and updates the user-facing 'nothing to undo' hint.",
+      "snippet": "operation: 'create' | 'restack' | 'pop';",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 36,
+      "deletions": 1,
+      "explanation": "Wires `dub pop` into commander. Reuses `parsePositiveInt` for `--steps`.",
+      "snippet": "program\n  .command('pop')\n  .description('Pop the last commit(s) off the current branch into the staging area')\n  .option('-n, --steps <count>', 'Number of commits to pop (default: 1)', parsePositiveInt)",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/pop.test.ts",
+      "changeType": "new",
+      "additions": 162,
+      "deletions": 0,
+      "explanation": "Unit tests: pop 1, pop N squash, parent-boundary refusal, dirty-tree refusal, invalid steps, undo-entry round-trip, untracked-parent refusal, undo restore, undo guards (off-branch, tracked edits, untracked files).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/pop-flow.test.ts",
+      "changeType": "new",
+      "additions": 76,
+      "deletions": 0,
+      "explanation": "Cross-command scenario: pop on a middle branch, edit, `modify -ac` — descendants restack lazily onto the rewritten parent.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/pop.mdx",
+      "changeType": "new",
+      "additions": 42,
+      "deletions": 0,
+      "explanation": "User-facing docs page: usage, flag table, safety contract, common pattern.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Registers `pop` in the docs sidebar (positioned right after `modify`).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Pop-undo branch guard",
+      "location": "packages/cli/src/commands/undo.ts:38-69",
+      "rationale": "Refuses to undo if the user switched off the popped branch — staged changes on a different branch would block checkout. Confirm the message is clear and the guard order (branch check before dirty check) is correct."
+    },
+    {
+      "title": "hasUnstagedTrackedChanges semantics",
+      "location": "packages/cli/src/lib/git.ts:638-657",
+      "rationale": "Intentionally ignores untracked files because `git reset --hard` doesn't touch them. Verify the porcelain column check (`line[1] !== ' '`) catches every modified-tracked case."
+    },
+    {
+      "title": "Parent-boundary count via rev-list",
+      "location": "packages/cli/src/commands/pop.ts:67-78",
+      "rationale": "Uses `git rev-list --count parent..branch`. For linear stacks this matches the branch-local commit count; merge commits in a branch (rare in stacks) would be counted as one commit each, which is the intent."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "pop command behaviors (11 cases)",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/pop.test.ts — covers happy path, squash, refusal modes, undo guards."
+    },
+    {
+      "kind": "integration",
+      "label": "pop + modify lazy restack of descendants",
+      "status": "done",
+      "evidence": "packages/cli/test/commands/pop-flow.test.ts — pops a middle branch, recommits, asserts child rebases onto the new parent tip."
+    },
+    {
+      "kind": "manual",
+      "label": "End-to-end CLI dry run",
+      "status": "done",
+      "evidence": "Built CLI in tmpdir, ran pop --steps 2, observed staged a.txt + b.txt and empty log; ran dub undo, observed two commits restored and clean index."
+    },
+    {
+      "kind": "build",
+      "label": "tsup build of dubstack CLI",
+      "status": "done",
+      "evidence": "`pnpm --filter dubstack build` succeeded; bundle 426 KB."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "90 test files, 817 tests passed."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Both `dubstack` and `docs` packages typecheck cleanly."
+    },
+    {
+      "name": "biome",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 270 files; no errors."
+    },
+    {
+      "name": "AI evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "No AI metadata/prompts changed in this PR, and the eval suite requires Gemini/Gateway/Bedrock provider keys not present in this workspace."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "CLI-only feature; no committed .tsx files changed, no browser surface.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-34-qa.md",
+    "caption": "Deterministic shell-output evidence + 12 vitest cases replace the video.",
+    "scenarios": [
+      "dub pop soft-resets one commit and leaves changes staged",
+      "dub pop --steps N squashes N commits into the staging area",
+      "dub pop refuses to cross the parent boundary",
+      "dub pop refuses on a dirty working tree",
+      "dub undo after pop restores the popped commits",
+      "dub undo refuses when user switched off the popped branch",
+      "dub modify after pop restacks descendants lazily"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New packages/cli/src/commands/pop.ts",
+      "status": "satisfied",
+      "evidence": "Created with full command implementation."
+    },
+    {
+      "criterion": "--steps N flag works",
+      "status": "satisfied",
+      "evidence": "Wired via commander `parsePositiveInt`; tested with --steps 3 squashing three commits."
+    },
+    {
+      "criterion": "Safety checks for dirty tree and parent boundary",
+      "status": "satisfied",
+      "evidence": "`isWorkingTreeClean` guard and `countCommitsAhead` parent-boundary refusal; both covered by tests."
+    },
+    {
+      "criterion": "Undo log entry created",
+      "status": "satisfied",
+      "evidence": "Saves an entry with operation='pop' and the pre-pop branch tip; `dub undo` reverses via hard-reset."
+    },
+    {
+      "criterion": "Restack happens lazily on next modify",
+      "status": "satisfied",
+      "evidence": "pop.ts doesn't trigger restack; existing modify.ts auto-restacks after commit/amend. Cross-command test verifies descendant rebase."
+    },
+    {
+      "criterion": "Tests for all paths",
+      "status": "satisfied",
+      "evidence": "12 vitest cases across pop.test.ts and pop-flow.test.ts."
+    },
+    {
+      "criterion": "Docs at apps/docs/content/docs/commands/pop.mdx",
+      "status": "satisfied",
+      "evidence": "Created with usage, flags, safety, common pattern; registered in meta.json."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Initial review flagged two critical issues: (1) pop-undo didn't guard against the user switching off the popped branch, and (2) hasUnstagedChanges treated untracked files as blocking even though `git reset --hard` preserves them. Both fixed: added explicit current-branch guard and renamed/reworked the helper to `hasUnstagedTrackedChanges` (porcelain --untracked-files=no). Tests updated to cover the new guards. Reviewer also noted dead code in the original helper which is gone after the rewrite.",
+      "Remaining minor: parent-boundary check uses rev-list --count, which counts merge commits as 1; this matches intent for linear stacks and is documented behavior."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "External dependencies",
+      "status": "No external dependencies detected. Issue is marked 'Blocked by: None — can start immediately'."
+    }
+  ],
+  "rollout": {
+    "summary": "Ships as a new CLI command in the next dubstack release. Zero migration; opt-in usage.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Release pipeline picks up new command",
+        "details": "Next dubstack publish includes `dub pop` and its docs page. No state-schema migration required (undo entries gain a new operation tag handled by extended union)."
+      },
+      {
+        "when": "First user run",
+        "label": "Users discover via help",
+        "details": "`dub pop --help` shows usage + examples; docs site shows the new sidebar entry under Commands."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "66549c6e6fae7b0ba9d975bb832d46d54b9c61ab",
+    "shortSha": "66549c6",
+    "message": "feat(pop): pop last commit(s) into staged changes [DUB-34]"
+  }
+}
