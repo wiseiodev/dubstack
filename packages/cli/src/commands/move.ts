@@ -278,12 +278,13 @@ export async function move(
     await retargetPrBase(retarget.branch, retarget.newBase, cwd);
   }
 
-  await clearCleanupJournal(cwd);
-
-  // Save the move undo entry BEFORE invoking restack so it survives the
-  // conflict path. We pass `skipUndoEntry: true` so restack can't overwrite
-  // it — `dub undo` after a successful or conflicted `dub move` always rolls
-  // back the whole move (state + every rebased branch tip).
+  // Save the move undo entry BEFORE clearing the cleanup journal AND BEFORE
+  // invoking restack. Ordering matters for crash recovery: if we cleared the
+  // journal first and crashed before saveUndoEntry, the user would have no
+  // way to roll back (journal gone -> `dub continue` no-ops; undo entry
+  // missing -> `dub undo` errors). `restack` receives `skipUndoEntry: true`
+  // so the move undo entry isn't overwritten by restack's own undo write,
+  // even when restack hits a conflict.
   await saveUndoEntry(
     {
       operation: 'move',
@@ -295,6 +296,8 @@ export async function move(
     },
     cwd,
   );
+
+  await clearCleanupJournal(cwd);
 
   const restackResult = await restack(cwd, { skipUndoEntry: true });
 
@@ -334,9 +337,17 @@ function planReparents(args: {
     }
     const newBranchParent = targetEntry.parent;
     if (newBranchParent == null) {
-      // targetEntry must have a parent because we reject inserting before root
-      // upstream. Defensive fallback: no reparents.
-      return [];
+      // Non-root branches must have a non-null parent — the root check above
+      // already rejected root targets, so reaching this branch means the
+      // tracked state is inconsistent (e.g. a non-root entry with `parent:
+      // null`). Surface it loudly instead of silently treating as a no-op.
+      throw new DubError(
+        `Branch '${targetEntry.name}' has corrupt metadata: non-root entry with no parent.`,
+        [
+          "Run 'dub doctor' to inspect the stack for damage.",
+          `Run 'dub track ${targetEntry.name} --parent <branch>' to repair the parent link.`,
+        ],
+      );
     }
     if (branchEntry.parent !== newBranchParent) {
       reparents.push({
