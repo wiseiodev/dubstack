@@ -260,7 +260,7 @@ program
   .option('--json', 'Output the stack tree as JSON')
   .option(
     '--no-color',
-    'Disable ANSI colors; keep text markers (`*` current, `>` ancestor) and drop sibling-subtree dimming',
+    'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
   )
   .addHelpText(
     'after',
@@ -289,7 +289,7 @@ program
   .option('--json', 'Output the stack tree as JSON')
   .option(
     '--no-color',
-    'Disable ANSI colors; keep text markers (`*` current, `>` ancestor) and drop sibling-subtree dimming',
+    'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
   )
   .action(
     async (options: {

@@ -571,6 +571,31 @@ describe('log', () => {
       expect(regions.get('feat/a')).toBe('descendant');
     });
 
+    it('does not double-process descendants reachable via two paths', () => {
+      // Diamond topology — feat/d listed twice as a child via cyclic parents.
+      // The BFS visited-set must prevent infinite work.
+      const diamond: Stack = {
+        id: 'stack-diamond',
+        branches: [
+          {
+            name: 'main',
+            type: 'root',
+            parent: null,
+            pr_number: null,
+            pr_link: null,
+          },
+          { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          { name: 'feat/b', parent: 'feat/a', pr_number: null, pr_link: null },
+          // Malformed: feat/c lists feat/b as parent but feat/b also points to feat/c.
+          { name: 'feat/c', parent: 'feat/b', pr_number: null, pr_link: null },
+        ],
+      };
+      const regions = computeRegions(diamond, 'feat/a');
+      expect(regions.get('feat/a')).toBe('current');
+      expect(regions.get('feat/b')).toBe('descendant');
+      expect(regions.get('feat/c')).toBe('descendant');
+    });
+
     it('terminates on a parent cycle without hanging', () => {
       const cyclic: Stack = {
         id: 'stack-cycle',
@@ -611,12 +636,14 @@ describe('log', () => {
       expect(out).not.toContain('~feat/c-leaf~');
       expect(out).toContain('⚠ (missing)');
       // No ANSI escape sequences should appear.
-      expect(out.includes(String.fromCharCode(27))).toBe(false);
+      expect(out.includes('\x1b')).toBe(false);
     });
 
     it('replaces markers with ANSI codes in color mode', () => {
+      // Mutating chalk.level is safe here because vitest isolates each test
+      // file (default `isolate: true`), so the singleton lives in its own
+      // module graph; the try/finally restores in-file ordering.
       const originalLevel = chalk.level;
-      // Force chalk to emit ANSI so the color path is observable in CI/no-TTY.
       chalk.level = 1;
       try {
         const out = styleLogOutput(sample, false);
@@ -626,7 +653,7 @@ describe('log', () => {
         // …but the branch names survive and ANSI codes wrap them.
         expect(out).toContain('feat/b (Current)');
         expect(out).toContain('feat/c');
-        expect(out.includes(String.fromCharCode(27))).toBe(true);
+        expect(out.includes('\x1b')).toBe(true);
       } finally {
         chalk.level = originalLevel;
       }
@@ -640,6 +667,25 @@ describe('log', () => {
         // Ensure only the branch name is captured, not anything beyond whitespace.
         expect(out).toContain('feat/scoped-name');
         expect(out).not.toContain('>feat/scoped-name');
+      } finally {
+        chalk.level = originalLevel;
+      }
+    });
+
+    it('composes ancestor + missing markers in both modes', () => {
+      const line = '  └─ >feat/a ⚠ (missing)';
+      const noColorOut = styleLogOutput(line, true);
+      expect(noColorOut).toBe(line);
+
+      const originalLevel = chalk.level;
+      chalk.level = 1;
+      try {
+        const colorOut = styleLogOutput(line, false);
+        // Branch name keeps text, no raw marker, and warning is preserved.
+        expect(colorOut).not.toContain('>feat/a');
+        expect(colorOut).toContain('feat/a');
+        expect(colorOut).toContain('⚠ (missing)');
+        expect(colorOut.includes('\x1b')).toBe(true);
       } finally {
         chalk.level = originalLevel;
       }
