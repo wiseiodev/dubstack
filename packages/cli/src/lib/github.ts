@@ -501,6 +501,11 @@ export async function getStackOverviewPrBatch(
     };
     const head = record.headRefName;
     if (!head) continue;
+    // Skip entries missing required fields so callers don't render
+    // placeholder rows (`#0`, blank title) for malformed PR records.
+    if (typeof record.number !== 'number' || typeof record.title !== 'string') {
+      continue;
+    }
     // Mirror getAllPrSyncInfoBatch: first PR per branch wins (newest-first).
     if (byBranch.has(head)) continue;
     const reviewDecision =
@@ -508,8 +513,8 @@ export async function getStackOverviewPrBatch(
         ? record.reviewDecision
         : null;
     byBranch.set(head, {
-      number: typeof record.number === 'number' ? record.number : 0,
-      title: typeof record.title === 'string' ? record.title : '',
+      number: record.number,
+      title: record.title,
       state: classifyPrState(record.state, record.mergedAt),
       baseRefName: record.baseRefName ?? null,
       mergedAt: record.mergedAt ?? null,

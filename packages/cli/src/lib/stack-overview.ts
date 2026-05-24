@@ -18,7 +18,11 @@ export interface BranchOverview {
   isRoot: boolean;
   /** GitHub PR snapshot, or `null` when no PR exists for this branch. */
   pr: StackOverviewPrInfo | null;
-  /** Local-tip commit metadata, or `null` when the branch isn't checked out locally. */
+  /**
+   * Local-tip commit metadata, or `null` when the branch ref does not exist
+   * locally (never fetched / deleted). Branches that exist locally but are
+   * not currently checked out still have metadata here.
+   */
   commit: BranchCommitMeta | null;
   /** Dubstack-state mirror: PR URL (may exist before the PR is found via head). */
   prLink: string | null;
@@ -31,8 +35,10 @@ export interface StackOverview {
   /** All tracked branches across every stack, in state order. */
   branches: BranchOverview[];
   /**
-   * True when `gh pr list` truncated. Callers should surface a "showing
-   * N of N+" notice — some branches may be missing PR data.
+   * True when `gh pr list` likely truncated (page-limit hit; the underlying
+   * signal is a heuristic — exactly `BATCH_PR_LIST_LIMIT` PRs trips it even
+   * when no further pages exist). Callers should surface a "showing N of
+   * N+" notice — some branches may be missing PR data.
    */
   truncated: boolean;
   /** ISO timestamp when this snapshot was materialized. */
@@ -50,6 +56,18 @@ async function getCachePath(cwd: string): Promise<string> {
   return path.join(await getDubDir(cwd), CACHE_FILENAME);
 }
 
+function isValidBranchOverview(value: unknown): value is BranchOverview {
+  if (!value || typeof value !== 'object') return false;
+  const b = value as Record<string, unknown>;
+  return (
+    typeof b.branch === 'string' &&
+    (b.parent === null || typeof b.parent === 'string') &&
+    typeof b.isRoot === 'boolean' &&
+    (b.pr === null || (typeof b.pr === 'object' && b.pr !== null)) &&
+    (b.commit === null || (typeof b.commit === 'object' && b.commit !== null))
+  );
+}
+
 async function readCache(cwd: string): Promise<StackOverview | null> {
   let raw: string;
   try {
@@ -57,20 +75,26 @@ async function readCache(cwd: string): Promise<StackOverview | null> {
   } catch {
     return null;
   }
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as StackOverview;
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      typeof parsed.cachedAt !== 'string' ||
-      !Array.isArray(parsed.branches)
-    ) {
-      return null;
-    }
-    return parsed;
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  // Defensive: cache lives at a user-visible path and may be hand-edited
+  // or partially-truncated. Validate the whole shape, not just the top-
+  // level keys, so callers never crash mid-render on a corrupted entry.
+  if (!parsed || typeof parsed !== 'object') return null;
+  const p = parsed as Record<string, unknown>;
+  if (
+    typeof p.cachedAt !== 'string' ||
+    typeof p.truncated !== 'boolean' ||
+    !Array.isArray(p.branches) ||
+    !p.branches.every(isValidBranchOverview)
+  ) {
+    return null;
+  }
+  return p as unknown as StackOverview;
 }
 
 async function writeCache(cwd: string, overview: StackOverview): Promise<void> {
@@ -111,6 +135,23 @@ export async function getStackOverviewBatch(
   const allBranchNames = state.stacks.flatMap((s) =>
     s.branches.map((b) => b.name),
   );
+
+  // Short-circuit on fresh / empty state: no branches means nothing to
+  // join, so skip the `gh pr list` (avoids spurious auth failures on a
+  // freshly-initialized repo) and the for-each-ref call.
+  if (allBranchNames.length === 0) {
+    const empty: StackOverview = {
+      branches: [],
+      truncated: false,
+      cachedAt: new Date(now).toISOString(),
+    };
+    try {
+      await writeCache(cwd, empty);
+    } catch {
+      // best-effort
+    }
+    return empty;
+  }
 
   const [prBatch, commitBatch] = await Promise.all([
     getStackOverviewPrBatch(cwd),

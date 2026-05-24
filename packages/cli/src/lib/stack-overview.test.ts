@@ -237,6 +237,64 @@ describe('getStackOverviewBatch — cache write failure', () => {
   });
 });
 
+describe('getStackOverviewBatch — empty state short-circuit', () => {
+  it('returns an empty overview without calling gh/git when state has no branches', async () => {
+    // initState ran in beforeEach; no branches added.
+    const overview = await getStackOverviewBatch(dir);
+    expect(overview.branches).toEqual([]);
+    expect(overview.truncated).toBe(false);
+    expect(mockGetStackOverviewPrBatch).not.toHaveBeenCalled();
+    expect(mockGetBranchCommitMetaBatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('getStackOverviewBatch — cache validation', () => {
+  it('rejects a cache with a non-boolean truncated field', async () => {
+    await seedTrivialStack();
+    const cachePath = path.join(dir, '.git', 'dubstack', 'overview-cache.json');
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        cachedAt: new Date().toISOString(),
+        truncated: 'yes',
+        branches: [],
+      }),
+    );
+    mockGetStackOverviewPrBatch.mockResolvedValueOnce({
+      byBranch: new Map(),
+      truncated: false,
+    });
+    mockGetBranchCommitMetaBatch.mockResolvedValueOnce(new Map());
+
+    await getStackOverviewBatch(dir);
+    // Corrupt cache rejected → fresh fetch happens.
+    expect(mockGetStackOverviewPrBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a cache containing malformed branch entries', async () => {
+    await seedTrivialStack();
+    const cachePath = path.join(dir, '.git', 'dubstack', 'overview-cache.json');
+    fs.writeFileSync(
+      cachePath,
+      JSON.stringify({
+        cachedAt: new Date().toISOString(),
+        truncated: false,
+        branches: [
+          { branch: 42, parent: null, isRoot: true, pr: null, commit: null },
+        ],
+      }),
+    );
+    mockGetStackOverviewPrBatch.mockResolvedValueOnce({
+      byBranch: new Map(),
+      truncated: false,
+    });
+    mockGetBranchCommitMetaBatch.mockResolvedValueOnce(new Map());
+
+    await getStackOverviewBatch(dir);
+    expect(mockGetStackOverviewPrBatch).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('getStackOverviewBatch — truncation passthrough', () => {
   it('surfaces truncated:true from getStackOverviewPrBatch', async () => {
     await seedTrivialStack();

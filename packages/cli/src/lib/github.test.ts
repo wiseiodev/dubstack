@@ -532,6 +532,52 @@ describe('getStackOverviewPrBatch', () => {
       'Failed to list PRs',
     );
   });
+
+  it('skips records missing required number/title fields', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        {
+          // valid
+          number: 1,
+          title: 'feat: a',
+          headRefName: 'feat/a',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+        {
+          // missing number
+          title: 'no number',
+          headRefName: 'feat/no-number',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+        {
+          // missing title
+          number: 99,
+          headRefName: 'feat/no-title',
+          baseRefName: 'main',
+          state: 'OPEN',
+          mergedAt: null,
+          reviewDecision: null,
+          isDraft: false,
+          statusCheckRollup: [],
+        },
+      ]),
+    });
+
+    const result = await getStackOverviewPrBatch('/repo');
+    expect(result.byBranch.has('feat/a')).toBe(true);
+    expect(result.byBranch.has('feat/no-number')).toBe(false);
+    expect(result.byBranch.has('feat/no-title')).toBe(false);
+  });
 });
 
 describe('getBranchPrSyncInfo', () => {
