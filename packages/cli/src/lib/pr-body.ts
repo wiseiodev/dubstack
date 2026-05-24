@@ -11,33 +11,101 @@ const AI_SUMMARY_START = '<!-- dubstack-ai-summary:start -->';
 const AI_SUMMARY_END = '<!-- dubstack-ai-summary:end -->';
 const METADATA_START = '<!-- dubstack-metadata';
 const METADATA_END = '-->';
+const TRUNCATION_THRESHOLD = 40;
+
+export interface DubstackMetadataTreeNode {
+  name: string;
+  depth: number;
+  pr_number?: number;
+  is_current?: boolean;
+}
 
 export interface DubstackMetadata {
+  schema_version: 1;
   stack_id: string;
   pr_number: number;
+  branch: string;
+  parent: string | null;
+  children: string[];
+  siblings: string[];
   prev_pr: number | null;
   next_pr: number | null;
-  branch: string;
+  tree: DubstackMetadataTreeNode[];
+}
+
+interface TreeNode {
+  branch: Branch;
+  children: TreeNode[];
+  depth: number;
 }
 
 /**
  * Builds the visible stack navigation table wrapped in dubstack markers.
+ * Renders the stack as an indented tree (2 spaces per level) with siblings
+ * sorted alphabetically by branch name. The `currentBranch` gets a 👈 marker.
  *
- * @param orderedBranches - Non-root branches in topological order
- * @param prMap - Map of branch name → PR number + title
- * @param currentBranch - The branch to mark with 👈
+ * For stacks with more than {@link TRUNCATION_THRESHOLD} *non-root* branches
+ * (i.e. PR-carrying branches), only the current branch, its ancestors and
+ * their direct children (siblings + aunts/uncles), and its descendants are
+ * shown. A single summary line at the bottom of the list tags the total
+ * number of hidden branches — locating each hidden subtree at its own indent
+ * level was rejected as too noisy for the PR description.
+ *
+ * @param branches - All branches in the stack (root + children). Tree shape is
+ *   derived from each branch's `parent` link.
+ * @param prMap - Map of branch name → PR number + title. Branches without an
+ *   entry render with their branch name and no PR number (e.g. the root).
+ * @param currentBranch - The branch to mark with 👈.
  */
 export function buildStackTable(
-  orderedBranches: Branch[],
+  branches: Branch[],
   prMap: Map<string, StackEntry>,
   currentBranch: string,
 ): string {
-  const lines = orderedBranches.map((branch) => {
-    const entry = prMap.get(branch.name);
-    if (!entry) return `- ${branch.name}`;
-    const marker = branch.name === currentBranch ? ' 👈' : '';
-    return `- #${entry.number} ${entry.title}${marker}`;
-  });
+  const root = buildTree(branches);
+  // Count only non-root branches so the threshold matches the user-visible
+  // "branches in a stack" concept (PR-carrying branches), independent of how
+  // many root nodes the input happens to contain.
+  const nonRootCount = branches.reduce(
+    (n, b) => (b.type === 'root' ? n : n + 1),
+    0,
+  );
+  const truncate = nonRootCount > TRUNCATION_THRESHOLD;
+
+  const lines: string[] = [];
+  let hiddenCount = 0;
+
+  if (root) {
+    const visible = truncate ? computeVisibleNames(root, currentBranch) : null;
+    const render = (node: TreeNode): void => {
+      const indent = '  '.repeat(node.depth);
+      lines.push(`${indent}- ${renderNodeLabel(node, prMap, currentBranch)}`);
+      for (const child of node.children) {
+        if (!visible || visible.has(child.branch.name)) {
+          render(child);
+        } else {
+          hiddenCount += countSubtree(child);
+        }
+      }
+    };
+    render(root);
+  } else {
+    for (const b of branches) {
+      const entry = prMap.get(b.name);
+      const marker = b.name === currentBranch ? ' 👈' : '';
+      lines.push(
+        entry
+          ? `- #${entry.number} ${entry.title}${marker}`
+          : `- ${b.name}${marker}`,
+      );
+    }
+  }
+
+  if (hiddenCount > 0) {
+    lines.push(
+      `... (${hiddenCount} branches hidden, run 'dub log' to see all)`,
+    );
+  }
 
   return [
     DUBSTACK_START,
@@ -49,23 +117,41 @@ export function buildStackTable(
 }
 
 /**
- * Builds the hidden metadata HTML comment block.
+ * Builds the hidden v1 metadata HTML comment block. Stores the full tree shape
+ * so downstream consumers (action webhooks, parsers) can rebuild the stack
+ * without reading state.
  */
-export function buildMetadataBlock(
-  stackId: string,
-  prNumber: number,
-  prevPr: number | null,
-  nextPr: number | null,
-  branch: string,
-): string {
-  const metadata = {
-    stack_id: stackId,
-    pr_number: prNumber,
-    prev_pr: prevPr,
-    next_pr: nextPr,
-    branch,
-  };
+export function buildMetadataBlock(metadata: DubstackMetadata): string {
   return `${METADATA_START}\n${JSON.stringify(metadata, null, 2)}\n${METADATA_END}`;
+}
+
+/**
+ * Builds the flat tree array stored inside the metadata block. Each entry
+ * carries its depth so consumers can re-render the tree without re-walking the
+ * parent links.
+ */
+export function buildMetadataTree(
+  branches: Branch[],
+  prMap: Map<string, StackEntry>,
+  currentBranch: string,
+): DubstackMetadataTreeNode[] {
+  const root = buildTree(branches);
+  if (!root) return [];
+
+  const result: DubstackMetadataTreeNode[] = [];
+  const walk = (node: TreeNode): void => {
+    const entry = prMap.get(node.branch.name);
+    const item: DubstackMetadataTreeNode = {
+      name: node.branch.name,
+      depth: node.depth,
+    };
+    if (entry) item.pr_number = entry.number;
+    if (node.branch.name === currentBranch) item.is_current = true;
+    result.push(item);
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return result;
 }
 
 /**
@@ -162,8 +248,13 @@ function normalizeBodyWhitespace(body: string): string {
 }
 
 /**
- * Parses hidden DubStack metadata from a PR body.
- * Returns null when metadata markers are absent or malformed.
+ * Parses hidden DubStack metadata from a PR body. Accepts both the legacy
+ * shape (no `schema_version`, no tree fields) and the v1 shape; legacy blocks
+ * are migrated to v1 with empty `tree`/`siblings`/`children` and `parent: null`
+ * so consumers can always rely on the v1 surface.
+ *
+ * Returns null when markers are absent, JSON is malformed, or required fields
+ * are missing/invalid.
  */
 export function parseDubstackMetadata(body: string): DubstackMetadata | null {
   const start = body.indexOf(METADATA_START);
@@ -176,25 +267,169 @@ export function parseDubstackMetadata(body: string): DubstackMetadata | null {
   if (end === -1) return null;
 
   const payload = body.slice(jsonStart, end).trim();
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(payload) as Partial<DubstackMetadata>;
-    if (
-      typeof parsed.stack_id !== 'string' ||
-      typeof parsed.pr_number !== 'number' ||
-      (parsed.prev_pr !== null && typeof parsed.prev_pr !== 'number') ||
-      (parsed.next_pr !== null && typeof parsed.next_pr !== 'number') ||
-      typeof parsed.branch !== 'string'
-    ) {
-      return null;
-    }
-    return {
-      stack_id: parsed.stack_id,
-      pr_number: parsed.pr_number,
-      prev_pr: parsed.prev_pr,
-      next_pr: parsed.next_pr,
-      branch: parsed.branch,
-    };
+    parsed = JSON.parse(payload);
   } catch {
     return null;
   }
+  if (!isPlainObject(parsed)) return null;
+
+  if (
+    typeof parsed.stack_id !== 'string' ||
+    typeof parsed.pr_number !== 'number' ||
+    typeof parsed.branch !== 'string' ||
+    (parsed.prev_pr !== null && typeof parsed.prev_pr !== 'number') ||
+    (parsed.next_pr !== null && typeof parsed.next_pr !== 'number')
+  ) {
+    return null;
+  }
+
+  if (parsed.schema_version !== undefined && parsed.schema_version !== 1) {
+    return null;
+  }
+
+  return {
+    schema_version: 1,
+    stack_id: parsed.stack_id,
+    pr_number: parsed.pr_number,
+    branch: parsed.branch,
+    parent:
+      typeof parsed.parent === 'string' || parsed.parent === null
+        ? (parsed.parent as string | null)
+        : null,
+    children: parseStringArray(parsed.children),
+    siblings: parseStringArray(parsed.siblings),
+    prev_pr: parsed.prev_pr as number | null,
+    next_pr: parsed.next_pr as number | null,
+    tree: parseTreeArray(parsed.tree),
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === 'string');
+}
+
+function parseTreeArray(value: unknown): DubstackMetadataTreeNode[] {
+  if (!Array.isArray(value)) return [];
+  const result: DubstackMetadataTreeNode[] = [];
+  for (const item of value) {
+    if (!isPlainObject(item)) continue;
+    if (typeof item.name !== 'string' || typeof item.depth !== 'number') {
+      continue;
+    }
+    const node: DubstackMetadataTreeNode = {
+      name: item.name,
+      depth: item.depth,
+    };
+    if (typeof item.pr_number === 'number') node.pr_number = item.pr_number;
+    if (item.is_current === true) node.is_current = true;
+    result.push(node);
+  }
+  return result;
+}
+
+function buildTree(branches: Branch[]): TreeNode | null {
+  const root = branches.find((b) => b.type === 'root' || b.parent === null);
+  if (!root) return null;
+
+  const childMap = new Map<string, Branch[]>();
+  for (const branch of branches) {
+    if (branch.parent != null && branch !== root) {
+      const arr = childMap.get(branch.parent) ?? [];
+      arr.push(branch);
+      childMap.set(branch.parent, arr);
+    }
+  }
+  for (const arr of childMap.values()) {
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const seen = new Set<string>();
+  const build = (branch: Branch, depth: number): TreeNode => {
+    seen.add(branch.name);
+    const children = (childMap.get(branch.name) ?? [])
+      .filter((c) => !seen.has(c.name))
+      .map((c) => build(c, depth + 1));
+    return { branch, children, depth };
+  };
+
+  return build(root, 0);
+}
+
+function renderNodeLabel(
+  node: TreeNode,
+  prMap: Map<string, StackEntry>,
+  currentBranch: string,
+): string {
+  const entry = prMap.get(node.branch.name);
+  const marker = node.branch.name === currentBranch ? ' 👈' : '';
+  if (!entry) return `${node.branch.name}${marker}`;
+  return `#${entry.number} ${entry.title}${marker}`;
+}
+
+function countSubtree(node: TreeNode): number {
+  let count = 1;
+  for (const child of node.children) count += countSubtree(child);
+  return count;
+}
+
+function computeVisibleNames(
+  root: TreeNode,
+  currentBranch: string,
+): Set<string> {
+  const byName = new Map<string, TreeNode>();
+  const collect = (node: TreeNode): void => {
+    byName.set(node.branch.name, node);
+    for (const child of node.children) collect(child);
+  };
+  collect(root);
+
+  const visible = new Set<string>();
+  const current = byName.get(currentBranch);
+  if (!current) {
+    // Unknown current branch — render full tree rather than hide everything.
+    for (const name of byName.keys()) visible.add(name);
+    return visible;
+  }
+
+  // Ancestor path (root → current) — also gives us "ancestors of current".
+  // The walk reads `Branch.parent` (the persisted parent name), so it
+  // terminates at the first node whose parent is not in `branches`. In a
+  // well-formed stack that is the tree root; for orphan fragments the chain
+  // stops short, in which case the root is still emitted unconditionally by
+  // the caller's `render(root)` to keep the table self-rooted.
+  const ancestors: TreeNode[] = [];
+  let cursor: TreeNode | undefined = current;
+  while (cursor) {
+    ancestors.unshift(cursor);
+    const parentName: string | null = cursor.branch.parent;
+    cursor = parentName ? byName.get(parentName) : undefined;
+  }
+  // Always include the tree root in the visible set so a deep `currentBranch`
+  // whose ancestor chain unexpectedly terminates short still renders a
+  // self-consistent tree (matches the unconditional `render(root)`).
+  visible.add(root.branch.name);
+  for (const a of ancestors) visible.add(a.branch.name);
+
+  // Direct children of each ancestor (siblings + aunts/uncles).
+  for (const a of ancestors) {
+    for (const child of a.children) visible.add(child.branch.name);
+  }
+
+  // All descendants of current.
+  const addDescendants = (node: TreeNode): void => {
+    for (const child of node.children) {
+      visible.add(child.branch.name);
+      addDescendants(child);
+    }
+  };
+  addDescendants(current);
+
+  return visible;
 }
