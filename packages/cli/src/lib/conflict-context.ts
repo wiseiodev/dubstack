@@ -37,14 +37,14 @@ const SCOPE_MAX_MARKER_LINES = 5000;
 export async function gatherConflictContext(
   cwd: string,
 ): Promise<ConflictContext> {
-  const operation = await detectActiveOperation(cwd);
-  if (operation === 'none') {
+  const detected = await detectActiveOperation(cwd);
+  if (detected === 'none') {
     throw new DubError('No active rebase or restack operation.', [
       "Run 'dub restack' to start restacking the current stack if you intended to.",
       "Run 'git status' to confirm whether a rebase is actually in progress.",
     ]);
   }
-  if (operation === 'cleanup') {
+  if (detected === 'cleanup') {
     // Cleanup replay is non-interactive and can't generate merge conflicts —
     // there's no conflict context to gather for it.
     throw new DubError(
@@ -55,6 +55,10 @@ export async function gatherConflictContext(
       ],
     );
   }
+  // Absorb pauses inside a plain git rebase — for conflict-resolution UI
+  // purposes the upstream/replayed framing is identical to a bare rebase.
+  const operation: 'rebase' | 'restack' =
+    detected === 'absorb' ? 'rebase' : detected;
 
   const conflictedFiles = await getConflictedFiles(cwd);
 

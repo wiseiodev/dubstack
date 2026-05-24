@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
+import { absorb } from './commands/absorb';
 import { branchInfoOutput } from './commands/branch';
 import {
   checkout,
@@ -780,6 +781,68 @@ Examples:
   );
 
 program
+  .command('absorb')
+  .description(
+    'Distribute fixup commits to their target commits (git-native autosquash, AI ambiguity resolver, or cross-branch mover)',
+  )
+  .option(
+    '--ai',
+    'AI-pick targets for ambiguous WIP commits on the current branch',
+  )
+  .option(
+    '--stack',
+    'Move fixup commits whose target lives on a different branch in the stack',
+  )
+  .option('--dry-run', 'Print what would be absorbed without mutating')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub absorb                Autosquash literal 'fixup!' / 'squash!' commits on the current branch
+  $ dub absorb --ai           Use the configured AI provider to pick targets for ambiguous WIP commits
+  $ dub absorb --stack        Move fixup commits across branches in the stack, then restack
+  $ dub absorb --dry-run      Print the plan without mutating`,
+  )
+  .action(
+    async (options: { ai?: boolean; stack?: boolean; dryRun?: boolean }) => {
+      const result = await absorb(process.cwd(), options);
+      if (result.conflict) {
+        console.log(
+          chalk.yellow(
+            `⚠ Conflict during absorb on '${result.branch}'. Resolve and run 'dub continue' (or 'dub continue --ai').`,
+          ),
+        );
+        return;
+      }
+      if (result.absorbed === 0 && result.skipped === 0) {
+        console.log(
+          chalk.dim(
+            result.mode === 'stack'
+              ? 'Nothing to absorb: no cross-branch fixup commits found.'
+              : 'Nothing to absorb: no fixup commits found.',
+          ),
+        );
+        return;
+      }
+      const verb = options.dryRun ? 'Would absorb' : '✔ Absorbed';
+      console.log(chalk.green(`${verb} ${result.absorbed} commit(s)`));
+      if (result.skipped > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ skipped: ${result.skipped} ambiguous commit(s) the AI could not assign`,
+          ),
+        );
+      }
+      if (result.movedTo.length > 0) {
+        console.log(chalk.dim(`  ↳ moved onto: ${result.movedTo.join(', ')}`));
+      }
+      if (result.restacked.length > 0) {
+        console.log(chalk.dim(`  ↳ restacked: ${result.restacked.join(', ')}`));
+      }
+    },
+  );
+
+program
   .command('unlink')
   .argument('<branch>', 'Branch to detach from its parent')
   .option(
@@ -1032,6 +1095,17 @@ program
       console.log(chalk.green('✔ Continued git rebase.'));
       return;
     }
+    if (result.continued === 'absorb') {
+      console.log(chalk.green('✔ Continued absorb.'));
+      if (result.absorbResult && result.absorbResult.restacked.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ restacked: ${result.absorbResult.restacked.join(', ')}`,
+          ),
+        );
+      }
+      return;
+    }
     if (result.restackResult?.status === 'conflict') {
       console.log(
         chalk.yellow(
@@ -1059,6 +1133,10 @@ program
     const result = await abortCommand(process.cwd());
     if (result.aborted === 'restack') {
       console.log(chalk.green('✔ Aborted restack and cleared progress.'));
+      return;
+    }
+    if (result.aborted === 'absorb') {
+      console.log(chalk.green('✔ Aborted absorb and cleared progress.'));
       return;
     }
     console.log(chalk.green('✔ Aborted git rebase.'));

@@ -19,13 +19,20 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'unlink';
+  undone:
+    | 'create'
+    | 'restack'
+    | 'rename'
+    | 'move'
+    | 'pop'
+    | 'absorb'
+    | 'unlink';
   details: string;
 }
 
 /**
  * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
- * `dub pop`, or `dub unlink` operation.
+ * `dub pop`, `dub absorb`, or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -192,12 +199,15 @@ export async function undo(cwd: string): Promise<UndoResult> {
   }
   await clearUndoEntry(cwd);
 
+  const branchCount = Object.keys(entry.branchTips).length;
   const details =
     entry.operation === 'move'
-      ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : entry.operation === 'unlink'
-        ? 'Restored stack metadata to pre-unlink state'
-        : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+      ? `Restored ${branchCount} branches to pre-move state`
+      : entry.operation === 'absorb'
+        ? `Reset ${branchCount} branches to pre-absorb state`
+        : entry.operation === 'unlink'
+          ? 'Restored stack metadata to pre-unlink state'
+          : `Reset ${branchCount} branches to pre-restack state`;
 
   return {
     undone: entry.operation,
