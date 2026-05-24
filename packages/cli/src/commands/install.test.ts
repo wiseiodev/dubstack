@@ -46,6 +46,19 @@ describe('install retarget-action', () => {
     ).toBe(false);
   });
 
+  it('cancels (does not hang) when confirm callback is omitted on a content diff', async () => {
+    // Models the non-TTY shell case wired in index.ts: the CLI passes
+    // confirm: undefined when stdin is not a TTY, and install() must
+    // refuse to overwrite rather than block forever waiting for input.
+    const target = path.join(dir, '.github/workflows/dubstack-retarget.yml');
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, 'old content\n');
+
+    const result = await install(dir, 'retarget-action');
+    expect(result.status).toBe('cancelled');
+    expect(fs.readFileSync(target, 'utf-8')).toBe('old content\n');
+  });
+
   it('cancels when confirm returns false on a content diff', async () => {
     const target = path.join(dir, '.github/workflows/dubstack-retarget.yml');
     fs.mkdirSync(path.dirname(target), { recursive: true });
