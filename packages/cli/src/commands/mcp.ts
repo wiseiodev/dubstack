@@ -4,19 +4,18 @@ import type { Readable, Writable } from 'node:stream';
 import { type McpMode, readConfig } from '../lib/config';
 import { DubError, formatDubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
-import { getBranchPrSyncInfo } from '../lib/github';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
-import { branchInfo } from './branch';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
 import { deleteCommand } from './delete';
-import { type DoctorIssue, doctor } from './doctor';
+import { doctor } from './doctor';
 import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
+import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
@@ -769,47 +768,6 @@ async function mutatingToolResult<T>(
 function optionalSubmitPath(value: unknown): 'current' | 'stack' | undefined {
   if (value === 'current' || value === 'stack') return value;
   return undefined;
-}
-
-async function status(cwd: string): Promise<JsonValue> {
-  const currentBranch = await getCurrentBranch(cwd);
-  const info = await branchInfo(cwd, currentBranch);
-  const operation = await detectActiveOperation(cwd);
-  const pr = await getBranchPrSyncInfo(currentBranch, cwd).catch((error) => ({
-    state: 'UNKNOWN' as const,
-    baseRefName: null,
-    error: error instanceof Error ? error.message : String(error),
-  }));
-  const health = await doctor(cwd, { all: false, fetch: false });
-  const drift = health.issues.filter(isDriftIssue);
-
-  return toJsonValue({
-    currentBranch,
-    operation,
-    branch: {
-      tracked: info.tracked,
-      stackId: info.stackId,
-      root: info.root,
-      parent: info.parent,
-      children: info.children,
-    },
-    pr,
-    drift: {
-      healthy: drift.length === 0,
-      issues: drift,
-    },
-  });
-}
-
-function isDriftIssue(issue: DoctorIssue): boolean {
-  return (
-    issue.code === 'parent-mismatch' ||
-    issue.code === 'remote-base-mismatch' ||
-    issue.code === 'missing-local' ||
-    issue.code === 'missing-remote' ||
-    issue.code === 'remote-drift' ||
-    issue.code === 'remote-check-failed'
-  );
 }
 
 function initializeResult(

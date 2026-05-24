@@ -20,6 +20,7 @@ import {
   fetchBranches,
   forceBranchTo,
   formatWorktreeCheckoutSkipMessage,
+  getBranchCommitMetaBatch,
   getBranchTip,
   getCurrentBranch,
   getDiffBetween,
@@ -685,6 +686,46 @@ describe('clearStaleNamespacedFetchRefs', () => {
   it('returns an empty list when nothing under the namespace exists', async () => {
     const deleted = await clearStaleNamespacedFetchRefs(['anything'], dir);
     expect(deleted).toEqual([]);
+  });
+});
+
+describe('getBranchCommitMetaBatch', () => {
+  it('returns an empty map when no branches are requested', async () => {
+    const result = await getBranchCommitMetaBatch(dir, []);
+    expect(result.size).toBe(0);
+  });
+
+  it('returns tip metadata for each existing branch in one call', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+    await gitInRepo(dir, ['add', 'a.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'a']);
+
+    await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+    await gitInRepo(dir, ['add', 'b.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'b']);
+
+    const result = await getBranchCommitMetaBatch(dir, ['feat/a', 'feat/b']);
+
+    expect(result.size).toBe(2);
+    const a = result.get('feat/a');
+    const b = result.get('feat/b');
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a?.authorEmail).toBe('test@dubstack.test');
+    expect(b?.authorEmail).toBe('test@dubstack.test');
+    expect(a?.shortSha).toMatch(/^[0-9a-f]{8}$/);
+    expect(b?.shortSha).toMatch(/^[0-9a-f]{8}$/);
+    expect(a?.shortSha).not.toBe(b?.shortSha);
+    expect(typeof a?.committedRel).toBe('string');
+    expect(a?.committedRel.length).toBeGreaterThan(0);
+  });
+
+  it('omits branches that do not exist locally', async () => {
+    const result = await getBranchCommitMetaBatch(dir, ['main', 'missing']);
+    expect(result.has('main')).toBe(true);
+    expect(result.has('missing')).toBe(false);
   });
 });
 
