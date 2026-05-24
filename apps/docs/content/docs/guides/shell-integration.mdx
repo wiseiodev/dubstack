@@ -1,0 +1,126 @@
+---
+title: Shell Integration
+description: Wire `dub status` into your shell prompt, tmux status line, or editor status bar.
+---
+
+`dub status` prints a compact one-liner describing the current branch, its PR
+state, CI rollup, and any stack drift. With `--json` it emits a stable,
+versioned snapshot designed for shell prompts and editor integrations.
+
+## The contract
+
+- `dub status` — human-readable one-liner (cache-first; never blocks on `gh`).
+- `dub status --json` — structured JSON with `schemaVersion: 1`.
+- `dub status --live` — bypass the 30s overview cache and refresh PR/CI data.
+- `dub status --no-pr` — skip the PR fetch entirely (great for prompts on
+  machines without `gh` installed or authenticated).
+
+The cache-only default is the fast path: when the stack overview cache is
+fresh, `dub status` returns immediately without ever calling `gh`. On a cold
+cache the command returns `cached: false` with a minimal local-only snapshot
+rather than blocking on a network round-trip — your prompt stays snappy.
+
+## JSON shape
+
+```json
+{
+  "schemaVersion": 1,
+  "cached": true,
+  "currentBranch": "feat/api",
+  "operation": "none",
+  "branch": {
+    "tracked": true,
+    "stackId": "stack-1",
+    "root": "main",
+    "parent": "main",
+    "children": ["feat/api-tests"]
+  },
+  "pr": {
+    "state": "OPEN",
+    "baseRefName": "main",
+    "number": 123,
+    "title": "feat: add API",
+    "isDraft": false,
+    "ciRollup": "SUCCESS",
+    "reviewDecision": null
+  },
+  "drift": { "healthy": true, "issues": [] }
+}
+```
+
+Consumers should pin on `schemaVersion`. Future breaking changes will bump
+the version; additive fields will stay on version `1`.
+
+## Starship
+
+Add a custom `dubstack` module to `~/.config/starship.toml`:
+
+```toml
+[custom.dubstack]
+command = "dub status --no-pr"
+when = "git rev-parse --is-inside-work-tree"
+shell = ["sh", "--noprofile", "--norc"]
+format = "[$output]($style) "
+style = "bold cyan"
+```
+
+For a richer prompt with PR + CI status, drop `--no-pr` (still cache-first):
+
+```toml
+[custom.dubstack]
+command = "dub status"
+when = "git rev-parse --is-inside-work-tree"
+format = "[$output]($style) "
+```
+
+## tmux
+
+Show the current stack status in the right status bar. Add to `~/.tmux.conf`:
+
+```bash
+set -g status-right '#(cd #{pane_current_path} && dub status --no-pr 2>/dev/null) | %H:%M '
+set -g status-interval 5
+```
+
+For PR/CI awareness, drop `--no-pr` and bump the interval to match the
+30s cache TTL:
+
+```bash
+set -g status-right '#(cd #{pane_current_path} && dub status 2>/dev/null) | %H:%M '
+set -g status-interval 30
+```
+
+## oh-my-zsh
+
+Drop this snippet into a custom plugin (e.g.
+`~/.oh-my-zsh/custom/plugins/dubstack/dubstack.plugin.zsh`):
+
+```zsh
+function dubstack_prompt_info() {
+  command -v dub >/dev/null 2>&1 || return
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return
+  local status_line
+  status_line="$(dub status --no-pr 2>/dev/null)" || return
+  [[ -n "$status_line" ]] && echo " %F{cyan}${status_line}%f"
+}
+
+PROMPT="${PROMPT}\$(dubstack_prompt_info)"
+```
+
+Enable the plugin in `~/.zshrc`:
+
+```zsh
+plugins=(... dubstack)
+```
+
+## Refreshing the cache
+
+Most shell integrations should rely on the default (cache-first) behavior —
+the overview cache is refreshed automatically by `dub log`, `dub co`, and
+`dub status --live`. If you want PR/CI freshness on every prompt, run
+`--live` from a background process and let the cached result feed your
+prompt:
+
+```bash
+(dub status --live >/dev/null 2>&1 &) ; dub status
+```
