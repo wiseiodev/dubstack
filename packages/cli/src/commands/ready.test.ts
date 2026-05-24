@@ -29,7 +29,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/a',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],
@@ -57,7 +57,7 @@ describe('ready', () => {
     mockGetSubmitPlan.mockResolvedValue({
       currentBranch: 'feat/a',
       rootBranch: 'main',
-      path: 'current',
+      scope: { kind: 'downstack' },
       branches: [
         { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
       ],

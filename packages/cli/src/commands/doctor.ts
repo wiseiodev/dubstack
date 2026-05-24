@@ -168,7 +168,7 @@ async function appendBranchHealthIssues(
           summary: `Branch '${branch.name}' is no longer based on '${branch.parent}'.`,
           details:
             'The tracked child branch is not descended from the current tip of its tracked parent, so structural stack drift is present and local submit/readiness checks would be misleading.',
-          fixes: ['dub restack', 'dub doctor', 'dub submit --path current'],
+          fixes: ['dub restack', 'dub doctor', 'dub submit'],
         });
       }
     }
@@ -202,7 +202,7 @@ async function appendBranchHealthIssues(
           fixes: [
             `git checkout ${githubBaseRef} && git pull --ff-only origin ${githubBaseRef}`,
             'dub restack',
-            'dub submit --path current',
+            'dub submit',
             'dub merge-check',
           ],
         });

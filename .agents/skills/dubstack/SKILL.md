@@ -115,8 +115,10 @@ dub abort
 ```bash
 dub ss
 dub submit --dry-run
-dub submit --path current
-dub submit --path stack --fix
+dub submit
+dub submit --upstack
+dub submit --stack
+dub submit --branch feat/api
 dub merge-check --pr 123
 dub merge-next
 dub post-merge

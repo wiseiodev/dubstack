@@ -84,9 +84,13 @@ This is a concise command reference for agents using `dub`.
 |---|---|
 | `dub submit` / `dub ss` | Push branches and create/update stack PRs |
 | `dub submit --dry-run` | Preview submit actions |
-| `dub submit --path current` | Submit current linear path (default) |
-| `dub submit --path stack` | Submit full stack (requires linear stack) |
-| `dub submit --path stack --fix` | Auto-fallback to current path when safe |
+| `dub submit` | Submit current branch + ancestors to trunk (default) |
+| `dub submit --downstack` | Same as default — current branch + ancestors |
+| `dub submit --upstack` | Current branch + all descendants |
+| `dub submit --stack` | Full tree from trunk |
+| `dub submit --branch <name>` | Only the specified branch |
+| `dub submit --path current` | _[deprecated]_ alias for `--downstack`; removed in v2 |
+| `dub submit --path stack` | _[deprecated]_ alias for `--stack`; removed in v2 |
 | `dub merge-check --pr <number>` | Validate DubStack merge-order dependencies |
 | `dub merge-next` / `dub land` | Merge next safe PR in current path |
 | `dub merge-next --dry-run` | Preview merge-next actions |

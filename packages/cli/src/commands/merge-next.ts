@@ -29,7 +29,7 @@ export async function mergeNext(
   await ensureGhInstalled();
   await checkGhAuth();
 
-  const plan = await getSubmitPlan(cwd, { path: 'current', fix: true });
+  const plan = await getSubmitPlan(cwd, { downstack: true, fix: true });
   const nextBranch = plan.branches[0]?.name;
   if (!nextBranch) {
     throw new DubError('No mergeable branch found in the current path.', [
@@ -41,7 +41,7 @@ export async function mergeNext(
   const pr = await getPr(nextBranch, cwd);
   if (!pr) {
     throw new DubError(`No open PR found for '${nextBranch}'.`, [
-      "Run 'dub ss --path current' to push the branch and create the PR.",
+      "Run 'dub ss' to push the branch and create the PR.",
       `Run 'gh pr view ${nextBranch}' to confirm a PR exists on GitHub.`,
     ]);
   }

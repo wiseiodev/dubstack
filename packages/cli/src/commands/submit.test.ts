@@ -456,9 +456,9 @@ describe('submit', () => {
       ]),
     );
 
-    const result = await submit('/repo', true, { path: 'stack' });
+    const result = await submit('/repo', true, { stack: true });
     expect(result.pushed).toEqual(['feat/a', 'feat/b']);
-    expect(result.path).toBe('stack');
+    expect(result.scope).toEqual({ kind: 'stack' });
   });
 
   it('defaults to current path and submits only the current linear path', async () => {
@@ -486,7 +486,7 @@ describe('submit', () => {
       ]),
     );
 
-    const result = await submit('/repo', true, { path: 'stack', fix: true });
+    const result = await submit('/repo', true, { stack: true, fix: true });
     expect(result.pushed).toEqual(['feat/a', 'feat/b']);
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining("'--fix' is deprecated"),
