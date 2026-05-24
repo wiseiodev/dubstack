@@ -46,10 +46,12 @@ the DUB-23 verification notes.
 
 ## Evidence
 
-- New file: `packages/cli/test/commands/post-merge-tree.test.ts` (377 lines).
-- Test command transcript: `pnpm test` → `86 passed (86) / 768 passed (768)`
-  at `11:09:44`, Duration 7.39s.
-- Lint command transcript: `pnpm checks` → `Checked 257 files in 37ms. No fixes applied.`
+- New file: `packages/cli/test/commands/post-merge-tree.test.ts` (8 mock-based
+  scenarios; line count omitted intentionally — see commits on the branch for
+  the authoritative diff stats).
+- Test command transcript: `pnpm test` → `86 files / 769 tests, all green`
+  (was 761 before this PR; +8 new).
+- Lint command transcript: `pnpm checks` → `Checked 259 files. No fixes applied.`
 - Typecheck transcript: `pnpm typecheck` → `2 successful, 2 total` (docs + dubstack).
 - No production code changed; `packages/cli/src/commands/post-merge.ts` is
   unmodified (DUB-23 is verification + coverage only).
