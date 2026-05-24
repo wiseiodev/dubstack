@@ -1,0 +1,262 @@
+{
+  "meta": {
+    "workId": "DUB-26",
+    "title": "Rich dub log with PR + CI status",
+    "artifactId": "dub-26",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-26-rich-dub-log-with-pr-ci-status",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-26",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 5,
+    "additions": 834,
+    "deletions": 14,
+    "diffStat": " .reports/dub-26-qa.md                 | 106 +++++++++\n packages/cli/src/commands/log.test.ts | 417 ++++++++++++++++++++++++++++++++++\n packages/cli/src/commands/log.ts      | 241 +++++++++++++++++++-\n packages/cli/src/commands/mcp.ts      |  35 ++-\n packages/cli/src/index.ts             |  49 +++-\n 5 files changed, 834 insertions(+), 14 deletions(-)"
+  },
+  "prompt": "Augment `dub log` from a name-only tree to a rich view with per-branch PR/CI/last-commit annotations. The region-aware tree (DUB-77) and the batched overview data layer (DUB-25) both exist — this issue wires them together: pull `getStackOverviewBatch`, extend `LogJsonBranch` with optional rich fields, append suffix annotations to the text view, and degrade gracefully when `gh` is unauthed.",
+  "tldr": "`dub log` now appends per-branch PR-state glyph, CI rollup, last-commit relative time, and short SHA after each label, sourced from `getStackOverviewBatch`. When `gh` is unauthed the rich data is silently dropped and the existing region-only tree renders unchanged. JSON output extends `LogJsonBranch` with optional `prState`, `prTitle`, `reviewDecision`, `ciState`, `draft`, `committedRel`, `shortSha`, and a reserved `frozen` placeholder for DUB-37.",
+  "why": {
+    "motivation": [
+      "DUB-77 added region-aware tree highlighting in `dub log` but the row text still showed only branch names — users had to flip to the GitHub UI to learn PR state, CI status, or how stale each branch was.",
+      "DUB-25 already batches the underlying data into a 30 s cached overview. This issue lights up the first consumer (`dub log` + `dub mcp dubstack.log`) so the work isn't dead inventory.",
+      "Failing soft for users without GitHub authentication is a hard requirement — the plain region-only tree must keep working unchanged when `gh` is missing, unauthed, or offline."
+    ],
+    "before": [
+      "`dub log` rendered `(main)\\n  └─ >feat/a\\n       └─ *feat/b (Current)*` — branch names and regions only.",
+      "`logJson` returned `name, type, parent, current, exists, prNumber, prLink, region, children`. No PR title, CI rollup, or commit metadata.",
+      "MCP `dubstack.log` mirrored the bare JSON shape; LLM consumers had to N+1 over `gh pr view` to enrich it."
+    ],
+    "after": [
+      "`dub log` (text mode) appends `  #42 ✔ approved · ✔ ci · 2 minutes ago · aaaa2222` to each branch label, color-coded per state and dimmed otherwise.",
+      "`logJson` extends `LogJsonBranch` with `prState`, `prTitle`, `reviewDecision`, `ciState`, `draft`, `committedRel`, `shortSha`, and reserved `frozen`. Fields are strictly omitted when no overview was provided — old consumers see the exact prior shape.",
+      "MCP `dubstack.log` schema gains `prs`, `ci`, `refresh` booleans and fail-softly returns the bare tree when the overview fetch errors.",
+      "New CLI flags: `--no-prs`, `--no-ci`, `--refresh`. `--no-color` strips ANSI from suffix tokens via a scoped Chalk instance so the existing `styleLogOutput` marker pipeline stays untouched.",
+      "Truncation banner (`ℹ Showing N+ branches`) surfaces when `gh pr list` hits the page limit."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/log.ts",
+      "changeType": "mod",
+      "additions": 241,
+      "deletions": 14,
+      "explanation": "Adds `LogOptions.{prs, ci, noColor, overview}`, extends `LogJsonBranch` with optional rich fields, threads `overviewMap` and a scoped `suffixChalk` through both recursive renderers, and implements `formatRichSuffix` / `formatPrToken` / `formatCiToken`. Glyph hierarchy: MERGED → CLOSED → DRAFT → APPROVED → CHANGES_REQUESTED → REVIEW_REQUIRED → open (bare). CI suppresses the `NONE` glyph silently.",
+      "snippet": "function makeSuffixChalk(noColor: boolean): ChalkInstance {\n  // A scoped chalk instance keeps the suffix styling decision local to\n  // `log()` so callers don't have to mutate the global chalk.level (which\n  // would race with concurrent renders and leak across vitest cases).\n  if (noColor) return new Chalk({ level: 0 });\n  return chalk;\n}",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 49,
+      "deletions": 5,
+      "explanation": "Adds `--no-prs`, `--no-ci`, `--refresh` flags on both `dub log` and `dub ls`, wraps `getStackOverviewBatch` in try/catch in `printLog`, and emits the truncation banner (guarded against the `branches.length === 0` cosmetic edge case from the adversarial review).",
+      "snippet": "let overview = null;\ntry {\n  overview = await getStackOverviewBatch(cwd, { refresh: options.refresh });\n} catch {\n  overview = null;\n}",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 35,
+      "deletions": 6,
+      "explanation": "Extends the `dubstack.log` tool schema with `prs`, `ci`, `refresh` booleans, lists them in `HISTORY_ARG_KEYS`, and threads the same fail-soft overview fetch into the handler so MCP clients see the rich JSON when `gh` is authed and the plain tree otherwise.",
+      "snippet": "case 'dubstack.log': {\n  const refresh = optionalBoolean(args.refresh);\n  let overview = null;\n  try {\n    overview = await getStackOverviewBatch(cwd, { refresh });\n  } catch {\n    overview = null;\n  }\n  return jsonToolResult(\n    await logJson(cwd, {\n      stack: optionalBoolean(args.stack),\n      all: optionalBoolean(args.all),\n      reverse: optionalBoolean(args.reverse),\n      prs: optionalBoolean(args.prs),\n      ci: optionalBoolean(args.ci),\n      overview,\n    }),\n  );\n}",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/log.test.ts",
+      "changeType": "mod",
+      "additions": 417,
+      "deletions": 1,
+      "explanation": "Adds a `rich overview` suite covering: linear-stack annotation, `--no-prs`, `--no-ci`, the full glyph hierarchy (draft / merged / closed / changes-requested), fallback when `overview: null`, additive JSON contract (fields strictly omitted when overview absent), ANSI styling under `noColor: false`, and a branching tree with sibling-subtree styling combined with rich annotations.",
+      "snippet": "it('emits the rich JSON fields when overview is provided', async () => {\n  // ...\n  const json = await logJson(dir, { overview });\n  const featA = json.stacks[0]?.root?.children[0];\n  expect(featA?.prState).toBe('OPEN');\n  expect(featA?.reviewDecision).toBe('APPROVED');\n  expect(featA?.ciState).toBe('SUCCESS');\n  expect(featA?.draft).toBe(false);\n  expect(featA?.committedRel).toBe('1 hour ago');\n  expect(featA?.shortSha).toBe('aaaa1111');\n  expect(featA?.frozen).toBeUndefined();\n  // ...\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-26-qa.md",
+      "changeType": "new",
+      "additions": 106,
+      "deletions": 0,
+      "explanation": "Self-QA fallback. No `.tsx` files changed; there is no browser surface to record. Captures unit-test count, manual CLI demo outputs across all four flag combinations, the gh-unauthed fallback, and the JSON shape evidence.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Fail-soft path for gh failures",
+      "location": "packages/cli/src/index.ts (printLog) + packages/cli/src/commands/mcp.ts (dubstack.log handler)",
+      "rationale": "The contract is that `dub log` MUST keep working when `gh` is unauthed, missing, or offline. Both call sites wrap `getStackOverviewBatch` in try/catch and pass `overview: null` on failure; downstream code treats `null` as 'render plain region-only tree' via `buildOverviewMap` returning an empty Map."
+    },
+    {
+      "title": "JSON additive contract",
+      "location": "packages/cli/src/commands/log.ts (renderNodeJson) + log.test.ts (`omits rich JSON fields when overview is absent`)",
+      "rationale": "Adding rich fields to `LogJsonBranch` cannot break existing MCP consumers reading `prNumber`, `region`, etc. New fields are populated only when the per-branch overview row exists; the 'omits' test pins this so future contributors can't accidentally make them required."
+    },
+    {
+      "title": "Glyph hierarchy in formatPrToken",
+      "location": "packages/cli/src/commands/log.ts (formatPrToken)",
+      "rationale": "MERGED beats everything; CLOSED beats DRAFT; DRAFT beats reviewDecision (so a stale APPROVED on a now-draft PR doesn't mislead). The 'renders the correct PR-state glyph' test covers all four hierarchies."
+    },
+    {
+      "title": "Scoped Chalk avoids polluting styleLogOutput",
+      "location": "packages/cli/src/commands/log.ts (makeSuffixChalk + formatPrToken/formatCiToken)",
+      "rationale": "The suffix is styled inline before `styleLogOutput` runs over the assembled output. The three existing label-marker regexes (`*name (Current)*`, `(─ )>name`, `~name~`) cannot collide with the suffix because branch names cannot contain spaces (per git refname rules) and the suffix begins with two spaces — `\\S+` in the ancestor regex stops at the gap. Adversarial review confirmed no collision path with current inputs."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "9 new tests in src/commands/log.test.ts covering rich rendering, flags, glyph hierarchy, fallback, and JSON shape",
+      "status": "done",
+      "evidence": "pnpm test → 836 passed (89 files)"
+    },
+    {
+      "kind": "manual",
+      "label": "End-to-end demo against a throwaway repo with a hand-crafted overview cache fixture",
+      "status": "done",
+      "evidence": "`.reports/dub-26-qa.md` records the four flag-combination outputs plus the gh-unauthed fallback"
+    },
+    {
+      "kind": "build",
+      "label": "tsup build of `packages/cli` succeeds and the built binary runs",
+      "status": "done",
+      "evidence": "`pnpm --filter dubstack build` → `ESM ⚡️ Build success in 180ms`; built binary invoked manually for the demo"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 271 files in 53ms. No fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo: 2 successful, 2 total (cached for docs, cache miss + clean for dubstack)"
+    },
+    {
+      "name": "Vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "89 files, 836 tests passed (was 827 before; +9 new)"
+    },
+    {
+      "name": "AI evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "No AI metadata or prompts changed in this PR; the local eval harness requires an AI provider key which is not configured in this environment. Per CLAUDE.md, evals are only required when AI metadata changes."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "dub log is a terminal CLI; no .tsx files or browser surface changed.",
+    "fallbackApprovedByUser": true,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-26-qa.md",
+    "caption": "Deterministic proof of the four flag-combination outputs and the gh-unauthed fallback path.",
+    "scenarios": [
+      "Rich view (no-color) shows PR + CI + commit annotations on every row",
+      "Rich view (FORCE_COLOR=1) wraps each suffix token in the expected ANSI codes",
+      "--no-prs hides PR data, keeps CI + commit",
+      "--no-ci hides CI rollup, keeps PR + commit",
+      "--refresh busts the cache; with unauthed gh, falls back to the plain region-only tree",
+      "--json emits the rich optional fields when an overview is present"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`dub log` defaults to the rich view when `gh` is authed; falls back to region-only tree otherwise",
+      "status": "satisfied",
+      "evidence": "printLog (index.ts) fetches overview unconditionally, fails soft to `null`; log() renders rich suffix only when overview is present. Manual demo confirms both paths."
+    },
+    {
+      "criterion": "`--no-prs`, `--no-ci`, `--no-color`, `--refresh` flags work",
+      "status": "satisfied",
+      "evidence": "All four flags wired in index.ts on both `dub log` and `dub ls`; tests + manual demo cover each."
+    },
+    {
+      "criterion": "`--json` extends `LogJsonResult` additively (consumers reading old fields keep working)",
+      "status": "satisfied",
+      "evidence": "All new fields are optional; the 'omits rich JSON fields' test asserts they are strictly absent when overview is not provided."
+    },
+    {
+      "criterion": "`logJson` consumed by `dub mcp`'s `dubstack.log` reflects the new optional fields",
+      "status": "satisfied",
+      "evidence": "MCP handler fetches the same overview and passes it into `logJson`. The tool schema also documents the three new flags."
+    },
+    {
+      "criterion": "Snapshot tests for several stack shapes (linear, tree, gh-unauthed fallback, --no-color)",
+      "status": "satisfied",
+      "evidence": "9 new assertion-style tests in `log.test.ts` cover linear, branching, fallback (overview: null), --no-prs, --no-ci, --no-color via noColor flag, plus the glyph hierarchy."
+    },
+    {
+      "criterion": "No regression in existing `log.test.ts` (DUB-77 tests must still pass)",
+      "status": "satisfied",
+      "evidence": "All 27 prior log.test.ts tests still pass; 836 total tests pass."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Advisory (addressed): the truncation banner could read 'Showing 0+ branches' in a theoretical edge case where the gh page-limit heuristic trips with an empty branches array. Fixed by guarding the banner with `overview.branches.length > 0`.",
+      "Reviewer confirmed no marker/regex collision is possible: the three styleLogOutput regexes cannot match suffix content because git refnames forbid spaces, and the suffix begins with two spaces.",
+      "Reviewer confirmed glyph hierarchy in formatPrToken (MERGED > CLOSED > DRAFT > APPROVED > CHANGES_REQUESTED > REVIEW_REQUIRED > bare) is correct and consistent with the JSON path."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-25 (batched PR/CI data layer)",
+      "status": "Done — `getStackOverviewBatch` consumed directly"
+    },
+    {
+      "name": "DUB-77 (region-aware log highlight)",
+      "status": "Done — `computeRegions` and `styleLogOutput` reused unchanged"
+    },
+    {
+      "name": "DUB-37 (`dub freeze`)",
+      "status": "Not yet started — `frozen?: boolean` reserved in the JSON shape; renderer will pick it up automatically once `BranchOverview.frozen` is populated."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure CLI/MCP additive change; no schema migration or persisted state changes. Merge unblocks Tier 2 follow-ups (`dub co`, `dub status`, `dub watch`).",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship via the standard semantic-release flow",
+        "details": "No additional rollout steps. Users without `gh` see no behavior change; users with `gh` authed see the rich suffix on next `dub log` invocation."
+      },
+      {
+        "when": "Follow-up",
+        "label": "Wire `getStackOverviewBatch` into `dub co`, `dub status`, `dub watch`",
+        "details": "Same overview, same cache — those consumers can fetch once per process tick and share the cached result. Each is its own ticket in Tier 2."
+      },
+      {
+        "when": "After DUB-37",
+        "label": "Populate `frozen` from `BranchOverview.frozen` once `dub freeze` lands",
+        "details": "No renderer changes needed — `frozen` is already in the JSON contract and the rich suffix can be extended to surface it without touching the data layer."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "80b811674c94f24713dabd4e199f03ddd3933b5c",
+    "shortSha": "80b8116",
+    "message": "feat(log): rich PR/CI/commit annotations on `dub log` tree [DUB-26]"
+  }
+}

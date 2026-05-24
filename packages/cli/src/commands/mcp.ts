@@ -6,6 +6,7 @@ import { DubError, formatDubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
+import { getStackOverviewBatch } from '../lib/stack-overview';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
@@ -72,7 +73,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-11-25', '2025-06-18']);
 const MAX_HISTORY_ARGS_LENGTH = 500;
 
 const HISTORY_ARG_KEYS: Record<string, string[]> = {
-  'dubstack.log': ['stack', 'all', 'reverse'],
+  'dubstack.log': ['stack', 'all', 'reverse', 'prs', 'ci', 'refresh'],
   'dubstack.doctor': ['all', 'fetch'],
   'dubstack.status': ['live', 'pr'],
   'dubstack.parent': ['branch'],
@@ -109,7 +110,8 @@ const BRANCH_SCHEMA = {
 const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.log',
-    description: 'Return the tracked DubStack stack tree as structured JSON.',
+    description:
+      'Return the tracked DubStack stack tree as structured JSON, with optional PR/CI/commit annotations per branch.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -124,6 +126,20 @@ const TOOLS: ToolDefinition[] = [
         reverse: {
           type: 'boolean',
           description: 'Reverse stack and child ordering.',
+        },
+        prs: {
+          type: 'boolean',
+          description:
+            'Include PR-state annotations (prState, prTitle, reviewDecision, draft) when overview data is available. Defaults to true.',
+        },
+        ci: {
+          type: 'boolean',
+          description:
+            'Include CI rollup (ciState) when overview data is available. Defaults to true.',
+        },
+        refresh: {
+          type: 'boolean',
+          description: 'Bust the 30-second overview cache before fetching.',
         },
       },
       additionalProperties: false,
@@ -628,14 +644,27 @@ async function callTool(
   args: Record<string, unknown>,
 ): Promise<ToolCallResult> {
   switch (name) {
-    case 'dubstack.log':
+    case 'dubstack.log': {
+      const refresh = optionalBoolean(args.refresh);
+      // Fail-soft on gh auth / network errors: the structured response should
+      // still surface the tracked tree when the overview can't be fetched.
+      let overview = null;
+      try {
+        overview = await getStackOverviewBatch(cwd, { refresh });
+      } catch {
+        overview = null;
+      }
       return jsonToolResult(
         await logJson(cwd, {
           stack: optionalBoolean(args.stack),
           all: optionalBoolean(args.all),
           reverse: optionalBoolean(args.reverse),
+          prs: optionalBoolean(args.prs),
+          ci: optionalBoolean(args.ci),
+          overview,
         }),
       );
+    }
     case 'dubstack.doctor':
       return jsonToolResult(
         await doctor(cwd, {
