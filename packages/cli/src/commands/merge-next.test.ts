@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../lib/github.js', () => ({
   checkGhAuth: vi.fn(),
   ensureGhInstalled: vi.fn(),
+  getAllPrSyncInfoBatch: vi.fn(),
+  getBranchPrSyncInfo: vi.fn(),
   getPr: vi.fn(),
+  getPrMergeStatusByNumber: vi.fn(),
   mergePr: vi.fn(),
   retargetPrBase: vi.fn(),
 }));
@@ -16,10 +19,14 @@ vi.mock('./submit.js', () => ({
   getSubmitPlan: vi.fn(),
 }));
 
+import type { Mock } from 'vitest';
 import {
   checkGhAuth,
   ensureGhInstalled,
+  getAllPrSyncInfoBatch,
+  getBranchPrSyncInfo,
   getPr,
+  getPrMergeStatusByNumber,
   mergePr,
   retargetPrBase,
 } from '../lib/github';
@@ -27,78 +34,113 @@ import { mergeNext } from './merge-next';
 import { postMerge } from './post-merge';
 import { getSubmitPlan } from './submit';
 
-const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
-const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
-const mockGetPr = getPr as ReturnType<typeof vi.fn>;
-const mockMergePr = mergePr as ReturnType<typeof vi.fn>;
-const mockRetargetPrBase = retargetPrBase as ReturnType<typeof vi.fn>;
-const mockPostMerge = postMerge as ReturnType<typeof vi.fn>;
-const mockGetSubmitPlan = getSubmitPlan as ReturnType<typeof vi.fn>;
+const mockEnsureGhInstalled = ensureGhInstalled as Mock;
+const mockCheckGhAuth = checkGhAuth as Mock;
+const mockGetAllPrSyncInfoBatch = getAllPrSyncInfoBatch as Mock;
+const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as Mock;
+const mockGetPr = getPr as Mock;
+const mockGetPrMergeStatusByNumber = getPrMergeStatusByNumber as Mock;
+const mockMergePr = mergePr as Mock;
+const mockRetargetPrBase = retargetPrBase as Mock;
+const mockPostMerge = postMerge as Mock;
+const mockGetSubmitPlan = getSubmitPlan as Mock;
+
+interface BranchSpec {
+  name: string;
+  parent: string | null;
+  pr_number?: number | null;
+  pr_link?: string | null;
+  type?: 'root';
+}
+
+function makePlan(opts: { branches: BranchSpec[]; currentBranch: string }) {
+  const branches = opts.branches.map((b) => ({
+    name: b.name,
+    parent: b.parent,
+    pr_number: b.pr_number ?? null,
+    pr_link: b.pr_link ?? null,
+    ...(b.type ? { type: b.type } : {}),
+  }));
+  const root = branches.find((b) => b.type === 'root');
+  return {
+    state: { stacks: [] },
+    stack: { id: 'stack-1', branches },
+    currentBranch: opts.currentBranch,
+    rootBranch: root?.name ?? 'main',
+    path: 'stack',
+    branches: branches.filter((b) => b.type !== 'root'),
+  };
+}
+
+function lifecycleBatch(
+  entries: Record<string, 'OPEN' | 'CLOSED' | 'MERGED' | 'NONE'>,
+  truncated = false,
+) {
+  const byBranch = new Map<
+    string,
+    { state: 'OPEN' | 'CLOSED' | 'MERGED' | 'NONE'; baseRefName: string | null }
+  >();
+  for (const [name, state] of Object.entries(entries)) {
+    byBranch.set(name, { state, baseRefName: null });
+  }
+  return { byBranch, truncated };
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
-  mockGetSubmitPlan.mockResolvedValue({
-    state: { stacks: [] },
-    stack: {
-      id: 'stack-1',
-      branches: [
-        {
-          name: 'main',
-          type: 'root',
-          parent: null,
-          pr_number: null,
-          pr_link: null,
-        },
-        { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
-        { name: 'feat/b', parent: 'feat/a', pr_number: null, pr_link: null },
-        { name: 'feat/c', parent: 'feat/b', pr_number: null, pr_link: null },
-      ],
-    },
-    currentBranch: 'feat/c',
-    rootBranch: 'main',
-    path: 'current',
-    branches: [
-      { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
-      { name: 'feat/b', parent: 'feat/a', pr_number: null, pr_link: null },
-      { name: 'feat/c', parent: 'feat/b', pr_number: null, pr_link: null },
-    ],
-  });
-  mockGetPr.mockImplementation(async (branch: string) => {
-    if (branch === 'feat/a') {
-      return {
-        number: 101,
-        url: 'https://github.com/o/r/pull/101',
-        title: 'feat: a',
-        body: '',
-      };
-    }
-    if (branch === 'feat/b') {
-      return {
-        number: 102,
-        url: 'https://github.com/o/r/pull/102',
-        title: 'feat: b',
-        body: '',
-      };
-    }
-    return null;
+  mockGetBranchPrSyncInfo.mockResolvedValue({
+    state: 'NONE',
+    baseRefName: null,
   });
   mockMergePr.mockResolvedValue(undefined);
   mockRetargetPrBase.mockResolvedValue(undefined);
   mockPostMerge.mockResolvedValue({
-    cleaned: ['feat/a'],
+    cleaned: [],
     skipped: [],
-    reparented: [{ branch: 'feat/b', parent: 'main' }],
-    retargeted: ['feat/b'],
+    reparented: [],
+    retargeted: [],
     restacked: true,
     submitted: true,
-    submittedBranches: ['feat/b', 'feat/c'],
+    submittedBranches: [],
     dryRun: false,
   });
 });
 
-describe('mergeNext', () => {
+describe('mergeNext linear stack', () => {
+  beforeEach(() => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/c',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/a', parent: 'main' },
+          { name: 'feat/b', parent: 'feat/a' },
+          { name: 'feat/c', parent: 'feat/b' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/a': 'OPEN',
+        'feat/b': 'OPEN',
+        'feat/c': 'NONE',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a')
+        return { number: 101, url: 'u/101', title: 'a', body: '' };
+      if (branch === 'feat/b')
+        return { number: 102, url: 'u/102', title: 'b', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockImplementation(async () => ({
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    }));
+  });
+
   it('retargets child PRs before merge and runs post-merge maintenance', async () => {
     const result = await mergeNext('/repo');
 
@@ -118,6 +160,7 @@ describe('mergeNext', () => {
     expect(result.mergedBranch).toBe('feat/a');
     expect(result.prNumber).toBe(101);
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
+    expect(result.siblingCandidates).toEqual([]);
   });
 
   it('supports dry-run without merging', async () => {
@@ -129,11 +172,15 @@ describe('mergeNext', () => {
     expect(result.dryRun).toBe(true);
     expect(result.mergedBranch).toBe('feat/a');
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
+    expect(result.siblingCandidates).toEqual([]);
   });
 
-  it('throws when next branch has no open PR', async () => {
-    mockGetPr.mockImplementation(async () => null);
-    await expect(mergeNext('/repo')).rejects.toThrow('No open PR found');
+  it('throws when no branch in the stack has an open PR', async () => {
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(lifecycleBatch({}));
+    mockGetPr.mockResolvedValue(null);
+    await expect(mergeNext('/repo')).rejects.toThrow(
+      'No mergeable branch found in the stack.',
+    );
   });
 
   it('aborts merge when pre-merge retargeting fails', async () => {
@@ -141,5 +188,279 @@ describe('mergeNext', () => {
 
     await expect(mergeNext('/repo')).rejects.toThrow('retarget failed');
     expect(mockMergePr).not.toHaveBeenCalled();
+  });
+});
+
+describe('mergeNext tree selection', () => {
+  it('3-sibling tree: prefers branch on the current path and reports the others', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/bravo',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/alpha', parent: 'main' },
+          { name: 'feat/bravo', parent: 'main' },
+          { name: 'feat/charlie', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/alpha': 'OPEN',
+        'feat/bravo': 'OPEN',
+        'feat/charlie': 'OPEN',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/alpha')
+        return { number: 201, url: 'u/201', title: 'a', body: '' };
+      if (branch === 'feat/bravo')
+        return { number: 202, url: 'u/202', title: 'b', body: '' };
+      if (branch === 'feat/charlie')
+        return { number: 203, url: 'u/203', title: 'c', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    });
+
+    const result = await mergeNext('/repo');
+
+    expect(result.mergedBranch).toBe('feat/bravo');
+    expect(result.prNumber).toBe(202);
+    expect(result.siblingCandidates).toEqual(['feat/alpha', 'feat/charlie']);
+    expect(mockMergePr).toHaveBeenCalledWith(202, '/repo', {
+      method: 'squash',
+      deleteBranch: true,
+    });
+  });
+
+  it('3-sibling tree from a non-stack branch: picks the alphabetically first mergeable child of trunk', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'main',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/alpha', parent: 'main' },
+          { name: 'feat/bravo', parent: 'main' },
+          { name: 'feat/charlie', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/alpha': 'OPEN',
+        'feat/bravo': 'OPEN',
+        'feat/charlie': 'OPEN',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/alpha')
+        return { number: 301, url: 'u/301', title: 'a', body: '' };
+      if (branch === 'feat/bravo')
+        return { number: 302, url: 'u/302', title: 'b', body: '' };
+      if (branch === 'feat/charlie')
+        return { number: 303, url: 'u/303', title: 'c', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    });
+
+    const result = await mergeNext('/repo');
+
+    expect(result.mergedBranch).toBe('feat/alpha');
+    expect(result.siblingCandidates).toEqual(['feat/bravo', 'feat/charlie']);
+  });
+
+  it('does not descend to grandchildren when a depth-1 candidate exists', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/grand',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/parent', parent: 'main' },
+          { name: 'feat/grand', parent: 'feat/parent' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/parent': 'OPEN',
+        'feat/grand': 'OPEN',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/parent')
+        return { number: 401, url: 'u/401', title: 'p', body: '' };
+      if (branch === 'feat/grand')
+        return { number: 402, url: 'u/402', title: 'g', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    });
+
+    const result = await mergeNext('/repo');
+
+    expect(result.mergedBranch).toBe('feat/parent');
+    expect(mockGetPrMergeStatusByNumber).toHaveBeenCalledWith(401, '/repo');
+    // Mergeability is not probed for grandchildren since depth 1 already had a winner.
+    expect(mockGetPrMergeStatusByNumber).not.toHaveBeenCalledWith(402, '/repo');
+  });
+
+  it('errors cleanly and does not merge when the only depth-1 candidate is BLOCKED', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/only',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/only', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({ 'feat/only': 'OPEN' }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/only')
+        return { number: 501, url: 'u/501', title: 'only', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'CONFLICTING',
+      mergeStateStatus: 'BLOCKED',
+    });
+
+    await expect(mergeNext('/repo')).rejects.toThrow(
+      /No mergeable PR at this stack level.*feat\/only.*PR #501.*mergeable=CONFLICTING.*state=BLOCKED/,
+    );
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
+  });
+
+  it('sibling hint lists only MERGEABLE peers — blocked siblings are excluded', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/bravo',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/alpha', parent: 'main' },
+          { name: 'feat/bravo', parent: 'main' },
+          { name: 'feat/charlie', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/alpha': 'OPEN',
+        'feat/bravo': 'OPEN',
+        'feat/charlie': 'OPEN',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/alpha')
+        return { number: 701, url: 'u/701', title: 'a', body: '' };
+      if (branch === 'feat/bravo')
+        return { number: 702, url: 'u/702', title: 'b', body: '' };
+      if (branch === 'feat/charlie')
+        return { number: 703, url: 'u/703', title: 'c', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockImplementation(
+      async (prNumber: number) => {
+        if (prNumber === 701)
+          return { mergeable: 'CONFLICTING', mergeStateStatus: 'BLOCKED' };
+        return { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+      },
+    );
+
+    const result = await mergeNext('/repo');
+
+    expect(result.mergedBranch).toBe('feat/bravo');
+    expect(result.siblingCandidates).toEqual(['feat/charlie']);
+  });
+
+  it('does not descend past a blocked floor: depth-1 BLOCKED with mergeable descendant still errors', async () => {
+    // feat/blocked is BLOCKED at depth 1. feat/grand is mergeable at depth 2.
+    // Even though the eligibility guard would normally skip feat/grand
+    // (parent's PR is OPEN, not MERGED), this test pins the contract: the
+    // mergeable descendant must NOT be chosen, and we must surface the
+    // blocked parent's status as a clean error.
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/grand',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/blocked', parent: 'main' },
+          { name: 'feat/grand', parent: 'feat/blocked' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({
+        'feat/blocked': 'OPEN',
+        'feat/grand': 'OPEN',
+      }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/blocked')
+        return { number: 801, url: 'u/801', title: 'p', body: '' };
+      if (branch === 'feat/grand')
+        return { number: 802, url: 'u/802', title: 'g', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockImplementation(
+      async (prNumber: number) => {
+        if (prNumber === 801)
+          return { mergeable: 'CONFLICTING', mergeStateStatus: 'BLOCKED' };
+        return { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+      },
+    );
+
+    await expect(mergeNext('/repo')).rejects.toThrow(
+      /No mergeable PR at this stack level.*feat\/blocked/,
+    );
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
+  });
+
+  it('dry-run reflects the chosen target and sibling hint', async () => {
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/bravo',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/alpha', parent: 'main' },
+          { name: 'feat/bravo', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({ 'feat/alpha': 'OPEN', 'feat/bravo': 'OPEN' }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/alpha')
+        return { number: 601, url: 'u/601', title: 'a', body: '' };
+      if (branch === 'feat/bravo')
+        return { number: 602, url: 'u/602', title: 'b', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'MERGEABLE',
+      mergeStateStatus: 'CLEAN',
+    });
+
+    const result = await mergeNext('/repo', { dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.mergedBranch).toBe('feat/bravo');
+    expect(result.prNumber).toBe(602);
+    expect(result.siblingCandidates).toEqual(['feat/alpha']);
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
   });
 });
