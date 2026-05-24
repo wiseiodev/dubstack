@@ -36,6 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
+import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
@@ -52,6 +53,7 @@ import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import { squash } from './commands/squash';
+import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
@@ -133,6 +135,92 @@ Examples:
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
   });
+
+program
+  .command('install')
+  .argument('<recipe>', 'Recipe to install (e.g. retarget-action)')
+  .option('--dry-run', 'Print the planned write without touching disk')
+  .option(
+    '--force',
+    'Overwrite an existing file with different content without confirming',
+  )
+  .description(
+    'Install a Dubstack recipe (workflow templates, etc.) into the current repo',
+  )
+  .addHelpText(
+    'after',
+    `
+Recipes:
+  retarget-action    GitHub Action that retargets dependent PRs when a stack PR merges
+
+Examples:
+  $ dub install retarget-action             Write .github/workflows/dubstack-retarget.yml
+  $ dub install retarget-action --dry-run   Preview the planned write
+  $ dub install retarget-action --force     Overwrite an existing file without confirming`,
+  )
+  .action(
+    async (recipe: string, options: { dryRun?: boolean; force?: boolean }) => {
+      const result = await install(process.cwd(), recipe as InstallRecipe, {
+        dryRun: options.dryRun,
+        force: options.force,
+        confirm: async (message) => {
+          // Non-interactive shells (piped stdin, CI scripts) would hang
+          // forever on rl.question. Treat as "no" and let the caller surface
+          // a 'cancelled' result; the user can pass --force for scripted
+          // overwrites.
+          if (!process.stdin.isTTY) {
+            console.log(
+              chalk.yellow(
+                '⚠ Refusing to prompt for confirmation in a non-interactive shell. Re-run with --force to overwrite, or --dry-run to preview.',
+              ),
+            );
+            return false;
+          }
+          const readline = await import('node:readline/promises');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          try {
+            const answer = await rl.question(`${message} [y/N] `);
+            const normalized = answer.trim().toLowerCase();
+            return normalized === 'y' || normalized === 'yes';
+          } finally {
+            rl.close();
+          }
+        },
+      });
+
+      switch (result.status) {
+        case 'installed':
+          console.log(chalk.green(`✔ Installed at ${result.path}`));
+          console.log(
+            chalk.dim(
+              '  Commit and push the workflow file. The Action runs on the next merge.',
+            ),
+          );
+          break;
+        case 'overwritten':
+          console.log(chalk.green(`✔ Overwrote ${result.path}`));
+          console.log(
+            chalk.dim('  Commit and push to pick up the new content.'),
+          );
+          break;
+        case 'already-installed':
+          console.log(
+            chalk.yellow(`⚠ Already installed at ${result.path} (no change)`),
+          );
+          break;
+        case 'preview':
+          console.log(chalk.dim(`# Would write to ${result.path}:`));
+          console.log(result.content);
+          break;
+        case 'cancelled':
+          console.log(chalk.yellow('⚠ Cancelled. No changes written.'));
+          break;
+      }
+    },
+  );
 
 program
   .command('docs')
@@ -1790,6 +1878,103 @@ Examples:
       }
     },
   );
+
+const stashCommand = program
+  .command('stash')
+  .description(
+    'Branch-aware stash: capture working tree + record source branch so pop can refuse mismatched branches',
+  )
+  .option(
+    '-m, --message <message>',
+    'Override the default stash message (default: branch + timestamp)',
+  )
+  .option('--list', "Alias for 'dub stash list' — show recorded stashes")
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub stash                                Stash on current branch
+  $ dub stash -m "wip: refactor"             Stash with custom message
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless
+  $ dub stash list                           Show recorded stashes with branch context`,
+  )
+  .action(async (options: { message?: string; list?: boolean }) => {
+    if (options.list) {
+      await runStashList();
+      return;
+    }
+    const result = await stashPush(process.cwd(), { message: options.message });
+    console.log(
+      chalk.green(
+        `✔ Stashed on '${result.branch}' (${result.sha.slice(0, 7)})`,
+      ),
+    );
+    console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    console.log(
+      chalk.dim(
+        `  ↳ run 'dub stash pop' on '${result.branch}' to restore, or 'dub stash pop --on <branch>' to move it.`,
+      ),
+    );
+  });
+
+stashCommand.addCommand(
+  new Command('pop')
+    .description('Pop the most recent dub stash (refuses if branch differs)')
+    .option('--on <branch>', 'Checkout <branch> first, then pop the stash')
+    .option(
+      '--force',
+      "Pop onto the current branch even if it doesn't match the recorded branch",
+    )
+    .addHelpText(
+      'after',
+      `
+Examples:
+  $ dub stash pop                            Pop most recent (same branch only)
+  $ dub stash pop --on feat/other            Checkout feat/other, then pop
+  $ dub stash pop --force                    Pop onto current branch regardless`,
+    )
+    .action(async (options: { on?: string; force?: boolean }) => {
+      const result = await stashPop(process.cwd(), {
+        on: options.on,
+        force: options.force,
+      });
+      if (result.checkedOut) {
+        console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+      }
+      const label =
+        result.sourceBranch === result.branch
+          ? `'${result.branch}'`
+          : `'${result.branch}' (originally on '${result.sourceBranch}')`;
+      console.log(chalk.green(`✔ Popped stash on ${label}`));
+      console.log(chalk.dim(`  ↳ message: ${result.message}`));
+    }),
+);
+
+stashCommand.addCommand(
+  new Command('list')
+    .description('Show recorded dub stashes with branch context')
+    .action(runStashList),
+);
+
+async function runStashList(): Promise<void> {
+  const result = await stashList(process.cwd());
+  if (result.entries.length === 0) {
+    console.log(chalk.dim('No dub stash entries recorded.'));
+    return;
+  }
+  for (let i = 0; i < result.entries.length; i += 1) {
+    const entry = result.entries[i];
+    const prefix = `${i}:`;
+    const refLabel = entry.ref ?? '(dropped)';
+    const presence = entry.present ? chalk.green('●') : chalk.yellow('○');
+    console.log(
+      `${presence} ${chalk.bold(prefix)} ${chalk.cyan(entry.branch)}  ${chalk.dim(refLabel)}  ${chalk.dim(entry.createdAt)}`,
+    );
+    console.log(chalk.dim(`    ↳ ${entry.message}`));
+  }
+}
 
 async function runSubmit(options: {
   dryRun?: boolean;

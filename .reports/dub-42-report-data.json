@@ -1,0 +1,311 @@
+{
+  "meta": {
+    "workId": "DUB-42",
+    "title": "dub stash + dub stash pop — branch-aware stashing",
+    "artifactId": "dub-42",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-42-dub-stash-dub-stash-pop-branch-aware-stashing",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-42",
+    "prUrl": "https://github.com/wiseiodev/dubstack/pull/78"
+  },
+  "stats": {
+    "fileCount": 12,
+    "additions": 1053,
+    "deletions": 0,
+    "diffStat": "12 files changed, 1053 insertions(+)"
+  },
+  "prompt": "Implement DUB-42: branch-aware stash for DubStack. dub stash records the source branch; dub stash pop refuses on a different branch unless --on or --force is given. dub stash list shows recorded entries with branch context.",
+  "tldr": "Adds dub stash / dub stash pop / dub stash list. A Dubstack-unique branch-aware stash that refuses to apply onto a different branch than where it was created, with --on <branch> and --force overrides. Recorded in .git/dubstack/stash-log.json as a 50-entry ring buffer; pop locates the right stash@{N} by SHA so external git stash activity can't grab the wrong entry.",
+  "why": {
+    "motivation": [
+      "Plain git stash doesn't remember which branch a stash was created on. Stashing on feat/a, switching to feat/b, then popping silently applies work onto the wrong branch — a common DubStack-user footgun.",
+      "Graphite doesn't ship this; it's a real differentiator for stack-heavy workflows where users frequently switch branches mid-WIP."
+    ],
+    "before": [
+      "Users either remember the source branch manually or eat the cost of a bad pop and untangle the diff after."
+    ],
+    "after": [
+      "dub stash records {sha, branch, message, createdAt}; pop refuses mismatches with both override flags in the recovery hint. dub stash list shows recorded stashes with branch context plus presence in git stash list."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/stash.ts",
+      "changeType": "new",
+      "additions": 213,
+      "deletions": 0,
+      "explanation": "stashPush / stashPop / stashList. Push refuses on clean tree, captures git stash + records to log. Pop finds the right stash@{N} by SHA, enforces branch match with --on/--force overrides, swallows post-pop log-write failure with a warning (the next pop auto-cleans the dangling entry).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/stash-log.ts",
+      "changeType": "new",
+      "additions": 107,
+      "deletions": 0,
+      "explanation": "Atomic write-then-rename, 50-entry ring buffer, corrupt file → empty list (log is best-effort context, not authoritative state).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 85,
+      "deletions": 0,
+      "explanation": "Adds gitStashPushIncludeUntracked, listGitStashes, gitStashPop helpers — DubError wrapping with recovery hints, SHA lookup so callers can match log entries to git refs.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 98,
+      "deletions": 0,
+      "explanation": "CLI wiring: `dub stash` parent command + `pop` and `list` subcommands, plus `--list` flag alias. Stash output highlights the source branch.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 65,
+      "deletions": 0,
+      "explanation": "Exposes dubstack.stash (mutating), dubstack.stash-pop (mutating), dubstack.stash-list (read-only) over the MCP surface.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/stash.test.ts",
+      "changeType": "new",
+      "additions": 247,
+      "deletions": 0,
+      "explanation": "16 tests covering all four acceptance-criterion paths plus edge cases: same-branch pop, branch-mismatch refusal, --on <branch>, --on <current>, --on + --force precedence, --force, missing --on target, empty log, dangling auto-clean, custom message, untracked-file inclusion.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/stash-log.test.ts",
+      "changeType": "new",
+      "additions": 74,
+      "deletions": 0,
+      "explanation": "Ring-buffer trim at 50, corrupt-file tolerance, removal by SHA, prepend ordering.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.test.ts",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 0,
+      "explanation": "tools/list assertion updated to include the three new tool names.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/stash.mdx",
+      "changeType": "new",
+      "additions": 115,
+      "deletions": 0,
+      "explanation": "Full docs page: usage, why-it-exists, behavior for push/pop/list, flag matrix, error matrix, state-file schema, precedence rule.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Registers stash in the docs sidebar between rename and skills.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "README.md",
+      "changeType": "mod",
+      "additions": 23,
+      "deletions": 0,
+      "explanation": "New `dub stash` section above `dub undo` with quick usage examples and a link to the full docs page.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "QUICKSTART.md",
+      "changeType": "mod",
+      "additions": 22,
+      "deletions": 0,
+      "explanation": "Inserts `10.5) Branch-Aware Stash` walkthrough and adds an entry to the Fast Command List.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "SHA-based stash lookup",
+      "location": "packages/cli/src/commands/stash.ts:116",
+      "rationale": "External git stash activity (drop, pop, push) shifts stash@{N} indexes. Looking up by commit SHA avoids the wrong-stash footgun, but assumes git keeps stash commits identifiable until they're dropped — which it does."
+    },
+    {
+      "title": "Post-pop log cleanup is non-atomic by design",
+      "location": "packages/cli/src/commands/stash.ts:164",
+      "rationale": "git stash pop already removed the stash from git's stack. A subsequent log-write failure can't be rolled back, so we swallow with a warning. The next dub stash pop will surface the dangling entry, auto-remove it, and the user retries — confirmed by tests for the dangling path."
+    },
+    {
+      "title": "Override flag precedence: --on wins over --force",
+      "location": "packages/cli/src/commands/stash.ts:135",
+      "rationale": "When both are passed, --on wins. Documented in stash.mdx, covered by a dedicated test. A user passing both is most likely thinking 'put it on this specific branch'."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "packages/cli/src/commands/stash.test.ts (16 tests)",
+      "status": "done",
+      "evidence": "All push/pop/list paths plus all four issue acceptance-criterion paths + adversarial-review additions."
+    },
+    {
+      "kind": "unit",
+      "label": "packages/cli/src/lib/stash-log.test.ts (5 tests)",
+      "status": "done",
+      "evidence": "Ring buffer trim, corrupt-file tolerance, removal by SHA, prepend ordering."
+    },
+    {
+      "kind": "unit",
+      "label": "packages/cli/src/commands/mcp.test.ts (tools/list)",
+      "status": "done",
+      "evidence": "Asserts the three new tool names are exposed in tools/list ordering."
+    },
+    {
+      "kind": "manual",
+      "label": "Built-CLI end-to-end transcript in a temp repo",
+      "status": "done",
+      "evidence": ".reports/dub-42-qa.md captures stash, pop, --on, --force, list, dangling-entry auto-clean, and MCP tools/list verification."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 303 files in 162ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo: 2 successful, 2 total."
+    },
+    {
+      "name": "tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "935 passed / 99 files passed."
+    },
+    {
+      "name": "build",
+      "command": "pnpm build",
+      "status": "passed",
+      "evidence": "turbo: 2 successful, 2 total (FULL TURBO)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files in the staged diff; the feature is a CLI command and JSON state file with no browser-facing surface.",
+    "fallbackApprovedByUser": true,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-42-qa.md",
+    "caption": "Built-CLI end-to-end transcript: clean-tree refusal, stash on feat/a, list, mismatched pop refusal with hint, --on feat/a, --force, custom message, dangling auto-clean, MCP tools/list verification.",
+    "scenarios": [
+      "stash refuses on clean working tree",
+      "stash on feat/a records branch + writes log",
+      "stash list shows recorded entries with branch + ref",
+      "pop on feat/b refused with both --on and --force hints",
+      "pop --on feat/a checks out + applies",
+      "pop --force applies on feat/b regardless",
+      "stash with custom -m message",
+      "dangling entry auto-removed when stash dropped externally",
+      "MCP tools/list exposes dubstack.stash / stash-pop / stash-list"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New packages/cli/src/commands/stash.ts with push, pop, list subcommands",
+      "status": "satisfied",
+      "evidence": "Three exported functions wired through CLI subcommands + MCP tools."
+    },
+    {
+      "criterion": "Branch tracking via .git/dubstack/stash-log.json",
+      "status": "satisfied",
+      "evidence": "stash-log.ts (ring buffer, atomic write, corrupt-tolerant); covered by stash-log.test.ts."
+    },
+    {
+      "criterion": "Branch-mismatch refusal with --on and --force overrides",
+      "status": "satisfied",
+      "evidence": "stashPop's branch-mismatch DubError surfaces both flags in recovery hints; tests cover both override paths + precedence."
+    },
+    {
+      "criterion": "Tests for each path",
+      "status": "satisfied",
+      "evidence": "16 command tests + 5 lib tests; covers stash on A pop on A, A pop on B refused, A pop --on B, list shows recent stashes with branch context, plus edge cases."
+    },
+    {
+      "criterion": "Docs at apps/docs/content/docs/commands/stash.mdx",
+      "status": "satisfied",
+      "evidence": "Full usage, behavior, flag/error matrix, state-file schema, precedence rule documented; meta.json updated."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Critical (resolved): log entry leak when removeStashLogEntry fails after a successful pop — now swallowed with a warning since stashPop auto-cleans dangling entries on the next invocation.",
+      "Minor (resolved): missing test for --on <current-branch> — added.",
+      "Minor (resolved): missing test for --on + --force precedence — added + documented in stash.mdx."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "External dependencies",
+      "status": "None — uses existing execa, retry, DubError, state plumbing already in lib/."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive feature. No state-format change in state.json; new sibling file .git/dubstack/stash-log.json is auto-created on first stash. Old clients ignore the file. Safe to roll forward and back without state migration.",
+    "steps": [
+      {
+        "when": "Merge",
+        "label": "Ship via standard squash-merge to main",
+        "details": "All gates green; semantic-release picks up the feat(stash) conventional commit and cuts a minor version."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Docs auto-deploy from main",
+        "details": "stash.mdx + README + QUICKSTART updates ship with the same merge."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "78fef33ce0edc5fa9e1ef6832640c91ff74dcfe7",
+    "shortSha": "78fef33",
+    "message": "feat(stash): dub stash + dub stash pop — branch-aware stashing [DUB-42]"
+  }
+}
