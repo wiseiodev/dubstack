@@ -41,7 +41,7 @@ export interface DoctorResult {
 
 export async function doctor(
   cwd: string,
-  options: { all?: boolean; fetch?: boolean } = {},
+  options: { all?: boolean; fetch?: boolean; skipGithub?: boolean } = {},
 ): Promise<DoctorResult> {
   const result: DoctorResult = {
     healthy: true,
@@ -98,7 +98,9 @@ export async function doctor(
 
   for (const branch of allBranches) {
     if (branch.type === 'root') continue;
-    await appendBranchHealthIssues(branch, cwd, result.issues);
+    await appendBranchHealthIssues(branch, cwd, result.issues, {
+      skipGithub: options.skipGithub ?? false,
+    });
   }
 
   result.healthy = result.issues.length === 0;
@@ -120,6 +122,7 @@ async function appendBranchHealthIssues(
   branch: Branch,
   cwd: string,
   issues: DoctorIssue[],
+  options: { skipGithub: boolean },
 ): Promise<void> {
   const hasLocal = await branchExists(branch.name, cwd);
   const hasRemote = await remoteBranchExists(branch.name, cwd);
@@ -174,17 +177,19 @@ async function appendBranchHealthIssues(
     }
 
     let githubBaseRef: string | null = null;
-    try {
-      const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
-      githubBaseRef = prInfo.state === 'OPEN' ? prInfo.baseRefName : null;
-    } catch (error) {
-      pushGithubCheckFailure(
-        issues,
-        branch.name,
-        error,
-        `Could not query GitHub PR info for '${branch.name}'.`,
-      );
-      githubBaseRef = null;
+    if (!options.skipGithub) {
+      try {
+        const prInfo = await getBranchPrSyncInfo(branch.name, cwd);
+        githubBaseRef = prInfo.state === 'OPEN' ? prInfo.baseRefName : null;
+      } catch (error) {
+        pushGithubCheckFailure(
+          issues,
+          branch.name,
+          error,
+          `Could not query GitHub PR info for '${branch.name}'.`,
+        );
+        githubBaseRef = null;
+      }
     }
 
     if (githubBaseRef) {
