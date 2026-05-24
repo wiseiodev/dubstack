@@ -12,6 +12,7 @@
     "submit",
     "sync",
     "restack",
+    "split",
     "merge-next",
     "post-merge",
     "fold",
@@ -20,6 +21,7 @@
     "doctor",
     "track",
     "rename",
+    "stash",
     "skills"
   ]
 }

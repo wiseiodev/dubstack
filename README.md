@@ -644,6 +644,29 @@ dub move feat/inserted --before feat/auth-login
 dub move feat/inserted --after feat/auth-base
 ```
 
+### `dub stash` / `dub stash pop` / `dub stash list`
+
+Branch-aware stash. Records which branch a stash was created on so `pop` can refuse a branch-mismatched apply. Useful when you started work on the wrong branch and want to move it elsewhere.
+
+```bash
+# Stash on the current branch (records branch in .git/dubstack/stash-log.json)
+dub stash
+
+# Pop most recent — refuses unless current branch matches the recorded branch
+dub stash pop
+
+# Checkout feat/other, then pop the stash there
+dub stash pop --on feat/other
+
+# Pop onto the current branch regardless of where the stash was created
+dub stash pop --force
+
+# Show recorded stashes with branch context
+dub stash list
+```
+
+See [`dub stash` docs](https://dubstack.dev/docs/commands/stash) for the full behavior, error matrix, and stash-log schema.
+
 ### `dub undo`
 
 Undo the last `dub create`, `dub restack`, or `dub move` operation.

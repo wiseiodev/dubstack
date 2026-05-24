@@ -1,0 +1,27 @@
+{
+  "description": "Linear 3-deep stack on top of trunk `main`. Bottom PR (#1, branch feat/a) merges. PR #2 (feat/b) had base feat/a and must retarget to main. PR #3 (feat/c) had base feat/b and is unchanged.",
+  "stack_id": "stk_linear",
+  "trunk": "main",
+  "merged": {
+    "number": 1,
+    "branch": "feat/a",
+    "parent": null,
+    "depth": 1
+  },
+  "dependents": [
+    {
+      "number": 2,
+      "branch": "feat/b",
+      "parent": "feat/a",
+      "depth": 2,
+      "expectedNewBase": "main"
+    },
+    {
+      "number": 3,
+      "branch": "feat/c",
+      "parent": "feat/b",
+      "depth": 3,
+      "expectedNoChange": true
+    }
+  ]
+}

@@ -352,4 +352,219 @@ describe('resumeCleanup', () => {
     getInfo.mockRestore();
     retarget.mockRestore();
   });
+
+  it('split-track-branch: adds new branch to state when git has it but state does not', async () => {
+    // Simulate a crashed split: new branch exists in git but state still only
+    // knows about main + the source branch.
+    await gitInRepo(dir, ['checkout', '-b', 'feat/source']);
+    await commitFile('a.ts', 'a\n', 'feat: a');
+    await gitInRepo(dir, ['checkout', '-b', 'feat/new', 'main']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            {
+              name: 'feat/source',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'split-track-branch',
+      branch: 'feat/new',
+      parent: 'main',
+      parentTip: 'main-tip-sha',
+      sourceBranch: 'feat/source',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0].type).toBe('split-track-branch');
+    const stacks = readState().stacks;
+    const branchNames = stacks
+      .flatMap((s) => s.branches.map((b) => b.name))
+      .sort();
+    expect(branchNames).toContain('feat/new');
+  });
+
+  it('split-track-branch: no-op when extractor rolled back (branch no longer exists in git)', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            {
+              name: 'feat/source',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'split-track-branch',
+      branch: 'feat/never-created',
+      parent: 'main',
+      parentTip: 'sha-doesnt-matter',
+      sourceBranch: 'feat/source',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(0);
+    expect(result.alreadyApplied).toHaveLength(1);
+    // State should be untouched: no phantom branch entry added.
+    const branchNames = readState()
+      .stacks.flatMap((s) => s.branches.map((b) => b.name))
+      .sort();
+    expect(branchNames).not.toContain('feat/never-created');
+  });
+
+  it('split-track-branch: no-op when branch already in state', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/already-tracked']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            {
+              name: 'feat/already-tracked',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'split-track-branch',
+      branch: 'feat/already-tracked',
+      parent: 'main',
+      parentTip: 'sha-doesnt-matter',
+      sourceBranch: 'feat/source',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(0);
+    expect(result.alreadyApplied).toHaveLength(1);
+  });
+
+  it('split-clear-source-pr: nulls pr_number when set, no-op when already null', async () => {
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            {
+              name: 'feat/with-pr',
+              parent: 'main',
+              pr_number: 42,
+              pr_link: 'https://github.com/x/y/pull/42',
+            },
+            {
+              name: 'feat/no-pr',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    await appendCleanupOperation(dir, journal, {
+      type: 'split-clear-source-pr',
+      branch: 'feat/with-pr',
+    });
+    await appendCleanupOperation(dir, journal, {
+      type: 'split-clear-source-pr',
+      branch: 'feat/no-pr',
+    });
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(1);
+    expect(result.alreadyApplied).toHaveLength(1);
+    const branches = readState().stacks[0].branches as unknown as Array<{
+      name: string;
+      pr_number: number | null;
+      pr_link: string | null;
+    }>;
+    const withPr = branches.find((b) => b.name === 'feat/with-pr');
+    expect(withPr?.pr_number).toBeNull();
+    expect(withPr?.pr_link).toBeNull();
+  });
+
+  it('split-track-branch: subsequent ops in the same journal see the newly-tracked branch', async () => {
+    // Two sibling splits land in git; both track-branch ops journal; replay
+    // must add both, and the second op must not see a stale snapshot of
+    // state that excludes the first.
+    await gitInRepo(dir, ['checkout', '-b', 'feat/source']);
+    await commitFile('a.ts', 'a\n', 'feat: a');
+    await gitInRepo(dir, ['checkout', '-b', 'feat/first', 'main']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/second', 'main']);
+    await gitInRepo(dir, ['checkout', 'main']);
+
+    writeState({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            { name: 'main', parent: null, type: 'root' },
+            {
+              name: 'feat/source',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    const journal = await startCleanupJournal(dir);
+    for (const branch of ['feat/first', 'feat/second']) {
+      await appendCleanupOperation(dir, journal, {
+        type: 'split-track-branch',
+        branch,
+        parent: 'main',
+        parentTip: 'main-tip',
+        sourceBranch: 'feat/source',
+      });
+    }
+
+    const result = await resumeCleanup(dir);
+
+    expect(result.applied).toHaveLength(2);
+    const branchNames = readState()
+      .stacks.flatMap((s) => s.branches.map((b) => b.name))
+      .sort();
+    expect(branchNames).toContain('feat/first');
+    expect(branchNames).toContain('feat/second');
+  });
 });
