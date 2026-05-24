@@ -10,7 +10,7 @@ import { getDubDir } from './state';
  */
 export interface UndoEntry {
   /** Which command created this snapshot. */
-  operation: 'create' | 'restack' | 'rename' | 'move' | 'pop';
+  operation: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'absorb';
   /** ISO timestamp of when the snapshot was taken. */
   timestamp: string;
   /** The branch user was on before the operation. */
@@ -57,7 +57,7 @@ export async function readUndoEntry(cwd: string): Promise<UndoEntry> {
   const undoPath = await getUndoPath(cwd);
   if (!fs.existsSync(undoPath)) {
     throw new DubError('Nothing to undo.', [
-      "DubStack tracks only the last 'create', 'restack', 'rename', 'move', or 'pop'; perform one to enable undo.",
+      "DubStack tracks only the last 'create', 'restack', 'rename', 'move', 'pop', or 'absorb'; perform one to enable undo.",
     ]);
   }
   const raw = fs.readFileSync(undoPath, 'utf-8');

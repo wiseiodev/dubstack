@@ -18,12 +18,12 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop';
+  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'absorb';
   details: string;
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, or `dub pop` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, or `dub absorb` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -181,10 +181,13 @@ export async function undo(cwd: string): Promise<UndoResult> {
   await writeState(entry.previousState, cwd);
   await clearUndoEntry(cwd);
 
+  const branchCount = Object.keys(entry.branchTips).length;
   const details =
     entry.operation === 'move'
-      ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+      ? `Restored ${branchCount} branches to pre-move state`
+      : entry.operation === 'absorb'
+        ? `Reset ${branchCount} branches to pre-absorb state`
+        : `Reset ${branchCount} branches to pre-restack state`;
 
   return {
     undone: entry.operation,
