@@ -5,6 +5,7 @@
     "repo",
     "create",
     "modify",
+    "pop",
     "checkout",
     "log",
     "navigate",
