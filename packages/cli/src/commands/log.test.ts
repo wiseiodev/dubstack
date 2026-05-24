@@ -799,6 +799,80 @@ describe('log', () => {
       expect(output).toContain('1 hour ago');
     });
 
+    it('omits PR JSON fields under --no-prs but keeps CI and commit metadata', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const json = await logJson(dir, { overview, prs: false });
+      const featA = json.stacks[0]?.root?.children[0];
+      expect(featA).not.toHaveProperty('prState');
+      expect(featA).not.toHaveProperty('prTitle');
+      expect(featA).not.toHaveProperty('reviewDecision');
+      expect(featA).not.toHaveProperty('draft');
+      expect(featA?.ciState).toBe('SUCCESS');
+      expect(featA?.committedRel).toBe('1 hour ago');
+      expect(featA?.shortSha).toBe('aaaa1111');
+      // Branch with overview but no PR also drops the explicit NONE fields.
+      const featB = featA?.children[0];
+      expect(featB).not.toHaveProperty('prState');
+      expect(featB).not.toHaveProperty('reviewDecision');
+      expect(featB).not.toHaveProperty('draft');
+      expect(featB?.ciState).toBe('NONE');
+    });
+
+    it('omits CI JSON field under --no-ci but keeps PR fields and commit metadata', async () => {
+      await seedLinearStack();
+      const overview = makeOverview([
+        makeBranchOverview('main', null),
+        makeBranchOverview('feat/a', 'main', {
+          pr: {
+            number: 42,
+            title: 'feat: a',
+            state: 'OPEN',
+            baseRefName: 'main',
+            mergedAt: null,
+            reviewDecision: 'APPROVED',
+            ciRollup: 'SUCCESS',
+            isDraft: false,
+          },
+          commit: {
+            committedRel: '1 hour ago',
+            authorEmail: 'a@x',
+            shortSha: 'aaaa1111',
+          },
+        }),
+        makeBranchOverview('feat/b', 'feat/a'),
+      ]);
+
+      const json = await logJson(dir, { overview, ci: false });
+      const featA = json.stacks[0]?.root?.children[0];
+      expect(featA?.prState).toBe('OPEN');
+      expect(featA?.reviewDecision).toBe('APPROVED');
+      expect(featA?.draft).toBe(false);
+      expect(featA).not.toHaveProperty('ciState');
+      expect(featA?.committedRel).toBe('1 hour ago');
+    });
+
     it('renders the correct PR-state glyph for draft, merged, closed, and changes-requested', async () => {
       await seedLinearStack();
       const overview = makeOverview([

@@ -386,17 +386,32 @@ async function renderNodeJson(
 
   const overview = overviewMap.get(branch.name);
   if (overview) {
+    const includePrs = options.prs !== false;
+    const includeCi = options.ci !== false;
     if (overview.pr) {
-      node.prState = overview.pr.state;
-      node.prTitle = overview.pr.title;
-      node.reviewDecision = normalizeReviewDecision(overview.pr.reviewDecision);
-      node.ciState = overview.pr.ciRollup;
-      node.draft = overview.pr.isDraft;
+      if (includePrs) {
+        node.prState = overview.pr.state;
+        node.prTitle = overview.pr.title;
+        node.reviewDecision = normalizeReviewDecision(
+          overview.pr.reviewDecision,
+        );
+        node.draft = overview.pr.isDraft;
+      }
+      if (includeCi) {
+        node.ciState = overview.pr.ciRollup;
+      }
     } else {
-      node.prState = 'NONE';
-      node.ciState = 'NONE';
-      node.draft = false;
-      node.reviewDecision = null;
+      // Explicit NONE/null lets consumers distinguish "overview present but no
+      // PR for this branch" from "no overview at all". Flag-gated the same way
+      // as the populated path so `--no-prs` / `--no-ci` are honored uniformly.
+      if (includePrs) {
+        node.prState = 'NONE';
+        node.draft = false;
+        node.reviewDecision = null;
+      }
+      if (includeCi) {
+        node.ciState = 'NONE';
+      }
     }
     if (overview.commit) {
       node.committedRel = overview.commit.committedRel;

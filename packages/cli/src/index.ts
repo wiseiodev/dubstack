@@ -19,7 +19,7 @@
  */
 
 import { createRequire } from 'node:module';
-import chalk from 'chalk';
+import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { branchInfoOutput } from './commands/branch';
@@ -1657,8 +1657,12 @@ async function printLog(
 
   const output = await log(cwd, logOptions);
   if (overview?.truncated && overview.branches.length > 0) {
+    // Use a scoped Chalk instance keyed off the same noColor decision the
+    // tree renderer honors — `chalk.yellow(...)` would otherwise still emit
+    // ANSI under `--no-color` since noColor only affects styleLogOutput.
+    const bannerChalk = noColor ? new Chalk({ level: 0 }) : chalk;
     console.log(
-      chalk.yellow(
+      bannerChalk.yellow(
         `ℹ Showing ${overview.branches.length}+ branches — some PR data may be stale.`,
       ),
     );
