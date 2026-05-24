@@ -25,7 +25,6 @@ import {
   findStackForBranch,
   getParent,
   readState,
-  type Stack,
 } from '../lib/state';
 import { computeRegions, type LogRegion } from './log';
 
@@ -131,14 +130,18 @@ export function computeAllRegions(
 }
 
 function regionRank(region: LogRegion): number {
+  // Higher rank wins when the same branch is classified differently across
+  // stacks. Intent: most-specific-to-current wins over the generic root /
+  // sibling fallbacks, but `root` still beats the per-stack fallbacks
+  // (`descendant` / `sibling-subtree`) so a shared trunk stays bold.
   switch (region) {
     case 'current':
       return 5;
     case 'ancestor':
       return 4;
-    case 'descendant':
-      return 3;
     case 'root':
+      return 3;
+    case 'descendant':
       return 2;
     case 'sibling-subtree':
       return 1;
@@ -206,19 +209,46 @@ async function safeOverview(
   } catch (err) {
     // PR metadata is best-effort — the picker still works without it.
     const message = err instanceof Error ? err.message : String(err);
+    if (/enoent/i.test(message)) {
+      return {
+        overview: null,
+        error: 'gh CLI not installed — install it to see PR metadata',
+      };
+    }
     return { overview: null, error: message };
   }
+}
+
+interface Stylers {
+  yellow: (text: string) => string;
+  green: (text: string) => string;
+}
+
+function makeStylers(noColor: boolean): Stylers {
+  if (noColor) {
+    return { yellow: (t) => t, green: (t) => t };
+  }
+  return { yellow: (t) => chalk.yellow(t), green: (t) => chalk.green(t) };
 }
 
 async function printDiffAgainstParent(
   branch: string,
   state: DubState,
   cwd: string,
+  stylers: Stylers,
 ): Promise<void> {
   const parent = getParent(state, branch);
   if (!parent) {
     console.log(
-      chalk.yellow(`No parent recorded for '${branch}' — nothing to diff.`),
+      stylers.yellow(`No parent recorded for '${branch}' — nothing to diff.`),
+    );
+    return;
+  }
+  if (!(await branchExists(parent, cwd))) {
+    console.log(
+      stylers.yellow(
+        `Parent branch '${parent}' is missing locally — cannot diff '${branch}'.`,
+      ),
     );
     return;
   }
@@ -229,7 +259,7 @@ async function printDiffAgainstParent(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.log(chalk.yellow(`Failed to run git diff: ${message}`));
+    console.log(stylers.yellow(`Failed to run git diff: ${message}`));
   }
 }
 
@@ -237,6 +267,7 @@ async function handlePickerOutcome(
   outcome: BranchPickerOutcome,
   state: DubState,
   cwd: string,
+  stylers: Stylers,
 ): Promise<{ done: { branch: string } | null } | { continueWith: string }> {
   if (outcome.type === 'checkout') {
     return { done: await checkout(outcome.branch, cwd) };
@@ -249,7 +280,7 @@ async function handlePickerOutcome(
       await openPrInBrowser(cwd, outcome.branch);
     } catch (err) {
       if (err instanceof DubError) {
-        console.log(chalk.yellow(err.message));
+        console.log(stylers.yellow(err.message));
       } else {
         throw err;
       }
@@ -259,14 +290,14 @@ async function handlePickerOutcome(
   if (outcome.type === 'copy') {
     const tool = await copyToClipboard(outcome.branch);
     if (tool) {
-      console.log(chalk.green(`✔ Copied '${outcome.branch}' to clipboard`));
+      console.log(stylers.green(`✔ Copied '${outcome.branch}' to clipboard`));
     } else {
-      console.log(chalk.yellow('(copy unavailable)'));
+      console.log(stylers.yellow('(copy unavailable)'));
     }
     return { continueWith: outcome.branch };
   }
   // outcome.type === 'diff'
-  await printDiffAgainstParent(outcome.branch, state, cwd);
+  await printDiffAgainstParent(outcome.branch, state, cwd, stylers);
   return { continueWith: outcome.branch };
 }
 
@@ -322,27 +353,29 @@ export async function interactiveCheckout(
 
   const regions = computeAllRegions(state, currentBranch);
 
+  const noColor =
+    options.noColor === true ||
+    chalk.level === 0 ||
+    process.env.NO_COLOR !== undefined;
+  const stylers = makeStylers(noColor);
+  const dim: (t: string) => string = noColor ? (t) => t : (t) => chalk.dim(t);
+
   if (options.refresh) {
-    console.log(chalk.dim('Loading PR data...'));
+    console.log(dim('Loading PR data...'));
   }
   const { overview, error: overviewError } = await safeOverview(
     cwd,
     options.refresh === true,
   );
   if (overviewError) {
-    console.log(chalk.yellow(`PR metadata unavailable: ${overviewError}`));
+    console.log(stylers.yellow(`PR metadata unavailable: ${overviewError}`));
   }
-
-  const noColor =
-    options.noColor === true ||
-    chalk.level === 0 ||
-    process.env.NO_COLOR !== undefined;
 
   let defaultBranch = currentBranch ?? undefined;
   const footerParts: string[] = [];
   if (overview?.truncated) {
     footerParts.push(
-      chalk.dim(
+      dim(
         `ℹ Showing ${overview.branches.length}+ branches — some PR data may be stale`,
       ),
     );
@@ -363,13 +396,10 @@ export async function interactiveCheckout(
       choices,
       defaultBranch,
       footer: footerParts.join('\n') || undefined,
+      noColor,
     });
-    const next = await handlePickerOutcome(outcome, state, cwd);
+    const next = await handlePickerOutcome(outcome, state, cwd, stylers);
     if ('done' in next) return next.done;
     defaultBranch = next.continueWith;
   }
 }
-
-// Re-export so other modules (and tests) can reach the lifecycle helpers
-// without depending on internal `lib/state` types.
-export type { Stack };

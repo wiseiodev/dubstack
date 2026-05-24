@@ -3,7 +3,6 @@ import {
   isDownKey,
   isEnterKey,
   isUpKey,
-  Separator,
   useEffect,
   useKeypress,
   useMemo,
@@ -13,6 +12,9 @@ import {
   useState,
 } from '@inquirer/core';
 import chalk from 'chalk';
+
+type Styler = (text: string) => string;
+const identity: Styler = (t) => t;
 
 /** One row in the branch picker. */
 export interface BranchPickerChoice {
@@ -39,9 +41,18 @@ export interface BranchPickerConfig {
   choices: BranchPickerChoice[];
   /** Pre-select this branch on open. Defaults to first selectable. */
   defaultBranch?: string;
-  /** Optional footer line (e.g. "Loading PR data..." or truncation notice). */
+  /**
+   * Optional footer line (e.g. "Loading PR data..." or truncation notice).
+   * Already-styled; the picker prints it verbatim under the choice list.
+   */
   footer?: string;
   pageSize?: number;
+  /**
+   * Disable all ANSI styling emitted by the picker itself. Choice labels
+   * are still rendered as-is — the caller is responsible for stripping
+   * color from them when needed (see `branch-picker-format.ts`).
+   */
+  noColor?: boolean;
 }
 
 function isSelectable(choice: BranchPickerChoice): boolean {
@@ -74,7 +85,11 @@ export const branchPickerPrompt: BranchPickerPrompt = createPrompt<
   BranchPickerOutcome,
   BranchPickerConfig
 >((config, done) => {
-  const { pageSize = 10 } = config;
+  const { pageSize = 10, noColor = false } = config;
+  const dim: Styler = noColor ? identity : (t) => chalk.dim(t);
+  const cyan: Styler = noColor ? identity : (t) => chalk.cyan(t);
+  const bold: Styler = noColor ? identity : (t) => chalk.bold(t);
+  const red: Styler = noColor ? identity : (t) => chalk.red(t);
   const [status, setStatus] = useState<'idle' | 'done'>('idle');
   const [searchTerm, setSearchTerm] = useState('');
   const prefix = usePrefix({ status });
@@ -185,35 +200,35 @@ export const branchPickerPrompt: BranchPickerPrompt = createPrompt<
     items: filtered,
     active,
     renderItem({ item, isActive }) {
+      // `usePagination` types `item` as `unknown`; safe because we always
+      // pass `filtered: BranchPickerChoice[]` as `items`.
       const choice = item as BranchPickerChoice;
       if (choice.disabled) {
-        const tag =
-          typeof choice.disabled === 'string' ? choice.disabled : '(disabled)';
-        return chalk.dim(`- ${choice.label} ${tag}`);
+        return dim(`- ${choice.label} ${choice.disabled}`);
       }
       const cursor = isActive ? cursorIcon : ' ';
       const line = `${cursor} ${choice.label}`;
-      return isActive ? chalk.cyan(line) : line;
+      return isActive ? cyan(line) : line;
     },
     pageSize,
     loop: false,
   });
 
-  const message = chalk.bold(config.message);
-  const searchStr = searchTerm ? chalk.cyan(searchTerm) : '';
+  const message = bold(config.message);
+  const searchStr = searchTerm ? cyan(searchTerm) : '';
   const header = [prefix, message, searchStr]
     .filter(Boolean)
     .join(' ')
     .trimEnd();
 
-  const helpLine = chalk.dim(
+  const helpLine = dim(
     [
-      `${chalk.bold('↑↓')} navigate`,
-      `${chalk.bold('⏎')} checkout`,
-      `${chalk.bold('p')} open PR`,
-      `${chalk.bold('d')} diff`,
-      `${chalk.bold('c')} copy`,
-      `${chalk.bold('esc')} cancel`,
+      `${bold('↑↓')} navigate`,
+      `${bold('⏎')} checkout`,
+      `${bold('p')} open PR`,
+      `${bold('d')} diff`,
+      `${bold('c')} copy`,
+      `${bold('esc')} cancel`,
     ].join(' • '),
   );
 
@@ -223,7 +238,7 @@ export const branchPickerPrompt: BranchPickerPrompt = createPrompt<
 
   let body: string;
   if (filtered.length === 0) {
-    body = chalk.red('> No branches match.');
+    body = red('> No branches match.');
   } else {
     body = renderedPage;
   }
@@ -231,6 +246,3 @@ export const branchPickerPrompt: BranchPickerPrompt = createPrompt<
   const parts = [body, config.footer ?? '', helpLine].filter(Boolean);
   return [header, parts.join('\n')];
 });
-
-/** Re-export for callers that want to add separators (e.g. between stacks). */
-export { Separator };

@@ -164,6 +164,43 @@ describe('branchPickerPrompt', () => {
     events.keypress({ name: 'up' });
     events.keypress({ name: 'return' }); // Enter on disabled row → no-op
     events.keypress({ name: 'escape' });
+    // Cancel resolves the prompt; checkout never fired on the disabled row
+    // (otherwise the assertion would observe `type: 'checkout', branch: 'main'`).
+    await expect(answer).resolves.toEqual({ type: 'cancel' });
+  });
+
+  it('emits no ANSI escape codes when noColor is true', async () => {
+    const { answer, events, getScreen } = await render(branchPickerPrompt, {
+      message: 'pick',
+      choices: makeChoices(),
+      footer: 'ℹ truncated',
+      noColor: true,
+    });
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape detection
+    expect(getScreen()).not.toMatch(/\x1b\[/);
+    events.keypress({ name: 'escape' });
+    await answer;
+  });
+
+  it('does not dispatch p/d/c when every choice is disabled', async () => {
+    // Only the (current) row exists, so `isSelectable(selected)` is false
+    // and the shortcut path must not fire `pr`/`diff`/`copy` on it.
+    const { answer, events } = await render(branchPickerPrompt, {
+      message: 'pick',
+      choices: [
+        {
+          value: 'main',
+          label: 'main',
+          searchKey: 'main',
+          disabled: '(current)',
+        },
+      ],
+    });
+    events.keypress({ name: 'p' });
+    events.keypress({ name: 'd' });
+    events.keypress({ name: 'c' });
+    events.keypress({ name: 'return' });
+    events.keypress({ name: 'escape' });
     await expect(answer).resolves.toEqual({ type: 'cancel' });
   });
 });

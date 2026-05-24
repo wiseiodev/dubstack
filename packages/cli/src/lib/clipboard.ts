@@ -1,8 +1,8 @@
 import { execa } from 'execa';
 
 /**
- * Best-effort clipboard copy. Tries `pbcopy` (macOS), `wl-copy` and `xclip`
- * (Linux), then `clip.exe` (Windows / WSL). Never throws — returns the
+ * Best-effort clipboard copy. Tries `pbcopy` (macOS); `wl-copy`, `xclip`,
+ * then `xsel` (Linux); and `clip` (Windows). Never throws — returns the
  * tool that succeeded, or `null` if every candidate is missing or errored.
  */
 export async function copyToClipboard(text: string): Promise<string | null> {
