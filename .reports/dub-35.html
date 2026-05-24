@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-35 - dub rename — rename a tracked branch (local + state + PR)</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-35</div>
+        <h1>DUB-35 - dub rename — rename a tracked branch (local + state + PR)</h1>
+        <div class="meta"><span><strong>8</strong> files</span>
+<span><span class="add">+617</span> / <span class="del">-3</span></span>
+<span>branch <strong>feature/dub-35-dub-rename-rename-a-tracked-branch-local-state-pr</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Add `dub rename` so users can rename a tracked branch and have DubStack propagate the change through state, child parent refs, and (when applicable) the remote — with single-level undo coverage.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>New `dub rename &lt;new&gt;` (or `dub rename &lt;old&gt; &lt;new&gt;`) command. Renames the branch in git, updates DubStack state and children&#39;s parent links, migrates the local `last-pushed` lease ref, pushes the new branch when a PR is linked, and records a single-level undo entry. `dub undo` reverses the rename in full (branch name, state, parent links, lease ref).</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Users frequently want to rename a stacked branch as the work clarifies (e.g. `feat/auth-spike` → `feat/auth-login`).</p>
+<p class="lede">Doing this by hand requires `git branch -m`, manually editing `.git/dubstack/state.json`, fixing every child&#39;s `parent`, and rePushing — easy to leave state out of sync.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>No `dub rename` command. Users had to `git branch -m` plus hand-edit `state.json` plus manually re-parent children.</li>
+<li>After a rename, `refs/dubstack/last-pushed/&lt;branch&gt;` was orphaned, which would have caused the next push to fall back to a bare `--force-with-lease` (losing race protection).</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`dub rename &lt;new&gt;` (or `dub rename &lt;old&gt; &lt;new&gt;`) updates branch name, state, children, and lease ref atomically.</li>
+<li>When a PR is linked, the renamed branch is pushed automatically (skippable via `--no-push`).</li>
+<li>`dub undo` rolls back the entire operation — name, state, parent links, lease ref — except the remote push itself.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/rename.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+173</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>The new command. Validates arguments and collisions (tracked, untracked-local, root branch, invalid ref, self-rename), saves a single undo entry before any mutation, runs `git branch -m`, migrates `refs/dubstack/last-pushed/&lt;branch&gt;`, updates branch.name + every child&#39;s parent in state, then pushes when a PR is linked.</p>
+    <div class="code"><pre>await renameBranch(oldName, newName, cwd);
+
+const trackedSha = await readLastPushedSha(oldName, cwd);
+if (trackedSha) {
+  await writeLastPushedSha(newName, trackedSha, cwd);
+  await deleteRef(lastPushedRef(oldName), cwd);
+}
+
+sourceBranch.name = newName;
+for (const child of childBranches) {
+  child.parent = newName;
+  reparentedChildren.push(child.name);
+}
+await writeState(state, cwd);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/undo.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+50</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Extends the existing one-level undo machinery to handle the new &#39;rename&#39; operation. Reverses the git rename, restores the previous state, and reverses the lease-ref migration. Refuses to clobber a pre-existing branch named `renameFrom`.</p>
+    <div class="code"><pre>if (await branchExists(renameFrom, cwd)) {
+  throw new DubError(
+    `Cannot undo rename: branch &#39;${renameFrom}&#39; already exists.`,
+    [...]
+  );
+}
+
+await renameBranch(renameTo, renameFrom, cwd);
+
+const trackedSha = await readLastPushedSha(renameTo, cwd);
+if (trackedSha) {
+  await writeLastPushedSha(renameFrom, trackedSha, cwd);
+  await deleteRef(lastPushedRef(renameTo), cwd);
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+26</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a small `renameBranch(old, new, cwd)` helper that wraps `git branch -m` with DubError + recovery hints. Works for both currently-checked-out and not-checked-out branches.</p>
+    <div class="code"><pre>export async function renameBranch(
+  oldName: string,
+  newName: string,
+  cwd: string,
+): Promise&lt;void&gt; {
+  try {
+    await execa(&#39;git&#39;, [&#39;branch&#39;, &#39;-m&#39;, oldName, newName], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to rename branch &#39;${oldName}&#39; to &#39;${newName}&#39;.`,
+        readGitCommandOutput(error),
+      ),
+      [...]
+    );
+  }
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/undo-log.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+5</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Extends UndoEntry.operation to include &#39;rename&#39; and adds optional `renameFrom`/`renameTo` fields. Backwards-compatible because existing &#39;create&#39;/&#39;restack&#39; entries leave the new fields undefined.</p>
+    <div class="code"><pre>operation: &#39;create&#39; | &#39;restack&#39; | &#39;rename&#39;;
+// ...
+/** For `rename`: the original branch name before the rename. */
+renameFrom?: string;
+/** For `rename`: the new branch name after the rename. */
+renameTo?: string;</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+54</span> <span class="del">-1</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Wires `dub rename` into the Commander program. Accepts `&lt;firstName&gt; [secondName]` plus a `--no-push` flag. Emits a green success line, a re-parent summary if children were touched, and a cleanup hint when the old remote branch may linger.</p>
+    <div class="code"><pre>program
+  .command(&#39;rename&#39;)
+  .argument(&#39;&lt;firstName&gt;&#39;, &#39;New name (current branch) or old name&#39;)
+  .argument(&#39;[secondName]&#39;, &#39;New name when renaming a specific tracked branch&#39;)
+  .option(&#39;--no-push&#39;, &#39;Skip pushing the renamed branch even if a PR exists&#39;)</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/rename.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+247</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>16 integration tests covering rename + collision + undo + lease-ref migration. Uses the repo&#39;s `createTestRepo()` helper so each test runs against a real isolated git repo.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/commands/rename.mdx</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+61</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Public docs page describing usage, behavior, flags, error conditions, and undo semantics.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">apps/docs/content/docs/commands/meta.json</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+1</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `rename` to the Commands nav after `track`.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Lease-ref migration on rename + undo</div>
+    <div class="note"><code>packages/cli/src/commands/rename.ts and undo.ts</code> The `refs/dubstack/last-pushed/&lt;branch&gt;` ref protects future pushes from racing third parties. Forgetting to migrate it on rename would silently downgrade the next push to a bare `--force-with-lease`. Worth confirming both the forward migration and the undo reversal cover the edge case where the branch was never previously submitted (no ref to migrate).</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">PR head handling vs. issue spec step 5</div>
+    <div class="note"><code>packages/cli/src/commands/rename.ts (no `gh pr edit --head` call)</code> The issue spec mentions `gh pr edit &lt;num&gt; --head &lt;new&gt;`, but the gh CLI does NOT support `--head` on `pr edit` and the GitHub REST API does not allow editing a PR&#39;s head ref. The implementation pushes the renamed branch and surfaces a cleanup hint instead — the old remote branch is intentionally left alone so the existing PR stays valid. Confirm this is acceptable trade-off.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Undo refuses to clobber an existing `renameFrom` branch</div>
+    <div class="note"><code>packages/cli/src/commands/undo.ts</code> If a user renamed `feat/old → feat/new` and then independently created a new `feat/old`, `dub undo` must not silently overwrite that branch. We throw a DubError with recovery hints instead. Worth a second look at the failure message.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">16 rename tests in packages/cli/src/commands/rename.test.ts</div>
+      <div class="note">Covers basic rename, two-arg rename, child re-parent, all 5 error paths, undo round-trip, last-pushed migration round-trip, PR-aware push, --no-push.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Undo tests in packages/cli/src/commands/undo.test.ts</div>
+      <div class="note">Existing create/restack undo tests still pass after extending UndoEntry.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Full repo suite (819 tests across 89 files)</div>
+      <div class="note">pnpm test passes end-to-end.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 269 files in 56ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. 2 packages, no errors.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest (full suite)</div>
+      <div class="note">Command: pnpm test. 89 test files, 819 tests passing.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Fallback QA covering 15 behavioral scenarios via integration tests against real git repos.</div>
+      <div class="note">Pure CLI change. No .tsx files modified; no browser-demoable surface.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-35-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Rename current branch</li>
+<li>Rename specific branch (old + new args) from another branch</li>
+<li>Re-parent children</li>
+<li>Reject tracked-name collision</li>
+<li>Reject untracked-local-name collision</li>
+<li>Reject invalid git ref name</li>
+<li>Reject untracked source</li>
+<li>Reject root-branch rename</li>
+<li>Reject self-rename</li>
+<li>Save undo entry with operation=&#39;rename&#39; + renameFrom/renameTo</li>
+<li>Undo restores name + state + child parents</li>
+<li>last-pushed ref migrates on rename</li>
+<li>last-pushed ref restored on undo</li>
+<li>Push triggered when PR linked; skipped otherwise</li>
+<li>--no-push skips push even with PR</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">New packages/cli/src/commands/rename.ts</div>
+      <div class="note">Created with full implementation (173 lines).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Validation, git branch rename, state update, child re-parenting, PR edit, push</div>
+      <div class="note">All steps implemented. Note: gh CLI / GitHub API do not allow editing PR head — substituted with push of renamed branch + cleanup hint for the old remote.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Undo log entry</div>
+      <div class="note">UndoEntry extended with &#39;rename&#39; operation; saveUndoEntry called before mutations.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests for rename, collision, undo</div>
+      <div class="note">16 tests in rename.test.ts including all 3 explicit collision/undo cases plus 13 more.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Docs at apps/docs/content/docs/commands/rename.mdx</div>
+      <div class="note">Created with usage, flags, error table, undo semantics. Added to commands meta.json nav.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Resolved: forward rename now migrates refs/dubstack/last-pushed/&lt;old&gt; to &lt;new&gt;; undo reverses it.</li>
+<li>Resolved: removed noisy &#39;No PR linked — nothing to push&#39; line that fired on every rename without a PR.</li>
+<li>Reviewer initially flagged an undo checkout ordering issue but self-dismissed it after tracing git&#39;s `branch -m` HEAD update semantics.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">No external dependencies detected</div>
+  <div class="note">n/a</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Ship as a new CLI command in the next release. No flags or migrations. Existing undo entries remain valid because the new fields are optional.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">Merge</div>
+  <div class="label">Standard squash merge to main</div>
+  <div class="note">Conventional commit `feat(rename): ...` so semantic-release picks it up.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-release</div>
+  <div class="label">Verify in real repo</div>
+  <div class="note">Run `dub rename` on a sandbox repo with a linked PR to confirm push + cleanup hint behave as documented.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>cc3837f</strong> <code>cc3837f269afd4f2b9e4aeab11714f2b0cb800e9</code></div>
+  <pre>feat(rename): add dub rename command [DUB-35]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">rename.ts</a>
+<a href="#tour" class="sub">undo.ts</a>
+<a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">undo-log.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
