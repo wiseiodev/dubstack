@@ -1072,6 +1072,11 @@ program
     '-a, --all',
     'Show branches across all tracked stacks in interactive selection',
   )
+  .option(
+    '--refresh',
+    'Bypass the 30s PR/CI overview cache and refetch from GitHub',
+  )
+  .option('--no-color', 'Disable ANSI colors in the picker')
   .description('Checkout a branch (interactive picker if no name given)')
   .action(
     async (
@@ -1081,6 +1086,8 @@ program
         showUntracked?: boolean;
         stack?: boolean;
         all?: boolean;
+        refresh?: boolean;
+        color?: boolean;
       },
     ) => {
       if (branch) {
@@ -1095,6 +1102,8 @@ program
           showUntracked: options.showUntracked,
           stack: options.stack,
           all: options.all,
+          refresh: options.refresh,
+          noColor: options.color === false,
         });
         if (result) {
           console.log(chalk.green(`✔ Switched to '${result.branch}'`));

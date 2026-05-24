@@ -1,6 +1,6 @@
 ---
 title: dub checkout
-description: Checkout a branch directly or use interactive search, plus stack navigation commands.
+description: Checkout a branch directly or use the interactive picker, plus stack navigation commands.
 ---
 
 ## Checkout
@@ -9,7 +9,7 @@ description: Checkout a branch directly or use interactive search, plus stack na
 # Checkout explicit branch
 dub checkout feat/auth-login
 
-# Interactive picker
+# Interactive picker (fuzzy search + rich branch metadata)
 dub checkout
 
 # Checkout trunk for current tracked stack
@@ -20,6 +20,9 @@ dub checkout --show-untracked
 
 # Scope to current stack
 dub checkout --stack
+
+# Bypass the 30s PR/CI cache
+dub checkout --refresh
 ```
 
 | Flag | Description |
@@ -27,8 +30,53 @@ dub checkout --stack
 | `--trunk` | Checkout stack trunk |
 | `--show-untracked` | Include non-tracked local branches in picker |
 | `--stack` | Restrict picker to current stack |
+| `--refresh` | Bypass the 30s PR/CI overview cache and refetch from GitHub |
+| `--no-color` | Disable ANSI colors in the picker |
 
 **Aliases:** `dub co`
+
+### Interactive picker
+
+Each row in the picker shows the branch name (colored by stack region) followed
+by PR number, review status, CI rollup, and last-commit age:
+
+```
+feat/auth-login   #101 · ✔ Approved · CI ✔ · 2h ago
+feat/auth-signup  #102 · ✏ Draft    · CI − · 1h ago
+feat/auth-tests        2 hours ago
+```
+
+PR metadata is populated from a 30-second on-disk cache at
+`.git/dubstack/overview-cache.json` so the picker renders instantly. Pass
+`--refresh` to force a fresh `gh pr list` round-trip.
+
+Branch names are colored by **stack region** relative to the current branch:
+
+| Region | Style |
+|---|---|
+| `current` | disabled `(current)` marker |
+| `ancestor` | cyan (on the parent path) |
+| `descendant` | neutral |
+| `sibling-subtree` | dim |
+| `root` | bold (the stack trunk) |
+
+### Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Navigate the list |
+| `Enter` | Checkout the highlighted branch |
+| `p` | Open the highlighted branch's PR in the browser |
+| `d` | Run `git diff <parent>...<branch>` against the parent and resume the picker |
+| `c` | Copy the branch name to the clipboard (best-effort `pbcopy` / `wl-copy` / `xclip` / `clip`) |
+| `Esc` / `q` / `Ctrl-C` | Cancel without switching branches |
+
+`p`, `d`, and `c` only fire when the search input is empty so typing branch
+names containing those letters keeps filtering. After `p`/`d`/`c` the picker
+re-opens with the same branch highlighted so you can chain actions.
+
+When no clipboard tool is available, `c` prints `(copy unavailable)` instead of
+erroring.
 
 ## Stack Navigation
 
