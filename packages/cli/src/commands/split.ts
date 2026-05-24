@@ -29,7 +29,7 @@ import {
   getDiffBetween,
   getDiffFileNamesBetween,
   hasStagedChanges,
-  hasUnstagedChanges,
+  hasUnstagedTrackedChanges,
   InteractivePatchQuitError,
   interactiveResetPatch,
   isValidBranchName,
@@ -764,7 +764,7 @@ async function extractByHunks(
     // generic "tree is dirty" check would always be true even when the user
     // unstaged nothing. Check the unstaged diff specifically — that's exactly
     // the content earmarked for the source branch.
-    const unstagedRemaining = await hasUnstagedChanges(cwd);
+    const unstagedRemaining = await hasUnstagedTrackedChanges(cwd);
 
     if (!stagedRemaining) {
       // Everything was unstaged — nothing left for the new branch.

@@ -43,6 +43,7 @@ import { mergeNext } from './commands/merge-next';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
+import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
@@ -805,7 +806,9 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create, dub restack, or dub rename operation')
+  .description(
+    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+  )
   .addHelpText(
     'after',
     `
@@ -1703,6 +1706,39 @@ After the split, 'dub restack' runs automatically so any descendants follow
 the source branch's new tip. Pass '--no-restack' to skip that step.`,
   )
   .action(runSplit);
+
+program
+  .command('pop')
+  .description(
+    'Pop the last commit(s) off the current branch into the staging area',
+  )
+  .option(
+    '-n, --steps <count>',
+    'Number of commits to pop (default: 1)',
+    parsePositiveInt,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub pop                Pop last commit into staged changes
+  $ dub pop --steps 3      Squash last 3 commits into staged changes
+  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)`,
+  )
+  .action(async (options: { steps?: number }) => {
+    const result = await pop(process.cwd(), { steps: options.steps });
+    const noun = result.steps === 1 ? 'commit' : 'commits';
+    console.log(
+      chalk.green(
+        `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
+      ),
+    );
+  });
 
 program
   .command('pr')
