@@ -1,0 +1,317 @@
+{
+  "meta": {
+    "workId": "DUB-40",
+    "title": "dub unlink — remove a parent-child dependency without deleting branches",
+    "artifactId": "dub-40",
+    "repo": "dubstack/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-40-dub-unlink-remove-a-parent-child-dependency-without-deleting",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-40",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 11,
+    "additions": 1057,
+    "deletions": 3,
+    "diffStat": "11 files changed, 1057 insertions(+), 3 deletions(-)"
+  },
+  "prompt": "Implement `dub unlink` end-to-end per DUB-40: detach a tracked branch from its parent, promote it to its own stack, retarget its PR to the original trunk through the existing cleanup journal infrastructure, ship with full test coverage and docs.",
+  "tldr": "New `dub unlink <branch>` command splits a tracked branch (and optionally its descendants) into its own stack without touching any local git branches; retargets the open PR to the original trunk via a journaled `gh pr edit` so a crash is resumable with `dub continue`.",
+  "why": {
+    "motivation": [
+      "DubStack had no first-class way to break a parent edge in state without deleting the branch or its descendants.",
+      "Tier 3 power-command gap: users had to manually edit `.git/dubstack/state.json` to split a stack.",
+      "Builds on Tier 0/1 infrastructure (DubError, cleanup journal, undo log) so it inherits crash-safety and recovery uniformly."
+    ],
+    "before": [
+      "No `unlink.ts` command existed.",
+      "Splitting a stack required hand-editing JSON or untracking + retracking, both of which lose PR linkage."
+    ],
+    "after": [
+      "`dub unlink <branch>` detaches the branch in state; new stack rooted at `<branch>` with `type: 'root'`, `parent: null`, `parent_revision` cleared.",
+      "`--keep-children` (default) moves descendants with `<branch>`; `--orphan-children` leaves them on the original parent.",
+      "`--no-retarget` opts out of the `gh pr edit` and prints the manual command.",
+      "Open PR is retargeted to the original trunk, with the retarget op journaled so `dub continue` resumes a crash mid-`gh pr edit`.",
+      "`dub undo` rolls the split back and discards the pending cleanup journal to keep the two recovery paths consistent.",
+      "Exposed as an MCP tool (`dubstack.unlink`)."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/unlink.ts",
+      "changeType": "new",
+      "additions": 257,
+      "deletions": 0,
+      "explanation": "Core command: validates inputs, plans the PR retarget against the original trunk, opens a cleanup journal recording only the retarget op (the state split itself is a single atomic writeState), mutates state, persists an `unlink` undo entry, runs `retargetPrBase` if not skipped, then clears the journal.",
+      "snippet": "const journal = await startCleanupJournal(cwd);\nif (plannedRetarget) {\n  await appendCleanupOperation(cwd, journal, {\n    type: 'retarget',\n    branch: plannedRetarget.branch,\n    newBase: plannedRetarget.newBase,\n  });\n}\n// ...state mutation...\nawait writeState(state, cwd);\nawait saveUndoEntry({ operation: 'unlink', ... }, cwd);\nif (plannedRetarget) {\n  await retargetPrBase(plannedRetarget.branch, plannedRetarget.newBase, cwd);\n}\nawait clearCleanupJournal(cwd);",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 89,
+      "deletions": 0,
+      "explanation": "Registers the `dub unlink` Commander command. Validates `--keep-children` and `--orphan-children` are mutually exclusive at the CLI layer, surfaces a yellow warning + manual `gh pr edit` hint when `--no-retarget` skipped a PR retarget.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 44,
+      "deletions": 0,
+      "explanation": "Adds the `dubstack.unlink` tool to the MCP surface (mutating: true) with input schema and a handler that delegates to `unlink(cwd, ...)`. Also adds the field to `HISTORY_ARG_KEYS` so MCP tool invocations show up in `dub history`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/undo.ts",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 1,
+      "explanation": "Extends undo handling to `unlink`. Reuses the restack/move force-restore loop (no-op for unlink since `branchTips` is empty) and additionally clears any pending cleanup journal so a stale retarget op can't fire on a branch that's been moved back to its original stack.",
+      "snippet": "if (entry.operation === 'unlink') {\n  // Undoing the split must also discard any pending journaled retarget\n  // from the original unlink — otherwise `dub continue` would retarget\n  // a branch that's now back in its original stack.\n  await clearCleanupJournal(cwd);\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/undo-log.ts",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 1,
+      "explanation": "Adds `'unlink'` to the `UndoEntry.operation` discriminator so the new operation is type-safe end to end.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/unlink.test.ts",
+      "changeType": "new",
+      "additions": 362,
+      "deletions": 0,
+      "explanation": "10 unit tests covering: mid-stack unlink with PR retarget, leaf unlink, --orphan-children, --no-retarget with and without a PR, journal-stays-on-disk on retarget failure, root rejection, untracked rejection, dirty worktree rejection, PR-already-on-trunk no-op.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/unlink-resume.test.ts",
+      "changeType": "new",
+      "additions": 130,
+      "deletions": 0,
+      "explanation": "Integration test that exercises a real cleanup journal on disk: forces `retargetPrBase` to throw, asserts the state split persisted and the journal contains the retarget op, then calls `resumeCleanup` and confirms the retarget runs and the journal is cleared.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/undo.test.ts",
+      "changeType": "mod",
+      "additions": 43,
+      "deletions": 1,
+      "explanation": "Regression test for the undo-clears-journal behavior: seeds an `unlink` undo entry plus a journal with a pending retarget op, runs `dub undo`, and asserts the journal is gone afterward.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.test.ts",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Updates the canonical `tools/list` expectation to include `dubstack.unlink`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/unlink.mdx",
+      "changeType": "new",
+      "additions": 101,
+      "deletions": 0,
+      "explanation": "Public docs: usage, flags, before/after tree diagrams for default and --orphan-children, crash-safety semantics, error table, related commands.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Adds `unlink` to the docs sidebar between `move` and `undo`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Crash safety of journal + writeState + retarget ordering",
+      "location": "packages/cli/src/commands/unlink.ts:160-235",
+      "rationale": "Mirrors the `move.ts` pattern: journal opened before writeState, undo entry saved before the retarget runs, journal cleared only on success. The retarget op alone is journaled — the state split itself is atomic via a single writeState. Trace each crash window to confirm `dub continue` can recover."
+    },
+    {
+      "title": "Promotion to a new root invariants",
+      "location": "packages/cli/src/commands/unlink.ts:190-203",
+      "rationale": "When `<branch>` becomes a root we set `type: 'root'`, `parent: null`, and explicitly clear `parent_revision`. `assertStateInvariants` runs immediately after. Confirm this matches DubStack's root semantics and that downstream callers (restack, log, doctor) handle a non-trunk-named root."
+    },
+    {
+      "title": "Undo + journal coexistence",
+      "location": "packages/cli/src/commands/undo.ts:144-150",
+      "rationale": "The undo path for `unlink` explicitly clears the cleanup journal. This is a tighter pattern than `move` uses (where the journal can survive an undo). Confirm this is the desired behavior — the same change could be applied to `move` in a follow-up but is deliberately out of scope here."
+    },
+    {
+      "title": "PR retarget target",
+      "location": "packages/cli/src/commands/unlink.ts:125-156",
+      "rationale": "We retarget to the original stack's root (`type: 'root'` branch). This matches `dub trunk`'s own definition of trunk. If a stack's root is itself a sub-branch (rare), the PR will end up based on that sub-branch rather than the git default branch. Spec-compliant per DUB-40 but worth double-checking."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "unlink command — 10 cases covering all flags + error paths",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/unlink.test.ts (pnpm test)"
+    },
+    {
+      "kind": "integration",
+      "label": "Crash mid-retarget → resumeCleanup replays the journal",
+      "status": "done",
+      "evidence": "packages/cli/test/commands/unlink-resume.test.ts (pnpm test)"
+    },
+    {
+      "kind": "integration",
+      "label": "dub undo discards pending cleanup journal for unlink",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/undo.test.ts (pnpm test)"
+    },
+    {
+      "kind": "manual",
+      "label": "Sandbox end-to-end (default, --orphan-children, undo, root rejection, mutex flag guard)",
+      "status": "done",
+      "evidence": ".reports/dub-40-qa.md"
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 302 files in 629ms. No errors."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "dubstack + docs both clean (tsc --noEmit)"
+    },
+    {
+      "name": "unit + integration tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "926 tests passed across 99 test files (up from 924 baseline)"
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No committed .tsx files changed and no browser surface; CLI behavior is observable from terminal output plus on-disk state.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-40-qa.md",
+    "caption": "Sandbox transcript: default unlink, undo, --orphan-children, root rejection, --keep-children + --orphan-children mutex guard.",
+    "scenarios": [
+      "Default `dub unlink feat/auth-login` on main→feat/auth-base→feat/auth-login→feat/auth-mfa: split into two stacks with feat/auth-login as new root.",
+      "`dub undo`: restored pre-unlink shape exactly.",
+      "`dub unlink feat/auth-login --orphan-children`: direct child re-parented onto feat/auth-base; new stack contains only feat/auth-login.",
+      "`dub unlink main`: rejected with DubError + recovery hint.",
+      "`dub unlink ... --keep-children --orphan-children`: rejected at CLI layer with DubError + recovery hint."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New `packages/cli/src/commands/unlink.ts`",
+      "status": "satisfied",
+      "evidence": "File created, 257 lines."
+    },
+    {
+      "criterion": "State split into two stacks",
+      "status": "satisfied",
+      "evidence": "Unit test 'promotes a mid-stack branch to a new root' + sandbox state.json inspection."
+    },
+    {
+      "criterion": "PR retargeting (or skip with warning per flag), journaled via `CleanupRetargetOp`",
+      "status": "satisfied",
+      "evidence": "Retarget unit test asserts the appendCleanupOperation call with a retarget op + the resume integration test."
+    },
+    {
+      "criterion": "`--keep-children` and `--orphan-children` flags work",
+      "status": "satisfied",
+      "evidence": "--orphan-children unit test + sandbox transcript; default keep-children covered by mid-stack test."
+    },
+    {
+      "criterion": "Undo log entry",
+      "status": "satisfied",
+      "evidence": "saveUndoEntry called with operation: 'unlink'; sandbox `dub undo` round-trip; undo.test.ts journal-clearing test."
+    },
+    {
+      "criterion": "Tests for each path + crash-resume",
+      "status": "satisfied",
+      "evidence": "10 unit tests in unlink.test.ts + integration test unlink-resume.test.ts."
+    },
+    {
+      "criterion": "Docs at `apps/docs/content/docs/commands/unlink.mdx`",
+      "status": "satisfied",
+      "evidence": "File created; meta.json updated to list it in the sidebar."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer raised concern about undo+journal coexistence (Finding 1). Addressed by clearing the cleanup journal as part of undo for `unlink` and added a regression test.",
+      "Reviewer raised concern about trunk resolution potentially picking a non-git-trunk root (Finding 2). Confirmed this matches DubStack's own `dub trunk` definition (the stack root) — no change needed.",
+      "Reviewer flagged a missing test for --no-retarget on a branch with no PR (Finding 4). Added the test."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-81 (Tier 3 implementation guardrails)",
+      "status": "Done — used the patterns doc, biome plugin rules pass."
+    },
+    {
+      "name": "DUB-76 (Post-merge journal unification, exposes CleanupRetargetOp)",
+      "status": "Done — reused `CleanupRetargetOp` and `resumeCleanup` unchanged."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive feature behind a new subcommand. No flag/gate; safe to merge after review.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship",
+        "details": "Build pipeline picks up `dub unlink` automatically — no migration, no config change."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Docs deploy",
+        "details": "apps/docs build will surface the new `/docs/commands/unlink` page in the sidebar."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "0348a878970003b6af6a86e2b4eea99f669eb89d",
+    "shortSha": "0348a87",
+    "message": "feat(unlink): detach branch from parent into its own stack [DUB-40]"
+  }
+}

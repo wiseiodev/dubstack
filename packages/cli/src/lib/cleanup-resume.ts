@@ -11,7 +11,13 @@ import {
   getBranchPrSyncInfo,
   retargetPrBase,
 } from './github';
-import { type Branch, readState, writeState } from './state';
+import {
+  addBranchToStack,
+  type Branch,
+  findStackForBranch,
+  readState,
+  writeState,
+} from './state';
 
 export interface CleanupResumeResult {
   /** Operations that actually changed on-disk state during replay. */
@@ -30,6 +36,12 @@ export interface CleanupResumeResult {
  * - `retarget`: updates the PR base via `gh pr edit` only if the current base
  *   differs from `newBase`; otherwise no-op. Skipped if the PR no longer
  *   exists.
+ * - `split-track-branch`: adds the newly-created sibling branch to state
+ *   when git has the branch but state hasn't recorded it yet; otherwise
+ *   no-op. Skipped if the branch no longer exists in git (extractor
+ *   rolled back).
+ * - `split-clear-source-pr`: nulls pr_number/pr_link on the source branch
+ *   when the source ended up empty and its PR was closed; otherwise no-op.
  *
  * The journal is cleared only after every operation completes without error.
  */
@@ -107,6 +119,42 @@ async function replayJournal(
         continue;
       }
       entry.parent = op.newParent;
+      stateDirty = true;
+      applied.push(op);
+      continue;
+    }
+    if (op.type === 'split-track-branch') {
+      // Skip when the branch already appears in state — the original run
+      // finished the state write before crashing.
+      if (branchIndex.has(op.branch)) {
+        alreadyApplied.push(op);
+        continue;
+      }
+      // Skip when the git branch is gone — the extractor rolled it back,
+      // so there is nothing to track.
+      const exists = await branchExists(op.branch, cwd);
+      if (!exists) {
+        alreadyApplied.push(op);
+        continue;
+      }
+      addBranchToStack(state, op.branch, op.parent, op.parentTip);
+      // Refresh the index so subsequent ops in the same journal see the
+      // newly-tracked branch.
+      const stack = findStackForBranch(state, op.branch);
+      const newEntry = stack?.branches.find((b) => b.name === op.branch);
+      if (newEntry) branchIndex.set(op.branch, newEntry);
+      stateDirty = true;
+      applied.push(op);
+      continue;
+    }
+    if (op.type === 'split-clear-source-pr') {
+      const entry = branchIndex.get(op.branch);
+      if (!entry || entry.pr_number == null) {
+        alreadyApplied.push(op);
+        continue;
+      }
+      entry.pr_number = null;
+      entry.pr_link = null;
       stateDirty = true;
       applied.push(op);
       continue;

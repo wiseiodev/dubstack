@@ -1,0 +1,116 @@
+---
+title: dub split
+description: Split the current branch into smaller sibling branches by commit, by file, by hunk, or with AI.
+---
+
+## Usage
+
+```bash
+# Interactive numbered checklist of commits to extract
+dub split --by-commit
+
+# Non-interactive: move specific files to a new branch (requires --name)
+dub split --by-file path/to/a.ts path/to/b.ts --name feat/new-slice
+
+# Interactive hunk-level picker (powered by `git reset --patch`)
+dub split --by-hunk
+
+# AI proposes a semantic split; you approve before it's applied
+dub split --ai
+```
+
+## Description
+
+`dub split` breaks a single overgrown branch into several smaller sibling
+branches that share the same parent. Each new branch is added to your stack
+metadata, restacked automatically, and ready to be submitted with `dub submit`.
+
+Pick the mode that matches how you want to slice the branch:
+
+| Mode | Best for |
+|---|---|
+| `--by-commit` | A branch with several commits that map cleanly to separable concerns. |
+| `--by-file <files...>` | A scripted split when you already know which files belong together. |
+| `--by-hunk` | Fine-grained refactors mixed into otherwise unrelated changes. |
+| `--ai` | "I'm not sure how to split this — propose something sensible." |
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--by-commit` | Interactively pick commits to extract. |
+| `--by-file <files...>` | Move the listed file paths to a new branch (requires `--name`). |
+| `--by-hunk` | Interactive `git reset --patch` style hunk picker (`y` moves a hunk back to source, `n` keeps it on the new branch). |
+| `--ai` | Ask the AI assistant to propose a semantic split. |
+| `--name <branch>` | New branch name for the extracted slice. Required for `--by-file`; prompted otherwise. |
+| `--commit-picks <indices>` | Skip the `--by-commit` prompt by passing 1-indexed positions (`"1,3-4"`). |
+| `--close-old-pr` | Close the source branch's existing PR (Graphite-style). Off by default. |
+| `--no-restack` | Skip the automatic restack of descendants after the split. |
+| `--dry-run` | AI mode only: print the proposal and exit without applying. |
+| `-y, --yes` | AI mode only: skip the approval prompt. |
+| `--no-interactive` | Disable interactive prompts; require flags for everything. |
+
+## How each mode works
+
+### `--by-commit`
+
+1. Lists every commit reachable from the current branch but not from its parent.
+2. Prompts you to enter the 1-indexed positions of the commits to move (e.g. `1 3` or `1-2,5`).
+3. Cherry-picks the selected commits onto a fresh sibling branch off the parent.
+4. Rewrites the source branch as `<parent> + remaining commits`.
+
+### `--by-file <files...>`
+
+1. Validates that each file actually changed between the parent and the current branch.
+2. Creates a new sibling branch off the parent and squashes the listed files' source-branch contents into a single commit there.
+3. Adds a "drop extracted files" commit on the source branch so the union of the two new branches matches what the source branch had before.
+
+### `--by-hunk`
+
+1. Creates a new sibling branch starting at the source branch tip.
+2. Soft-resets that branch to the parent so every source change lands in the index.
+3. Drops you into `git reset --patch HEAD` — answer **`y`** to a hunk to UNSTAGE it (it goes back to the **source** branch); answer **`n`** to keep it staged (it stays on the **new** branch).
+4. Stashes the unstaged remainder, commits the index on the new branch, then re-applies the stash on the source branch and commits there. If you press `q` to quit, both branches are rolled back to their pre-split state.
+
+### `--ai`
+
+1. Sends the branch diff, commit subjects, and file list to the configured AI provider.
+2. The model returns a JSON proposal: one entry per new branch with a name, file list, and one-line summary.
+3. The proposal is printed for review and you approve (`y`) before any branches change.
+4. Each proposed branch is then applied exactly like `--by-file`.
+
+Pass `--dry-run` to see the proposal without applying it. Pass `-y` / `--yes` in
+scripted contexts to skip the approval prompt.
+
+## PR handling
+
+A branch's PR survives a split. The defaults are non-destructive:
+
+- **Default**: the source branch's PR is **left intact**. The next `dub submit` force-pushes the new (smaller) shape onto it, and each new branch gets its own PR.
+- **`--close-old-pr`**: Graphite-style. The existing PR is closed with a comment that links to the new branches; the new branches each get their own PR on the next `dub submit`.
+- **Empty source fallback**: if the split leaves the source branch with no unique commits vs its parent, the old PR is closed automatically (GitHub rejects PRs with no diff). The closing comment links to the new branches.
+
+Either way, your review history is never silently lost — closures happen with a
+comment, never a delete.
+
+## After the split
+
+`dub split` runs `dub restack` automatically so any descendants follow the
+source branch's new tip. If you'd rather restack later (for example to chain
+several `dub split` runs together), pass `--no-restack`.
+
+## Examples
+
+```bash
+# Pull two files out of an overgrown branch
+dub split --by-file packages/api/handler.ts packages/api/types.ts --name feat/api
+
+# Pull commits 1 and 3 out (skip the prompt)
+dub split --by-commit --commit-picks 1,3 --name feat/extracted
+
+# Let the AI propose a split and apply it after you confirm
+dub split --ai
+
+# Close the existing PR while splitting (Graphite-style)
+dub split --by-commit --close-old-pr
+```
