@@ -1,0 +1,302 @@
+{
+  "meta": {
+    "workId": "DUB-33",
+    "title": "dub fold — combine a branch into its parent",
+    "artifactId": "dub-33",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-33-dub-fold-combine-a-branch-into-its-parent",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-33",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 9,
+    "additions": 1093,
+    "deletions": 0,
+    "diffStat": " .reports/dub-33-qa.md                        |  65 +++++\n apps/docs/content/docs/commands/fold.mdx     |  46 ++++\n apps/docs/content/docs/commands/meta.json    |   1 +\n packages/cli/src/commands/fold.ts            | 150 +++++++++++\n packages/cli/src/index.ts                    |  73 ++++++\n packages/cli/src/lib/fold.ts                 | 301 ++++++++++++++++++++++\n packages/cli/src/lib/git.ts                  |  71 ++++++\n packages/cli/src/lib/github.ts               |  26 ++\n packages/cli/test/commands/fold-tree.test.ts | 360 +++++++++++++++++++++++++++\n 9 files changed, 1093 insertions(+)"
+  },
+  "prompt": "Implement `dub fold` so users can combine a stacked branch back into its parent (`gt fold` equivalent): fast-forward or squash parent to current branch tip, re-parent children onto the former parent, restack remaining descendants, delete the folded branch locally, and close its PR (if open) with a 'Folded into <parent> via dub fold.' comment.",
+  "tldr": "Adds `dub fold` (`packages/cli/src/commands/fold.ts` + `packages/cli/src/lib/fold.ts`). Keep-commits mode fast-forwards the parent; `--squash` collapses the branch into one commit. Children re-parent onto the former parent and `restack` rebases them — critically, fold records the OLD branch tip as their `parent_revision` so restack's `git rebase --onto newParent oldBase child` actually moves descendants in squash mode. Guards: dirty tree, root branches, fold-into-trunk, no commits, parent drift (via `parent_revision` or `getMergeBase`), worktree checkout conflicts. PR closure is gated on `getPrStateByNumber === 'OPEN'` so stale `pr_number`s on merged/closed PRs are no-ops.",
+  "why": {
+    "motivation": [
+      "Tier 3 power-command gap: dubstack had no way to collapse a sub-branch back into its parent when a feature ended up small enough to ship as one branch.",
+      "Equivalent to `gt fold`; users coming from Graphite expect this primitive when reorganizing stacks.",
+      "Without `dub fold`, the manual workaround (`git checkout parent && git merge --ff-only child`, then untrack, delete, retarget PRs, restack) is fiddly and easy to get wrong on tree-shaped stacks."
+    ],
+    "before": [
+      "No `fold` command. Users had to drop down to raw git + `dub untrack`/`dub delete` and manually retarget any open PRs.",
+      "Re-parenting children onto a grandparent had no idiomatic flow; it relied on `dub track --parent <new>` per child followed by `dub restack`."
+    ],
+    "after": [
+      "`dub fold` (with optional `--squash`, `--force`, and `--keep-commits` flags) handles the full flow in one command.",
+      "Children of the folded branch automatically re-parent onto the grandparent and are restacked.",
+      "Open PRs for the folded branch are closed with a comment naming the new parent; already-merged/closed PRs are left untouched.",
+      "Strict preconditions prevent unsafe folds: dirty tree, root branches, fold-into-trunk, no-op (no commits), parent drift, and same-branch-checked-out-in-another-worktree all fail with `DubError` recovery hints."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/fold.ts",
+      "changeType": "new",
+      "additions": 301,
+      "deletions": 0,
+      "explanation": "Core library: validation (tracked, non-root, parent-not-trunk, clean tree, no worktree collision, parent up-to-date via parent_revision or merge-base, has commits to fold), keep-commits/squash git ops, state mutation. Critically, sets each child's `parent_revision = branchTip` (the OLD deleted-branch tip) so the subsequent `restack` does the right `git rebase --onto newParent oldBase child` — setting it to `newParentTip` would silently no-op restack and orphan squash-mode descendants on the dead ref.",
+      "snippet": "// Re-parent children of the folded branch onto its former parent.\n// Record the OLD branch tip as their parent_revision (not the new\n// parent tip): restack uses parent_revision as the 'old base' for\n// `git rebase --onto <newParent> <oldBase> <child>`. In keep-commits\n// mode old==new and restack is a no-op; in squash mode restack\n// rewrites children from the dead branch tip onto the new squash\n// commit. Setting parent_revision to newParentTip would make restack\n// a silent no-op and leave squashed descendants orphaned.\nfor (const child of stack.branches) {\n  if (child.parent === branchName) {\n    child.parent = parentName;\n    child.parent_revision = branchTip;\n  }\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/fold.ts",
+      "changeType": "new",
+      "additions": 150,
+      "deletions": 0,
+      "explanation": "CLI wrapper: prompt + confirmation, runs `foldBranch`, then closes any OPEN PR (gated on `getPrStateByNumber`), then runs `restack` if there were children. A non-OPEN PR (merged or closed) is left alone — pr_number persists in state after submit and is never cleared, so blind closure would error on every fold of a merged branch.",
+      "snippet": "if (result.prNumber != null) {\n  try {\n    await ensureGhInstalled();\n    await checkGhAuth();\n    // Only close PRs that are actually open. The pr_number in state\n    // is set at submit time and never cleared, so it may point at an\n    // already-merged or already-closed PR.\n    const prState = await getPrStateByNumber(result.prNumber, cwd);\n    if (prState === 'OPEN') {\n      await closePrWithComment(\n        result.prNumber,\n        `Folded into \\`${result.parent}\\` via \\`dub fold\\`.`,\n        cwd,\n      );\n      prClosed = true;\n    }\n  } catch (error) { ... }\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 73,
+      "deletions": 0,
+      "explanation": "Wires up `dub fold` with `--force`, `--squash`, `--keep-commits`, and `--no-interactive` flags. Rejects `--squash` + `--keep-commits` combo. Outputs commit-count summary, re-parented children count, restack status, and closed-PR number.",
+      "snippet": "program\n  .command('fold')\n  .description('Combine the current branch into its parent, re-parenting children')\n  .option('-f, --force', 'Skip the deletion confirmation prompt')\n  .option('--squash', 'Collapse the branch into one commit on the parent (default keeps commits)')\n  .option('--keep-commits', 'Preserve commits as separate commits on the parent (default)')\n  .option('--no-interactive', 'Disable prompts and require --force')",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 71,
+      "deletions": 0,
+      "explanation": "Adds two helpers used by fold: `getCommitSubjectsBetween(base, head)` (for building squash commit messages, oldest-first) and `mergeSquashAndCommit(branch, message)` (runs `git merge --squash <branch>` then commits with the given message).",
+      "snippet": "export async function mergeSquashAndCommit(\n  branch: string, message: string, cwd: string,\n): Promise<void> {\n  await execa('git', ['merge', '--squash', branch], { cwd });\n  await execa('git', ['commit', '-m', message], { cwd });\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/github.ts",
+      "changeType": "mod",
+      "additions": 26,
+      "deletions": 0,
+      "explanation": "Adds `closePrWithComment(prNumber, comment, cwd)` — single `gh pr close --comment` call routed through the existing `runGh` retry wrapper, with `DubError` recovery hints on failure.",
+      "snippet": "export async function closePrWithComment(\n  prNumber: number, comment: string, cwd: string,\n): Promise<void> {\n  try {\n    await runGh(['pr', 'close', String(prNumber), '--comment', comment], { cwd });\n  } catch (error) { ... }\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/commands/fold-tree.test.ts",
+      "changeType": "new",
+      "additions": 360,
+      "deletions": 0,
+      "explanation": "13 integration tests running against real temporary git repos: leaf fold (keep-commits), children re-parent to grandparent, squash collapses into one commit, squash + descendants properly rebased (the critical squash-mode bug from adversarial review), PR closure for OPEN PRs, no PR closure for merged/closed, and 7 guard tests (trunk parent, drift, no-confirm-no-force, no commits, root branch, worktree conflict, dirty tree).",
+      "snippet": "it('--squash mode rebases descendants onto the new squash commit', async () => {\n  // main -> feat/base -> feat/mid -> feat/leaf, then fold feat/mid --squash\n  // ...\n  const newBaseTip = await getBranchTip('feat/base', dir);\n  const leafParentSha = (await gitInRepo(dir, ['rev-parse', 'feat/leaf^'])).stdout.trim();\n  // feat/leaf's immediate parent commit must be the new squash commit on\n  // feat/base - otherwise leaf is orphaned on the dead branch tip.\n  expect(leafParentSha).toBe(newBaseTip);\n});",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/fold.mdx",
+      "changeType": "new",
+      "additions": 46,
+      "deletions": 0,
+      "explanation": "Docs page for `dub fold`: usage, behavior, flags, examples.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Adds `fold` to the docs command index between `post-merge` and `undo`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-33-qa.md",
+      "changeType": "new",
+      "additions": 65,
+      "deletions": 0,
+      "explanation": "Self-QA fallback: explains why no video (CLI, no UI surface), maps each acceptance criterion to its test, and summarizes the adversarial-review fixes.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Squash-mode descendant rebase",
+      "location": "packages/cli/src/lib/fold.ts:262-275",
+      "rationale": "Children's parent_revision must be set to the OLD branch tip (`branchTip`), not the new parent tip. The first adversarial review caught this — setting it to newParentTip silently makes the subsequent restack a no-op in squash mode, orphaning descendants on the deleted ref. Test: `--squash mode rebases descendants onto the new squash commit`."
+    },
+    {
+      "title": "Parent staleness guard",
+      "location": "packages/cli/src/lib/fold.ts:222-238",
+      "rationale": "Falls back to `getMergeBase` when `parent_revision` is null (older state, manually-tracked branches), so an old branch that has drifted from its parent cannot silently absorb unrelated history during fold."
+    },
+    {
+      "title": "PR closure gate",
+      "location": "packages/cli/src/commands/fold.ts:107-126",
+      "rationale": "`pr_number` in state is set at submit time and never cleared. Without the `getPrStateByNumber === 'OPEN'` guard, fold would call `gh pr close` on already-merged/closed PRs (error noise + semantically wrong)."
+    },
+    {
+      "title": "Worktree collision guard",
+      "location": "packages/cli/src/lib/fold.ts:192-208",
+      "rationale": "Without this guard, `deleteLocalBranch` later in the flow would fail after parent had already advanced, leaving git and dubstack state diverged."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "integration",
+      "label": "fold-tree.test.ts (13 tests, real git temp repos)",
+      "status": "done",
+      "evidence": "All happy paths + 7 guard cases pass; total suite 840 passing (+13 new)."
+    },
+    {
+      "kind": "build",
+      "label": "biome + tsc + vitest gates",
+      "status": "done",
+      "evidence": "pnpm checks / typecheck / test all green on commit b2cd722."
+    },
+    {
+      "kind": "manual",
+      "label": "Adversarial review",
+      "status": "done",
+      "evidence": "Two rounds; first round flagged 5 issues, 4 fixed in scope, 1 deferred (undo for fold, matches delete.ts convention)."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Lint/format (biome)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 274 files in 42ms. No fixes applied."
+    },
+    {
+      "name": "Type check (tsc, turbo)",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Tasks: 2 successful, 2 total (dubstack + docs)."
+    },
+    {
+      "name": "Tests (vitest, turbo)",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "Test Files 90 passed (90); Tests 840 passed (840)."
+    },
+    {
+      "name": "AI evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "No AI metadata or prompts changed; evals fail preexisting in this workspace (no AI provider keys configured)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files changed; `dub fold` is a CLI command with no browser UI surface.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-33-qa.md",
+    "caption": "Deterministic test proof in lieu of a video for the new dub fold CLI command.",
+    "scenarios": [
+      "Leaf fold (keep-commits) advances parent and removes branch",
+      "Children of folded branch are re-parented and restacked",
+      "--squash collapses commits and descendants rebase onto the new squash commit",
+      "PR is closed with comment when OPEN; left alone when MERGED/CLOSED",
+      "Guards: dirty tree, root branch, fold-into-trunk, no commits, drift, worktree collision, non-interactive without --force"
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New packages/cli/src/commands/fold.ts",
+      "status": "satisfied",
+      "evidence": "File exists at packages/cli/src/commands/fold.ts and wired in src/index.ts."
+    },
+    {
+      "criterion": "Parent gets the commits",
+      "status": "satisfied",
+      "evidence": "`folds a leaf branch into its non-trunk parent (keep-commits)` asserts feat/base log contains the folded commit."
+    },
+    {
+      "criterion": "Children re-parent correctly",
+      "status": "satisfied",
+      "evidence": "`re-parents children of folded branch onto the grandparent` + `--squash mode rebases descendants` assert state.parent + git history."
+    },
+    {
+      "criterion": "PR closed with comment if present",
+      "status": "satisfied",
+      "evidence": "`closes the PR with a comment when the folded branch had an OPEN PR` asserts closePrWithComment invocation with the canonical message."
+    },
+    {
+      "criterion": "--force and --squash flags work",
+      "status": "satisfied",
+      "evidence": "Every happy-path test uses --force; squash-specific tests cover --squash semantics; index.ts rejects --squash + --keep-commits combo."
+    },
+    {
+      "criterion": "Restack runs automatically",
+      "status": "satisfied",
+      "evidence": "fold command invokes restack when childrenReparented.length > 0; squash + descendants test proves the rebase actually happened."
+    },
+    {
+      "criterion": "Tests for each path",
+      "status": "satisfied",
+      "evidence": "13 tests in fold-tree.test.ts covering 4 listed scenarios + 9 guards/edge cases."
+    },
+    {
+      "criterion": "Docs at apps/docs/content/docs/commands/fold.mdx",
+      "status": "satisfied",
+      "evidence": "fold.mdx exists with usage/behavior/flags/examples; meta.json indexes it."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 2,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Round 1 (4 critical, 1 important): (1) blind PR closure on merged/closed PRs, (2) no worktree guard on folded branch, (3) state mutation has no undo entry (deferred — matches delete.ts), (4) children.parent_revision set to wrong tip silently orphans squash-mode descendants, (5) null parent_revision skipped the staleness guard.",
+      "Round 1 fixes (4 of 5 in scope): PR closure now gated on getPrStateByNumber === 'OPEN'; worktree check added with explicit DubError; children.parent_revision set to branchTip (OLD tip) so restack rebases correctly; parent_revision null falls back to getMergeBase.",
+      "Round 2 verdict: all 4 in-scope fixes verified correct. Minor: keep-commits children-reparent test asserts parent_revision == newBaseTip, which is vacuously true (newBaseTip == branchTip in ff-only mode); the squash test adequately covers the critical-bug regression.",
+      "Deferred: extending the undo log to a 'fold' operation type. Out of scope for DUB-33 acceptance criteria, and the existing delete.ts uses the same write-after-mutate pattern."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-33 listed dependencies",
+      "status": "No external dependencies detected (issue says: 'Blocked by: None — can start immediately')."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive CLI command. Safe to merge whenever review approves; no migrations, no config changes, no flag gating.",
+    "steps": [
+      {
+        "when": "Pre-merge",
+        "label": "Review + merge PR",
+        "details": "Standard PR review on the new command, library, and tests. Default branch CI will run the same gates this report ran locally."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Docs publish",
+        "details": "fold.mdx is added to apps/docs/content/docs/commands and indexed in meta.json — published with the next docs build."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Future work",
+        "details": "Optional: extend the undo log with a 'fold' operation type to enable `dub undo` recovery from a partial fold failure (current convention in delete.ts is also write-after-mutate without undo)."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "b2cd72280a1c10c6678ff81c45a97174fc5a15dc",
+    "shortSha": "b2cd722",
+    "message": "feat(fold): combine a branch into its parent\n\n`dub fold` collapses the current branch into its parent: fast-forwards\n(or squashes) parent to branch tip, re-parents children onto former\nparent, runs restack, deletes branch, and closes any OPEN PR with a\n\"Folded into <parent>\" comment.\n\nGuards: dirty tree, root branches, fold-into-trunk, no commits,\nparent drift (uses parent_revision or merge-base), worktree checkout\nconflicts. Children's parent_revision is set to the OLD branch tip so\nrestack rewrites squash-mode descendants onto the new squash commit\ninstead of orphaning them on the deleted ref.\n\nCompletes DUB-33"
+  }
+}

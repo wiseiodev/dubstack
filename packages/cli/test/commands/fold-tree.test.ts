@@ -111,12 +111,11 @@ describe('dub fold', () => {
     ]);
     expect(result.restacked).toBe(true);
 
+    const newBaseTip = await getBranchTip('feat/base', dir);
     const state = await readState(dir);
     expect(getBranch(state, 'feat/mid')).toBeUndefined();
     expect(getBranch(state, 'feat/leaf1')?.parent).toBe('feat/base');
     expect(getBranch(state, 'feat/leaf2')?.parent).toBe('feat/base');
-
-    const newBaseTip = await getBranchTip('feat/base', dir);
     expect(getBranch(state, 'feat/leaf1')?.parent_revision).toBe(newBaseTip);
     expect(getBranch(state, 'feat/leaf2')?.parent_revision).toBe(newBaseTip);
 
@@ -255,7 +254,41 @@ describe('dub fold', () => {
     const result = await fold(dir, { force: true });
 
     expect(result.prClosed).toBe(false);
+    expect(result.prPriorState).toBe('MERGED');
     expect(closePrSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects fold when a git rebase is already in progress', async () => {
+    await create('feat/base', dir);
+    await commitFile('shared.txt', 'base-version', 'base-commit');
+
+    await create('feat/child', dir);
+    await commitFile('shared.txt', 'child-version', 'child-commit');
+
+    // Force a rebase that will conflict to leave the repo in a paused
+    // rebase state. Use try/catch because git exits non-zero on conflict.
+    await gitInRepo(dir, ['checkout', 'feat/base']);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'diverged-base');
+    await gitInRepo(dir, ['add', 'shared.txt']);
+    await gitInRepo(dir, ['commit', '-m', 'base-diverge']);
+    try {
+      await gitInRepo(dir, ['rebase', 'feat/base', 'feat/child']);
+    } catch {
+      // expected — conflict pauses the rebase
+    }
+
+    try {
+      await expect(
+        fold(dir, { branch: 'feat/child', force: true }),
+      ).rejects.toThrow(/operation is already in progress/);
+    } finally {
+      // Clean up so afterEach doesn't trip on the half-finished rebase.
+      try {
+        await gitInRepo(dir, ['rebase', '--abort']);
+      } catch {
+        // already aborted
+      }
+    }
   });
 
   it('rejects fold when current branch is directly on trunk', async () => {

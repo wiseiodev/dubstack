@@ -8,6 +8,7 @@ import {
   getFoldPreview,
 } from '../lib/fold';
 import {
+  type BranchPrLifecycleState,
   checkGhAuth,
   closePrWithComment,
   ensureGhInstalled,
@@ -23,6 +24,10 @@ export interface FoldCommandOptions extends FoldOptions {
 export interface FoldCommandResult extends FoldResult {
   cancelled: boolean;
   prClosed: boolean;
+  /** Lifecycle state of the PR at the time of fold, if any. `null` when no
+   * PR was attached to the folded branch. Lets the CLI tell the user why a
+   * PR was (or wasn't) closed. */
+  prPriorState: BranchPrLifecycleState | null;
   restacked: boolean;
 }
 
@@ -89,9 +94,11 @@ export async function fold(
         ...EMPTY_FOLD_RESULT_BASE,
         branch: preview.branch,
         parent: preview.parent,
+        squashedCommits: preview.squashedCommits,
         childrenReparented: preview.childrenReparented,
         cancelled: true,
         prClosed: false,
+        prPriorState: null,
         restacked: false,
       };
     }
@@ -100,6 +107,7 @@ export async function fold(
   const result = await foldBranch(cwd, options);
 
   let prClosed = false;
+  let prPriorState: BranchPrLifecycleState | null = null;
   if (result.prNumber != null) {
     try {
       await ensureGhInstalled();
@@ -107,8 +115,8 @@ export async function fold(
       // Only close PRs that are actually open. The pr_number in state is
       // set at submit time and never cleared, so it may point at an
       // already-merged or already-closed PR.
-      const prState = await getPrStateByNumber(result.prNumber, cwd);
-      if (prState === 'OPEN') {
+      prPriorState = await getPrStateByNumber(result.prNumber, cwd);
+      if (prPriorState === 'OPEN') {
         await closePrWithComment(
           result.prNumber,
           `Folded into \`${result.parent}\` via \`dub fold\`.`,
@@ -145,6 +153,7 @@ export async function fold(
     ...result,
     cancelled: false,
     prClosed,
+    prPriorState,
     restacked,
   };
 }

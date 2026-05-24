@@ -13,6 +13,7 @@ import {
   mergeSquashAndCommit,
 } from './git';
 import { assertStateInvariants } from './invariants';
+import { detectActiveOperation } from './operation-state';
 import { findStackForBranch, readState, type Stack, writeState } from './state';
 
 export interface FoldPreview {
@@ -148,6 +149,22 @@ export async function foldBranch(
   cwd: string,
   options: FoldOptions = {},
 ): Promise<FoldResult> {
+  const activeOperation = await detectActiveOperation(cwd);
+  if (activeOperation !== 'none') {
+    throw new DubError(
+      `Cannot fold: a '${activeOperation}' operation is already in progress.`,
+      activeOperation === 'rebase'
+        ? [
+            "Run 'git rebase --continue' or 'git rebase --abort' to finish the rebase, then retry.",
+            "Run 'dub continue' or 'dub abort' if dubstack started the rebase.",
+          ]
+        : [
+            "Run 'dub continue' to resume the operation, or 'dub abort' to cancel it.",
+            "Run 'dub log' to inspect the stack once the operation completes.",
+          ],
+    );
+  }
+
   if (!(await isWorkingTreeClean(cwd))) {
     throw new DubError('Working tree has uncommitted changes.', [
       "Run 'git status' to see the uncommitted changes.",
@@ -296,6 +313,8 @@ function buildSquashMessage(branch: string, subjects: string[]): string {
   if (rest.length === 0) {
     return first;
   }
-  const bullets = rest.map((s) => `* ${s}`).join('\n');
+  // Strip a leading bullet marker before re-bulleting so subjects that already
+  // start with "* " don't render as "* * subject".
+  const bullets = rest.map((s) => `* ${s.replace(/^\*\s+/, '')}`).join('\n');
   return `${first}\n\nSquashed from '${branch}':\n${bullets}`;
 }

@@ -613,6 +613,16 @@ Examples:
       }
       if (result.prClosed) {
         console.log(chalk.dim(`  ↳ Closed PR #${result.prNumber}`));
+      } else if (
+        result.prNumber != null &&
+        result.prPriorState &&
+        result.prPriorState !== 'OPEN'
+      ) {
+        console.log(
+          chalk.dim(
+            `  ↳ PR #${result.prNumber} already ${result.prPriorState.toLowerCase()}; left untouched`,
+          ),
+        );
       }
     },
   );
