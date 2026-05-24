@@ -12,7 +12,12 @@
   ],
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!skills-lock.json"]
+    "includes": [
+      "**",
+      "!skills-lock.json",
+      "!packages/retarget-action/dist",
+      "!.reports"
+    ]
   },
   "formatter": {
     "enabled": true,
