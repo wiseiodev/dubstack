@@ -422,6 +422,85 @@ export async function getLastCommitMessage(
   }
 }
 
+/**
+ * Returns the number of commits on `branch` that are not reachable from `base`.
+ *
+ * Used by stack-mutating commands (`pop`, `squash`) to decide when an operation
+ * would cross the parent boundary or has nothing to do.
+ *
+ * @throws {DubError} If the rev-list lookup fails (typically because one of the
+ *   refs is missing locally).
+ */
+export async function countCommitsAhead(
+  branch: string,
+  base: string,
+  cwd: string,
+): Promise<number> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-list', '--count', `${base}..${branch}`],
+      { cwd },
+    );
+    return Number.parseInt(stdout.trim(), 10);
+  } catch {
+    throw new DubError(
+      `Failed to count commits between '${base}' and '${branch}'.`,
+      [
+        `Run 'git rev-list --count ${base}..${branch}' manually to inspect the underlying error.`,
+        `Run 'git fetch origin' if either branch is missing locally.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Returns the commit messages (subject + body) for the commits on `branch`
+ * since `base`, ordered most-recent-first. Used by `dub squash` to assemble
+ * the default concatenated message when no override is supplied.
+ */
+export async function getCommitMessagesBetween(
+  base: string,
+  branch: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '--format=%B%x1e', `${base}..${branch}`],
+      { cwd },
+    );
+    return stdout
+      .split('\x1e')
+      .map((entry) => entry.replace(/^\n+|\n+$/g, ''))
+      .filter((entry) => entry.length > 0);
+  } catch {
+    throw new DubError(
+      `Failed to read commit messages between '${base}' and '${branch}'.`,
+      [
+        `Run 'git log ${base}..${branch}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Soft-resets HEAD to the given ref, keeping the working tree and index
+ * intact. The pre-reset commits' changes remain staged.
+ *
+ * @throws {DubError} If the reset fails (e.g. ref does not exist).
+ */
+export async function softResetTo(ref: string, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--soft', ref], { cwd });
+  } catch {
+    throw new DubError(`Failed to soft-reset HEAD to '${ref}'.`, [
+      `Run 'git reset --soft ${ref}' manually to inspect the underlying error.`,
+      "Run 'git status' to confirm the repository is in a clean state.",
+    ]);
+  }
+}
+
 /** Per-branch commit metadata returned by {@link getBranchCommitMetaBatch}. */
 export interface BranchCommitMeta {
   /** `git for-each-ref %(committerdate:relative)`, e.g. "3 hours ago". */

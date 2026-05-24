@@ -5,6 +5,7 @@
     "repo",
     "create",
     "modify",
+    "squash",
     "checkout",
     "log",
     "navigate",
