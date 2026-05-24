@@ -1,3 +1,4 @@
+import { clearCleanupJournal } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -16,7 +17,7 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move';
+  undone: 'create' | 'restack' | 'rename' | 'move' | 'unlink';
   details: string;
 }
 
@@ -141,12 +142,20 @@ export async function undo(cwd: string): Promise<UndoResult> {
   }
 
   await writeState(entry.previousState, cwd);
+  if (entry.operation === 'unlink') {
+    // Undoing the split must also discard any pending journaled retarget from
+    // the original unlink — otherwise a subsequent `dub continue` would
+    // retarget the PR for a branch that's now back in its original stack.
+    await clearCleanupJournal(cwd);
+  }
   await clearUndoEntry(cwd);
 
   const details =
     entry.operation === 'move'
       ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+      : entry.operation === 'unlink'
+        ? 'Restored stack metadata to pre-unlink state'
+        : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
 
   return {
     undone: entry.operation,
