@@ -10,7 +10,7 @@ import { getDubDir } from './state';
  */
 export interface UndoEntry {
   /** Which command created this snapshot. */
-  operation: 'create' | 'restack';
+  operation: 'create' | 'restack' | 'rename';
   /** ISO timestamp of when the snapshot was taken. */
   timestamp: string;
   /** The branch user was on before the operation. */
@@ -21,6 +21,10 @@ export interface UndoEntry {
   branchTips: Record<string, string>;
   /** Branches created by this operation (to be deleted on undo). */
   createdBranches: string[];
+  /** For `rename`: the original branch name before the rename. */
+  renameFrom?: string;
+  /** For `rename`: the new branch name after the rename. */
+  renameTo?: string;
 }
 
 async function getUndoPath(cwd: string): Promise<string> {

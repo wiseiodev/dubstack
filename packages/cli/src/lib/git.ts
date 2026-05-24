@@ -236,6 +236,32 @@ export async function deleteLocalBranch(
 }
 
 /**
+ * Renames a local branch via `git branch -m <old> <new>`.
+ * Works whether or not the branch is currently checked out.
+ * @throws {DubError} If the rename fails (e.g. target name already exists).
+ */
+export async function renameBranch(
+  oldName: string,
+  newName: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await execa('git', ['branch', '-m', oldName, newName], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to rename branch '${oldName}' to '${newName}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git branch --list ${newName}' to confirm whether '${newName}' already exists.`,
+        `Run 'git branch -m ${oldName} ${newName}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
+/**
  * Force-moves a branch pointer to a specific commit SHA.
  * Used by undo to reset branches to their pre-operation tips.
  */

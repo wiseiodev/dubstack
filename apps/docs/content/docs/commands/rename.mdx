@@ -1,0 +1,61 @@
+---
+title: dub rename
+description: Rename a tracked branch and propagate the change through state, children, and the PR.
+---
+
+## Usage
+
+```bash
+# Rename the current tracked branch
+dub rename feat/new-name
+
+# Rename a specific tracked branch by old/new
+dub rename feat/old feat/new
+
+# Rename without pushing the renamed branch (even if a PR exists)
+dub rename feat/new-name --no-push
+```
+
+## Behavior
+
+`dub rename`:
+
+1. Validates that the new name is a legal git ref and doesn't collide with any tracked or untracked local branch.
+2. Runs `git branch -m <old> <new>`.
+3. Updates the branch's `name` in DubStack state.
+4. Re-parents every child of the old branch onto the new name.
+5. If the branch already has a PR linked, pushes the renamed branch to `origin` with `--force-with-lease`. Use `--no-push` to skip this step.
+6. Records a one-level undo entry. `dub undo` reverses the rename.
+
+The old remote branch (when one existed) is **not** deleted automatically. The
+command surfaces a hint with the exact `git push origin --delete <old>` you'd run
+to clean it up. Existing PRs remain linked to their original head ref — relink
+or close them manually as needed.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--no-push` | Skip pushing the renamed branch even when a PR is linked |
+
+## Errors
+
+| Condition | Behavior |
+|---|---|
+| New name collides with another tracked branch | `DubError` with recovery hint to `dub untrack` the collider |
+| New name collides with an untracked local branch | `DubError` with recovery hint to `dub delete` or pick a different name |
+| Source branch is not tracked | `DubError` pointing at `dub track` |
+| Source branch is the stack root | `DubError` — root branches cannot be renamed via `dub rename` |
+| Invalid new branch name | `DubError` explaining git ref naming rules |
+
+## Undo
+
+```bash
+dub rename feat/old feat/new
+dub undo   # → renames feat/new back to feat/old and restores state
+```
+
+Undo restores the local branch name, the state file, and child parent links.
+It does **not** revert any push that already happened — the renamed branch
+remains on the remote. Re-push (`dub submit`) or delete the renamed remote
+branch manually if you need to fully roll back.

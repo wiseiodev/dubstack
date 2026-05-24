@@ -46,6 +46,7 @@ import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { ready } from './commands/ready';
+import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
@@ -704,7 +705,7 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create or dub restack operation')
+  .description('Undo the last dub create, dub restack, or dub rename operation')
   .addHelpText(
     'after',
     `
@@ -1513,6 +1514,58 @@ program
   .action(async (branch?: string) => {
     await pr(process.cwd(), branch);
   });
+
+program
+  .command('rename')
+  .argument('<firstName>', 'New name (current branch) or old name')
+  .argument('[secondName]', 'New name when renaming a specific tracked branch')
+  .description(
+    'Rename a tracked branch and propagate the change through state, children, and remote',
+  )
+  .option('--no-push', 'Skip pushing the renamed branch even if a PR exists')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub rename feat/new-name              Rename the current tracked branch
+  $ dub rename feat/old feat/new          Rename a specific tracked branch
+  $ dub rename --no-push feat/new-name    Rename without pushing the renamed branch`,
+  )
+  .action(
+    async (
+      firstName: string,
+      secondName: string | undefined,
+      options: { push?: boolean },
+    ) => {
+      const result = await rename(process.cwd(), firstName, secondName, {
+        noPush: options.push === false,
+      });
+      console.log(
+        chalk.green(`✔ Renamed '${result.oldName}' to '${result.newName}'`),
+      );
+      if (result.reparentedChildren.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Re-parented ${result.reparentedChildren.length} child branch(es): ${result.reparentedChildren.join(', ')}`,
+          ),
+        );
+      }
+      if (result.pushed && result.prNumber != null) {
+        console.log(
+          chalk.dim(
+            `  ↳ Pushed '${result.newName}' to origin (PR #${result.prNumber} remains linked to the old head until you re-target)`,
+          ),
+        );
+      }
+      if (result.oldRemoteCleanupHint) {
+        console.log(
+          chalk.dim(
+            `  ℹ Old remote branch '${result.oldName}' may still exist. Run 'git push origin --delete ${result.oldName}' to clean it up.`,
+          ),
+        );
+      }
+    },
+  );
 
 async function runSubmit(options: {
   dryRun?: boolean;

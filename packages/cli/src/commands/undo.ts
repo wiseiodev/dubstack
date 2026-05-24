@@ -1,16 +1,22 @@
 import { DubError } from '../lib/errors';
 import {
+  branchExists,
   checkoutBranch,
   deleteBranch,
+  deleteRef,
   forceBranchTo,
   getCurrentBranch,
   isWorkingTreeClean,
+  lastPushedRef,
+  readLastPushedSha,
+  renameBranch,
+  writeLastPushedSha,
 } from '../lib/git';
 import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack';
+  undone: 'create' | 'restack' | 'rename';
   details: string;
 }
 
@@ -62,6 +68,49 @@ export async function undo(cwd: string): Promise<UndoResult> {
     return {
       undone: 'create',
       details: `Deleted branch${entry.createdBranches.length > 1 ? 'es' : ''} '${entry.createdBranches.join("', '")}'`,
+    };
+  }
+
+  if (entry.operation === 'rename') {
+    const renameFrom = entry.renameFrom;
+    const renameTo = entry.renameTo;
+    if (!renameFrom || !renameTo) {
+      throw new DubError('Undo entry is missing rename details.', [
+        "Run 'rm .git/dubstack/undo.json' to clear the malformed entry.",
+      ]);
+    }
+
+    if (await branchExists(renameFrom, cwd)) {
+      throw new DubError(
+        `Cannot undo rename: branch '${renameFrom}' already exists.`,
+        [
+          `Run 'git branch -D ${renameFrom}' to remove the conflicting branch, then retry 'dub undo'.`,
+          `Rename the conflicting branch with 'git branch -m ${renameFrom} <other-name>', then retry.`,
+        ],
+      );
+    }
+
+    await renameBranch(renameTo, renameFrom, cwd);
+
+    // Reverse the `last-pushed` ref migration done by the forward rename so
+    // the next push from `renameFrom` keeps its --force-with-lease tracking.
+    const trackedSha = await readLastPushedSha(renameTo, cwd);
+    if (trackedSha) {
+      await writeLastPushedSha(renameFrom, trackedSha, cwd);
+      await deleteRef(lastPushedRef(renameTo), cwd);
+    }
+
+    await writeState(entry.previousState, cwd);
+
+    if (currentBranch !== renameTo && currentBranch !== entry.previousBranch) {
+      await checkoutBranch(entry.previousBranch, cwd);
+    }
+
+    await clearUndoEntry(cwd);
+
+    return {
+      undone: 'rename',
+      details: `Renamed '${renameTo}' back to '${renameFrom}'`,
     };
   }
 
