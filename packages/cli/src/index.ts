@@ -36,6 +36,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { init } from './commands/init';
+import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
@@ -52,6 +53,8 @@ import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import { revert } from './commands/revert';
+import type { SplitMode } from './commands/split';
+import { split } from './commands/split';
 import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
@@ -60,6 +63,7 @@ import { sync } from './commands/sync';
 import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
+import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
 import { watch } from './commands/watch';
 import {
@@ -134,6 +138,92 @@ Examples:
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
   });
+
+program
+  .command('install')
+  .argument('<recipe>', 'Recipe to install (e.g. retarget-action)')
+  .option('--dry-run', 'Print the planned write without touching disk')
+  .option(
+    '--force',
+    'Overwrite an existing file with different content without confirming',
+  )
+  .description(
+    'Install a Dubstack recipe (workflow templates, etc.) into the current repo',
+  )
+  .addHelpText(
+    'after',
+    `
+Recipes:
+  retarget-action    GitHub Action that retargets dependent PRs when a stack PR merges
+
+Examples:
+  $ dub install retarget-action             Write .github/workflows/dubstack-retarget.yml
+  $ dub install retarget-action --dry-run   Preview the planned write
+  $ dub install retarget-action --force     Overwrite an existing file without confirming`,
+  )
+  .action(
+    async (recipe: string, options: { dryRun?: boolean; force?: boolean }) => {
+      const result = await install(process.cwd(), recipe as InstallRecipe, {
+        dryRun: options.dryRun,
+        force: options.force,
+        confirm: async (message) => {
+          // Non-interactive shells (piped stdin, CI scripts) would hang
+          // forever on rl.question. Treat as "no" and let the caller surface
+          // a 'cancelled' result; the user can pass --force for scripted
+          // overwrites.
+          if (!process.stdin.isTTY) {
+            console.log(
+              chalk.yellow(
+                '⚠ Refusing to prompt for confirmation in a non-interactive shell. Re-run with --force to overwrite, or --dry-run to preview.',
+              ),
+            );
+            return false;
+          }
+          const readline = await import('node:readline/promises');
+          const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          });
+          try {
+            const answer = await rl.question(`${message} [y/N] `);
+            const normalized = answer.trim().toLowerCase();
+            return normalized === 'y' || normalized === 'yes';
+          } finally {
+            rl.close();
+          }
+        },
+      });
+
+      switch (result.status) {
+        case 'installed':
+          console.log(chalk.green(`✔ Installed at ${result.path}`));
+          console.log(
+            chalk.dim(
+              '  Commit and push the workflow file. The Action runs on the next merge.',
+            ),
+          );
+          break;
+        case 'overwritten':
+          console.log(chalk.green(`✔ Overwrote ${result.path}`));
+          console.log(
+            chalk.dim('  Commit and push to pick up the new content.'),
+          );
+          break;
+        case 'already-installed':
+          console.log(
+            chalk.yellow(`⚠ Already installed at ${result.path} (no change)`),
+          );
+          break;
+        case 'preview':
+          console.log(chalk.dim(`# Would write to ${result.path}:`));
+          console.log(result.content);
+          break;
+        case 'cancelled':
+          console.log(chalk.yellow('⚠ Cancelled. No changes written.'));
+          break;
+      }
+    },
+  );
 
 program
   .command('docs')
@@ -603,6 +693,94 @@ Examples:
       }
       if (result.rebased.length > 0) {
         console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
+      }
+    },
+  );
+
+program
+  .command('unlink')
+  .argument('<branch>', 'Branch to detach from its parent')
+  .option(
+    '--no-retarget',
+    'Leave PR base unchanged (warn that the PR will be out of sync)',
+  )
+  .option(
+    '--keep-children',
+    'Move descendants with <branch> into the new stack (default)',
+  )
+  .option(
+    '--orphan-children',
+    'Re-parent direct children onto the original parent instead of moving them',
+  )
+  .description(
+    'Detach a tracked branch from its parent, splitting it into its own stack',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub unlink feat/auth-login                Promote feat/auth-login to a new stack root
+  $ dub unlink feat/auth-login --orphan-children  Leave descendants on the original parent
+  $ dub unlink feat/auth-login --no-retarget  Skip PR retarget (warns about drift)`,
+  )
+  .action(
+    async (
+      branch: string,
+      options: {
+        retarget?: boolean;
+        keepChildren?: boolean;
+        orphanChildren?: boolean;
+      },
+    ) => {
+      if (options.keepChildren && options.orphanChildren) {
+        throw new DubError(
+          "Pass only one of '--keep-children' or '--orphan-children'.",
+          [
+            "Pass '--keep-children' (default) to move descendants with <branch>.",
+            "Pass '--orphan-children' to leave descendants on the original parent.",
+          ],
+        );
+      }
+      const result = await unlink(process.cwd(), branch, {
+        noRetarget: options.retarget === false,
+        orphanChildren: options.orphanChildren ?? false,
+      });
+      console.log(
+        chalk.green(
+          `✔ Unlinked '${result.branch}' from '${result.previousParent}'`,
+        ),
+      );
+      if (result.movedDescendants.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Moved ${result.movedDescendants.length} descendant(s) into new stack: ${result.movedDescendants.join(', ')}`,
+          ),
+        );
+      }
+      if (result.orphanedChildren.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Re-parented ${result.orphanedChildren.length} child(ren) onto '${result.previousParent}': ${result.orphanedChildren.join(', ')}`,
+          ),
+        );
+      }
+      if (result.retargeted && result.prNumber != null) {
+        console.log(
+          chalk.dim(
+            `  ↳ Retargeted PR #${result.prNumber} → '${result.trunk}'`,
+          ),
+        );
+      } else if (result.retargetSkipped && result.prNumber != null) {
+        console.log(
+          chalk.yellow(
+            `⚠ PR #${result.prNumber} not retargeted (--no-retarget). If its base is no longer correct after the split, retarget manually.`,
+          ),
+        );
+        console.log(
+          chalk.dim(
+            `  Run 'gh pr edit ${result.prNumber} --base ${result.trunk}' to retarget to '${result.trunk}'.`,
+          ),
+        );
       }
     },
   );
@@ -1649,6 +1827,65 @@ program
   });
 
 program
+  .command('split')
+  .description(
+    'Split the current branch into smaller sibling branches (by-commit, by-file, by-hunk, or AI)',
+  )
+  .option(
+    '--by-commit',
+    'Interactively pick commits to extract to a new branch',
+  )
+  .option(
+    '--commit-picks <indices>',
+    "For '--by-commit': skip the prompt and use these 1-indexed positions (e.g. '1,3-4')",
+  )
+  .option(
+    '--by-file <files...>',
+    'Non-interactive: move specific files to a new branch (requires --name)',
+  )
+  .option(
+    '--by-hunk',
+    "Interactively pick hunks via `git reset --patch` (answer 'y' to move a hunk back to source, 'n' to keep it on the new branch)",
+  )
+  .option('--ai', 'Ask the AI assistant to propose a semantic split')
+  .option('--name <branch>', 'New branch name for the extracted slice')
+  .option(
+    '--close-old-pr',
+    "Close the source branch's existing PR (Graphite-style); by default it's left for `dub submit` to force-push",
+  )
+  .option(
+    '--no-restack',
+    'Skip the automatic restack of descendants after the split',
+  )
+  .option(
+    '--dry-run',
+    'AI mode only: show the proposal and exit without applying',
+  )
+  .option('-y, --yes', 'AI mode only: skip the approval prompt')
+  .option('--no-interactive', 'Disable interactive prompts and require flags')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub split --by-file packages/cli/src/lib/foo.ts --name feat/foo
+  $ dub split --by-commit                          Interactive numbered checklist
+  $ dub split --by-hunk                            Interactive 'git reset --patch' style
+  $ dub split --ai                                 AI-propose a semantic split
+
+PR handling:
+  • By default the source branch's existing PR is left intact; the next 'dub submit'
+    force-pushes the new (smaller) shape and the new branches get their own PRs.
+  • Pass --close-old-pr for Graphite-style "close old + create new on submit".
+  • If the split leaves the source branch empty vs its parent, the old PR is
+    closed automatically (GitHub rejects PRs with no diff) with a comment
+    linking to the new branches.
+
+After the split, 'dub restack' runs automatically so any descendants follow
+the source branch's new tip. Pass '--no-restack' to skip that step.`,
+  )
+  .action(runSplit);
+
+program
   .command('pop')
   .description(
     'Pop the last commit(s) off the current branch into the staging area',
@@ -1941,6 +2178,108 @@ async function runSubmit(options: {
   console.log(
     chalk.yellow(
       `⚠ Nothing to push for ${scopeLabel}. The selected scope contains no submittable branches.`,
+    ),
+  );
+}
+
+async function runSplit(options: {
+  byCommit?: boolean;
+  byFile?: string[];
+  byHunk?: boolean;
+  ai?: boolean;
+  name?: string;
+  commitPicks?: string;
+  closeOldPr?: boolean;
+  restack?: boolean;
+  dryRun?: boolean;
+  yes?: boolean;
+  interactive?: boolean;
+}) {
+  const selectedModes: SplitMode[] = [];
+  if (options.byCommit) selectedModes.push('by-commit');
+  if (options.byFile && options.byFile.length > 0)
+    selectedModes.push('by-file');
+  if (options.byHunk) selectedModes.push('by-hunk');
+  if (options.ai) selectedModes.push('ai');
+
+  if (selectedModes.length === 0) {
+    throw new DubError(
+      "Pick a split mode: '--by-commit', '--by-file <files...>', '--by-hunk', or '--ai'.",
+      [
+        "Run 'dub split --by-file <files...> --name <new-branch>' to extract files.",
+        "Run 'dub split --by-commit' for an interactive commit picker.",
+      ],
+    );
+  }
+  if (selectedModes.length > 1) {
+    throw new DubError(
+      "Split modes are mutually exclusive; pick one of '--by-commit', '--by-file', '--by-hunk', or '--ai'.",
+      ["Rerun 'dub split <mode>' with exactly one mode flag."],
+    );
+  }
+
+  const mode = selectedModes[0];
+  // Pass the raw string straight through; split() parses + validates it
+  // against the real commit count so error messages are meaningful.
+  const result = await split(process.cwd(), {
+    mode,
+    files: options.byFile,
+    name: options.name,
+    commitPicksRaw: options.commitPicks,
+    closeOldPr: options.closeOldPr,
+    noRestack: options.restack === false,
+    dryRun: options.dryRun,
+    yes: options.yes,
+    interactive: options.interactive,
+  });
+
+  if (mode === 'ai' && options.dryRun) {
+    console.log(chalk.green('✔ Dry-run: AI proposed the following split:'));
+    for (const [i, p] of (result.aiProposal ?? []).entries()) {
+      console.log(chalk.dim(`  ${i + 1}. ${p.branch}`));
+      if (p.summary) console.log(chalk.dim(`     ${p.summary}`));
+      for (const f of p.files) console.log(chalk.dim(`       • ${f}`));
+    }
+    return;
+  }
+
+  const sliceLabel = result.created.length === 1 ? 'slice' : 'slices';
+  console.log(
+    chalk.green(
+      `✔ Split '${result.sourceBranch}' into ${result.created.length} new ${sliceLabel}:`,
+    ),
+  );
+  for (const c of result.created) {
+    console.log(chalk.dim(`  ↳ ${c.branch} (on '${c.parent}')`));
+  }
+  if (result.sourceEmpty) {
+    console.log(
+      chalk.yellow(
+        `⚠ '${result.sourceBranch}' has no unique commits left vs '${result.parentBranch}'.`,
+      ),
+    );
+  }
+  if (result.existingPrNumber != null) {
+    if (result.prClosed) {
+      console.log(
+        chalk.dim(
+          `  ↳ Closed existing PR #${result.existingPrNumber} on '${result.sourceBranch}'.`,
+        ),
+      );
+    } else {
+      console.log(
+        chalk.dim(
+          `  ↳ PR #${result.existingPrNumber} on '${result.sourceBranch}' left intact; next 'dub submit' will force-push the new shape.`,
+        ),
+      );
+    }
+  }
+  if (result.restacked) {
+    console.log(chalk.dim('  ↳ Restacked descendants.'));
+  }
+  console.log(
+    chalk.dim(
+      "  Run 'dub submit' to push the new branches and create their PRs.",
     ),
   );
 }

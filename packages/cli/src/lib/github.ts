@@ -942,6 +942,33 @@ export async function retargetPrBase(
 }
 
 /**
+ * Closes a PR by number without deleting the branch.
+ *
+ * Used by `dub split --close-old-pr` and by the empty-source fallback when
+ * the source branch ends up with no unique commits left after the split.
+ */
+export async function closePr(
+  prNumber: number,
+  cwd: string,
+  options: { comment?: string } = {},
+): Promise<void> {
+  const args = ['pr', 'close', String(prNumber)];
+  if (options.comment && options.comment.trim().length > 0) {
+    args.push('--comment', options.comment.trim());
+  }
+  try {
+    await runGh(args, { cwd });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(`Failed to close PR #${prNumber}: ${message}`, [
+      `Run 'gh pr close ${prNumber}' manually to inspect the failure.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
+}
+
+/**
  * Merges a PR by number using the requested strategy.
  */
 export async function mergePr(

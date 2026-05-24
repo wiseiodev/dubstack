@@ -1,5 +1,9 @@
 node_modules
 dist
+# The retarget Action's dist/ MUST stay tracked — GitHub Marketplace serves
+# the Action from the tagged tree, so dist/index.js has to exist there.
+!packages/retarget-action/dist
+!packages/retarget-action/dist/**
 coverage
 .git/dubstack
 .playwright-cli
