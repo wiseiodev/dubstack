@@ -1,3 +1,4 @@
+import { clearCleanupJournal } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import { rebaseAbort } from '../lib/git';
 import {
@@ -5,7 +6,6 @@ import {
   detectActiveOperation,
   hasGitRebaseInProgress,
 } from '../lib/operation-state';
-import { clearCleanupJournal } from '../lib/sync/journal';
 
 interface AbortCommandResult {
   aborted: 'rebase' | 'restack' | 'cleanup';

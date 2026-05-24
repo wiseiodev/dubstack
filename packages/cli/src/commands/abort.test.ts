@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearCleanupJournal } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import { rebaseAbort } from '../lib/git';
 import {
@@ -6,12 +7,11 @@ import {
   detectActiveOperation,
   hasGitRebaseInProgress,
 } from '../lib/operation-state';
-import { clearCleanupJournal } from '../lib/sync/journal';
 import { abortCommand } from './abort';
 
 vi.mock('../lib/operation-state');
 vi.mock('../lib/git');
-vi.mock('../lib/sync/journal');
+vi.mock('../lib/cleanup-journal');
 
 describe('abort command', () => {
   const cwd = '/tmp/repo';
