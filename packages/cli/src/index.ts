@@ -77,6 +77,7 @@ import {
   restackConflictPrompt,
 } from './lib/restack-conflict-prompt';
 import { rollbackRestack } from './lib/restack-rollback';
+import { parseScope, type ScopeMode } from './lib/scope';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -762,16 +763,48 @@ program
 
 program
   .command('merge-check')
-  .description('Validate DubStack merge order for a PR')
+  .description('Validate DubStack merge order for a PR or scoped set of PRs')
   .option('--pr <number>', 'PR number to validate', parsePositiveInt)
   .option('--branch <name>', 'Branch name to resolve PR from')
-  .action(async (options: { pr?: number; branch?: string }) => {
-    const result = await mergeCheck(process.cwd(), {
-      pr: options.pr,
-      branch: options.branch,
-    });
-    console.log(chalk.green(`✔ Merge check passed: ${result.reason}`));
-  });
+  .option(
+    '--scope <mode>',
+    'Validation scope when no --pr/--branch is given: current (default) | downstack | stack',
+    parseScope,
+    'current' as ScopeMode,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub merge-check                       Check the current branch's PR
+  $ dub merge-check --scope downstack     Check current branch + ancestors
+  $ dub merge-check --scope stack         Check every branch in the stack
+  $ dub merge-check --pr 123              Check a specific PR (scope ignored)`,
+  )
+  .action(
+    async (options: { pr?: number; branch?: string; scope: ScopeMode }) => {
+      const result = await mergeCheck(process.cwd(), {
+        pr: options.pr,
+        branch: options.branch,
+        scope: options.scope,
+      });
+      if (result.branches.length <= 1) {
+        console.log(chalk.green(`✔ Merge check passed: ${result.reason}`));
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Merge check passed for ${result.branches.length} branch(es) (scope: ${result.scope})`,
+        ),
+      );
+      for (const finding of result.branches) {
+        const prLabel = finding.prNumber ? `PR #${finding.prNumber}` : 'no PR';
+        console.log(
+          chalk.dim(`  ↳ ${finding.branch} (${prLabel}): ${finding.reason}`),
+        );
+      }
+    },
+  );
 
 program
   .command('post-merge')
@@ -936,16 +969,27 @@ program
 program
   .command('ready')
   .description('Run health + submit preflight checks for the current branch')
-  .action(async () => {
-    const result = await ready(process.cwd());
+  .option(
+    '--scope <mode>',
+    'Validation scope: current | downstack (default) | stack',
+    parseScope,
+    'downstack' as ScopeMode,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub ready                    Check current branch + ancestors (downstack)
+  $ dub ready --scope current    Check just the current branch
+  $ dub ready --scope stack      Check every branch in the stack`,
+  )
+  .action(async (options: { scope: ScopeMode }) => {
+    const result = await ready(process.cwd(), { scope: options.scope });
     console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
     if (result.submitBranches.length > 0) {
-      const scopeLabel = result.submitScope
-        ? describeScopeLabel(result.submitScope)
-        : 'downstack';
       console.log(
         chalk.dim(
-          `Submit scope (${scopeLabel}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
+          `Submit scope (${result.scope}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
         ),
       );
     }

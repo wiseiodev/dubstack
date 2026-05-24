@@ -37,6 +37,7 @@ describe('ready', () => {
 
     const result = await ready('/repo');
     expect(result.ready).toBe(true);
+    expect(result.scope).toBe('downstack');
     expect(result.submitBranches).toEqual(['feat/a']);
     expect(result.blockers).toEqual([]);
   });
@@ -81,5 +82,82 @@ describe('ready', () => {
     const result = await ready('/repo');
     expect(result.ready).toBe(false);
     expect(result.blockers).toContain('submit-preflight');
+  });
+
+  it('downstack scope returns the current branch plus ancestors', async () => {
+    mockDoctor.mockResolvedValue({
+      healthy: true,
+      issues: [],
+      checkedBranch: 'feat/b2',
+    });
+    mockGetSubmitPlan.mockResolvedValue({
+      currentBranch: 'feat/b2',
+      rootBranch: 'main',
+      scope: { kind: 'downstack' },
+      branches: [
+        { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+        { name: 'feat/b2', parent: 'feat/a', pr_number: null, pr_link: null },
+      ],
+    });
+
+    const result = await ready('/repo', { scope: 'downstack' });
+    expect(result.scope).toBe('downstack');
+    expect(result.submitBranches).toEqual(['feat/a', 'feat/b2']);
+    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', {
+      downstack: true,
+    });
+  });
+
+  it('current scope narrows to just the current branch', async () => {
+    mockDoctor.mockResolvedValue({
+      healthy: true,
+      issues: [],
+      checkedBranch: 'feat/b2',
+    });
+    mockGetSubmitPlan.mockResolvedValue({
+      currentBranch: 'feat/b2',
+      rootBranch: 'main',
+      scope: { kind: 'downstack' },
+      branches: [
+        { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+        { name: 'feat/b2', parent: 'feat/a', pr_number: null, pr_link: null },
+      ],
+    });
+
+    const result = await ready('/repo', { scope: 'current' });
+    expect(result.scope).toBe('current');
+    expect(result.submitBranches).toEqual(['feat/b2']);
+    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', {
+      downstack: true,
+    });
+  });
+
+  it('stack scope checks every branch in the stack', async () => {
+    mockDoctor.mockResolvedValue({
+      healthy: true,
+      issues: [],
+      checkedBranch: 'feat/b2',
+    });
+    mockGetSubmitPlan.mockResolvedValue({
+      currentBranch: 'feat/b2',
+      rootBranch: 'main',
+      scope: { kind: 'stack' },
+      branches: [
+        { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+        { name: 'feat/b1', parent: 'feat/a', pr_number: null, pr_link: null },
+        { name: 'feat/b2', parent: 'feat/a', pr_number: null, pr_link: null },
+        { name: 'feat/b3', parent: 'feat/a', pr_number: null, pr_link: null },
+      ],
+    });
+
+    const result = await ready('/repo', { scope: 'stack' });
+    expect(result.scope).toBe('stack');
+    expect(result.submitBranches).toEqual([
+      'feat/a',
+      'feat/b1',
+      'feat/b2',
+      'feat/b3',
+    ]);
+    expect(mockGetSubmitPlan).toHaveBeenCalledWith('/repo', { stack: true });
   });
 });
