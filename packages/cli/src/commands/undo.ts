@@ -183,15 +183,35 @@ export async function undo(cwd: string): Promise<UndoResult> {
   await writeState(entry.previousState, cwd);
   await clearUndoEntry(cwd);
 
-  const details =
-    entry.operation === 'move'
-      ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
-      : entry.operation === 'reorder'
-        ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-reorder state`
-        : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+  const branchCount = Object.keys(entry.branchTips).length;
+  const details = describeBranchResetDetails(entry.operation, branchCount);
 
   return {
     undone: entry.operation,
     details,
   };
+}
+
+/**
+ * Renders the success message for the branch-reset undo path
+ * (`restack`/`move`/`reorder`). Exhaustive switch with a `never` fallback
+ * so any future `UndoEntry.operation` value lands here as a typecheck error
+ * rather than silently falling through to the restack wording.
+ */
+function describeBranchResetDetails(
+  operation: 'restack' | 'move' | 'reorder',
+  branchCount: number,
+): string {
+  switch (operation) {
+    case 'move':
+      return `Restored ${branchCount} branches to pre-move state`;
+    case 'reorder':
+      return `Restored ${branchCount} branches to pre-reorder state`;
+    case 'restack':
+      return `Reset ${branchCount} branches to pre-restack state`;
+    default: {
+      const _exhaustive: never = operation;
+      return _exhaustive;
+    }
+  }
 }

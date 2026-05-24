@@ -807,7 +807,7 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+    'Undo the last dub create, dub restack, dub rename, dub move, dub pop, or dub reorder operation',
   )
   .addHelpText(
     'after',
@@ -1711,28 +1711,37 @@ Examples:
       );
       return;
     }
-    if (result.status === 'exit') {
-      console.log(
-        chalk.yellow(
-          `⚠ Reorder left in its current state on '${result.conflictBranch}'.`,
-        ),
-      );
-      console.log(
-        chalk.dim(
-          '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
-        ),
-      );
-      return;
-    }
-    if (result.status === 'conflict') {
-      console.log(
-        chalk.yellow(`⚠ Conflict while reordering '${result.conflictBranch}'`),
-      );
-      console.log(
-        chalk.dim(
-          '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
-        ),
-      );
+    if (result.status === 'exit' || result.status === 'conflict') {
+      const isReorderRebase = result.conflictSource === 'reorder';
+      const subject = isReorderRebase
+        ? `reordering '${result.conflictBranch}'`
+        : `restacking descendant '${result.conflictBranch}'`;
+      const verb = result.status === 'exit' ? 'left in conflict' : 'Conflict';
+      console.log(chalk.yellow(`⚠ ${verb} while ${subject}`));
+      if (isReorderRebase) {
+        // No `restack-progress.json` was written, so `dub continue` cannot
+        // resume on its own — point the user at the underlying git command,
+        // then `dub restack` afterwards to rebase descendants.
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: git rebase --continue',
+          ),
+        );
+        console.log(
+          chalk.dim(
+            "  Once the rebase finishes, run 'dub restack' to rebase descendants.",
+          ),
+        );
+        console.log(
+          chalk.dim('  Or run: git rebase --abort, then dub undo, to bail.'),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
+          ),
+        );
+      }
       return;
     }
     const kept = result.finalPicks.length;

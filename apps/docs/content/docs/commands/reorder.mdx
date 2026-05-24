@@ -39,11 +39,18 @@ branch.
    `pick` and `drop` actions and runs the rebase with that todo applied.
 6. On rebase conflict, prompts with the same three-option dialog used by
    `dub restack`:
-   - **Continue resolving** — leaves files in their conflicted state. After
-     resolving, run `dub continue` (or `dub continue --ai`).
+   - **Continue resolving** — leaves files in their conflicted state. The
+     conflict happened inside the reorder rebase, so no `restack-progress.json`
+     exists; resolve files, then run `git rebase --continue`, then
+     `dub restack` to rebase descendants.
    - **Cancel and roll back** — aborts the rebase and resets the branch to
      its pre-reorder tip via the undo snapshot.
    - **Exit** — leaves the operation in its current state for manual handling.
+
+   If instead the cascading restack of descendants hits a conflict (after the
+   reorder itself completed cleanly), the standard `dub continue` /
+   `dub abort` recovery applies, because that path *did* write a
+   `restack-progress.json`.
 7. After a clean rebase, runs the standard restack to rebase descendants.
 8. Saves a `reorder` undo entry so `dub undo` reverts both the reordered
    branch and any descendants the cascading restack rewrote.
@@ -89,11 +96,12 @@ dub undo
 | Branch has zero commits beyond its parent | Fail — nothing to reorder. |
 | Branch has exactly one commit | Fail — use `dub modify` for single-commit edits. |
 | All commits marked as drop in the picker | Picker rejects the choice and loops; the rebase would otherwise empty the branch. |
-| Rebase conflict | Prompts with the standard `dub restack` three-option dialog. |
+| Rebase conflict (interactive TTY) | Prompts with the standard `dub restack` three-option dialog (continue / cancel / exit). |
+| Rebase conflict (non-interactive: CI, MCP, piped stdin) | Resolves silently to "continue" — the rebase is paused mid-flight and `dub reorder` returns `status: "conflict"`. Resolve manually then run `git rebase --continue` + `dub restack` (or `git rebase --abort` + `dub undo` to bail). |
 
 ## Related
 
-- [`dub modify`](./modify.mdx) — edit, amend, or pop the latest commit.
-- [`dub restack`](./restack.mdx) — rebase descendants after a parent moves.
-- [`dub move`](./move.mdx) — relocate a branch within its stack (not commits).
-- [`dub undo`](./undo.mdx) — roll back the last create/restack/move/rename/reorder.
+- `dub modify` — edit, amend, or pop the latest commit.
+- `dub restack` — rebase descendants after a parent moves.
+- `dub move` — relocate a branch within its stack (not commits).
+- `dub undo` — roll back the last create/restack/move/rename/reorder.

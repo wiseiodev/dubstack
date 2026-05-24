@@ -1,5 +1,3 @@
-import { DubError } from './errors';
-
 /**
  * A single entry in a git rebase --interactive todo file. `dub reorder` only
  * supports `pick` (keep the commit) and `drop` (skip it); the other rebase
@@ -27,13 +25,14 @@ export interface RebaseTodoEntry {
  * The string is newline-terminated so `git rebase` accepts it without
  * complaining about a missing trailing newline.
  *
- * @throws {DubError} If `entries` is empty (git rebase refuses an empty todo).
+ * @throws {Error} If `entries` is empty. This is a developer invariant, not
+ * a user-facing failure — `dub reorder` validates "all entries dropped" /
+ * "no commits to reorder" *before* calling this helper and surfaces those
+ * via `DubError`.
  */
 export function buildRebaseTodo(entries: readonly RebaseTodoEntry[]): string {
   if (entries.length === 0) {
-    throw new DubError('Cannot build an empty rebase todo.', [
-      'Pass at least one entry; an empty todo aborts the rebase.',
-    ]);
+    throw new Error('buildRebaseTodo: entries must be non-empty.');
   }
   const lines = entries.map((entry) => {
     const subject = entry.subject?.trim();
@@ -47,6 +46,12 @@ export function buildRebaseTodo(entries: readonly RebaseTodoEntry[]): string {
  * Returns true when the supplied entries describe a no-op reorder: every
  * commit kept in its original order with no drops. Used by `dub reorder` to
  * skip the rebase entirely when the picker exits unchanged.
+ *
+ * The length guard is defence-in-depth: in production, `dub reorder` always
+ * passes `entries` of the same length as `original` (drops are represented
+ * as `action: 'drop'` rather than absent entries), but a future caller or
+ * test that hands in a shorter list will correctly be treated as "not a
+ * no-op" so the rebase still runs.
  */
 export function isNoopReorder(
   original: readonly string[],

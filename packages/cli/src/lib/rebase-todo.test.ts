@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { DubError } from './errors';
 import { buildRebaseTodo, isNoopReorder } from './rebase-todo';
 
 describe('buildRebaseTodo', () => {
@@ -22,9 +21,10 @@ describe('buildRebaseTodo', () => {
     expect(todo).toBe('pick aaaaaaa\npick bbbbbbb\n');
   });
 
-  it('throws DubError with recovery hint when no entries are provided', () => {
-    expect(() => buildRebaseTodo([])).toThrow(DubError);
-    expect(() => buildRebaseTodo([])).toThrow(/empty rebase todo/);
+  it('throws a developer-invariant Error when no entries are provided', () => {
+    // Empty input is a programmer bug — `dub reorder` already filters
+    // all-drop / no-commit cases via DubError before reaching this helper.
+    expect(() => buildRebaseTodo([])).toThrow(/non-empty/);
   });
 
   it('always ends with a trailing newline', () => {

@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import select from '@inquirer/select';
@@ -6,17 +8,22 @@ import chalk from 'chalk';
 import { DubError } from '../lib/errors';
 import { execa } from '../lib/exec';
 import {
+  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCurrentBranch,
   getMergeBase,
   isWorkingTreeClean,
+  listWorktreeCheckouts,
 } from '../lib/git';
 import {
   buildRebaseTodo,
   isNoopReorder,
   type RebaseTodoEntry,
 } from '../lib/rebase-todo';
-import { restackConflictPrompt } from '../lib/restack-conflict-prompt';
+import {
+  resolveRestackConflictDecision,
+  restackConflictPrompt,
+} from '../lib/restack-conflict-prompt';
 import { rollbackRestack } from '../lib/restack-rollback';
 import { findStackForBranch, getParent, readState } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
@@ -59,6 +66,15 @@ export interface ReorderResult {
   rebased: string[];
   /** Set when the cascading restack hit a conflict. */
   conflictBranch?: string;
+  /**
+   * Discriminates between the reorder rebase itself producing a conflict
+   * (`'reorder'`) and the cascading descendant restack producing one
+   * (`'restack'`). The CLI wrapper uses this to print the right recovery
+   * hint — `dub continue` resumes a cascading restack, but the reorder
+   * rebase has no restack-progress.json, so users must `git rebase --continue`
+   * then `dub restack` manually.
+   */
+  conflictSource?: 'reorder' | 'restack';
   /** Set on no-op / cancellation paths to explain why nothing was rewritten. */
   noOpReason?: string;
 }
@@ -86,6 +102,7 @@ export interface ActionPromptInput {
 export type ActionPromptResult =
   | { kind: 'done' }
   | { kind: 'cancel' }
+  | { kind: 'noop' }
   | { kind: 'move'; todoIndex: number; direction: 'up' | 'down' }
   | { kind: 'toggle-drop'; todoIndex: number };
 
@@ -158,6 +175,28 @@ export async function reorder(
     );
   }
 
+  // Defence in depth: refuse to reorder a branch git reports as also checked
+  // out in another worktree. In practice git enforces that the same branch
+  // can't be checked out twice (and `getCurrentBranch` already errored on
+  // detached HEAD above), so this branch is rarely reached — keeping it
+  // guards against forced/inconsistent setups (e.g. `worktree add --force`
+  // followed by a manual ref edit) before `git rebase -i` would otherwise
+  // fail with a confusing message (Tier 3 pattern §5).
+  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
+  const otherWorktree = worktreeCheckouts.get(currentBranch);
+  if (otherWorktree) {
+    throw new DubError(
+      `Cannot reorder '${currentBranch}': branch is checked out in another worktree.`,
+      [
+        formatWorktreeCheckoutSkipMessage(
+          currentBranch,
+          otherWorktree,
+          'dub reorder',
+        ),
+      ],
+    );
+  }
+
   const parent = getParent(state, currentBranch);
   if (!parent) {
     throw new DubError(
@@ -194,7 +233,10 @@ export async function reorder(
   }
 
   const pickerResult = options.entries
-    ? { kind: 'done' as const, entries: options.entries }
+    ? {
+        kind: 'done' as const,
+        entries: validateProvidedEntries(options.entries, commits),
+      }
     : await runPicker(commits, options.promptAction);
 
   if (pickerResult.kind === 'cancel') {
@@ -273,15 +315,20 @@ export async function reorder(
           dropped: [],
           rebased: [],
           conflictBranch: currentBranch,
+          conflictSource: 'reorder',
         };
       }
-      // 'continue' — user resolves manually then runs `dub continue`.
+      // 'continue' — user resolves manually then runs `git rebase --continue`
+      // (no `restack-progress.json` exists yet because the conflict was in the
+      // reorder rebase, not the cascading restack — see the CLI wrapper for
+      // the source-aware recovery hint).
       return {
         status: 'conflict',
         finalPicks: [],
         dropped: [],
         rebased: [],
         conflictBranch: currentBranch,
+        conflictSource: 'reorder',
       };
     }
     throw error;
@@ -294,7 +341,25 @@ export async function reorder(
     .filter((e) => e.action === 'drop')
     .map((e) => e.sha);
 
-  const restackResult = await restack(cwd, { skipUndoEntry: true });
+  // Cascading restack — if it throws (e.g. post-rewrite hook left files
+  // staged), the reorder itself is already on disk; surface a hint pointing
+  // at `dub undo` so the user can roll back without losing the snapshot.
+  let restackResult: Awaited<ReturnType<typeof restack>>;
+  try {
+    restackResult = await restack(cwd, { skipUndoEntry: true });
+  } catch (error) {
+    if (error instanceof DubError) {
+      throw new DubError(
+        `Reorder succeeded but the cascading restack failed: ${error.message}`,
+        [
+          ...error.recovery,
+          "Run 'dub undo' to roll the reorder back to the pre-reorder branch tips.",
+          "Run 'dub restack' once the underlying issue is resolved to finish updating descendants.",
+        ],
+      );
+    }
+    throw error;
+  }
 
   return {
     status: restackResult.status === 'conflict' ? 'conflict' : 'success',
@@ -302,15 +367,63 @@ export async function reorder(
     dropped,
     rebased: restackResult.rebased,
     ...(restackResult.status === 'conflict'
-      ? { conflictBranch: restackResult.conflictBranch }
+      ? {
+          conflictBranch: restackResult.conflictBranch,
+          conflictSource: 'restack' as const,
+        }
       : {}),
   };
+}
+
+/**
+ * Validates an `entries` array supplied via `ReorderOptions` (tests + MCP)
+ * against the commits actually on the branch. Catches the failure mode
+ * where the caller supplies a partial todo (e.g. only 2 of 5 commits) —
+ * git would otherwise silently drop the missing commits from history.
+ *
+ * Returns the validated array. Throws a `DubError` with recovery hints on
+ * any mismatch.
+ */
+function validateProvidedEntries(
+  entries: readonly RebaseTodoEntry[],
+  commits: readonly CommitInfo[],
+): RebaseTodoEntry[] {
+  const validShas = new Set(commits.map((c) => c.sha));
+  if (entries.length !== commits.length) {
+    throw new DubError(
+      `Supplied 'entries' has ${entries.length} item(s) but the branch has ${commits.length} commit(s) beyond its parent.`,
+      [
+        'Pass exactly one entry per commit between the parent and HEAD.',
+        "Mark commits you want to remove with action: 'drop' instead of omitting them.",
+      ],
+    );
+  }
+  for (const [idx, entry] of entries.entries()) {
+    if (!validShas.has(entry.sha)) {
+      throw new DubError(
+        `'entries[${idx}]' references SHA '${entry.sha}' which is not on the current branch.`,
+        [
+          'Run `git log --format=%H <parent>..HEAD` to list the candidate SHAs.',
+          'Make sure every entry uses a full SHA from that list.',
+        ],
+      );
+    }
+  }
+  return entries as RebaseTodoEntry[];
 }
 
 async function defaultConflictPrompt(
   branch: string,
 ): Promise<'continue' | 'cancel' | 'exit'> {
-  return restackConflictPrompt({ branch });
+  // Match `dub restack`: in non-TTY contexts (CI, MCP, piped stdin), skip the
+  // prompt and default to `continue` so the existing "resolve + run dub
+  // continue" recovery still works.
+  const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+  return resolveRestackConflictDecision({
+    branch,
+    interactive,
+    promptChoice: (branchName) => restackConflictPrompt({ branch: branchName }),
+  });
 }
 
 /**
@@ -417,6 +530,12 @@ async function runPicker(
       return { kind: 'cancel' };
     }
 
+    if (action.kind === 'noop') {
+      // Prompt returned without a state change (e.g. user pressed (back));
+      // re-render the picker and re-prompt without deepening the call stack.
+      continue;
+    }
+
     if (action.kind === 'toggle-drop') {
       const displayIndex = todoIndexToDisplayIndex(
         action.todoIndex,
@@ -471,6 +590,23 @@ function todoIndexToDisplayIndex(todoIndex: number, total: number): number {
 async function defaultActionPrompt(
   input: ActionPromptInput,
 ): Promise<ActionPromptResult> {
+  try {
+    return await runDefaultActionPrompt(input);
+  } catch (error) {
+    // @inquirer/select throws ExitPromptError on Ctrl+C / SIGINT. Treat
+    // that as the same intent as the explicit "Cancel" choice so the
+    // picker exits cleanly and `runPicker` rolls back without printing
+    // a stack trace.
+    if (error instanceof Error && error.name === 'ExitPromptError') {
+      return { kind: 'cancel' };
+    }
+    throw error;
+  }
+}
+
+async function runDefaultActionPrompt(
+  input: ActionPromptInput,
+): Promise<ActionPromptResult> {
   printPickerState(input);
 
   const action = await select<'move' | 'toggle' | 'done' | 'cancel'>({
@@ -497,8 +633,11 @@ async function defaultActionPrompt(
       { name: '(back)', value: 'back' as const },
     ],
   });
+  // Returning 'noop' lets `runPicker` re-render and re-prompt without
+  // recursing into `defaultActionPrompt` (which would deepen the call stack
+  // on every (back) press).
   if (commitChoice === 'back') {
-    return defaultActionPrompt(input);
+    return { kind: 'noop' };
   }
 
   if (action === 'toggle') {
@@ -514,7 +653,7 @@ async function defaultActionPrompt(
     ],
   });
   if (direction === 'back') {
-    return defaultActionPrompt(input);
+    return { kind: 'noop' };
   }
   return { kind: 'move', todoIndex: commitChoice, direction };
 }
@@ -545,23 +684,28 @@ async function runInteractiveRebaseWithTodo(
   todoBody: string,
   cwd: string,
 ): Promise<void> {
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const stamp = randomUUID();
   const todoFile = path.join(os.tmpdir(), `dubstack-reorder-todo-${stamp}`);
+  // CJS extension required: git spawns this as a standalone Node script via
+  // `GIT_SEQUENCE_EDITOR`, with no --input-type=module context. The CLI
+  // package itself is ESM, so the bridge has to live in its own .cjs file.
   const bridgeFile = path.join(
     os.tmpdir(),
     `dubstack-reorder-bridge-${stamp}.cjs`,
   );
 
-  fs.writeFileSync(todoFile, todoBody);
-  // Git invokes `GIT_SEQUENCE_EDITOR` via the shell and appends the
+  // Git invokes `GIT_SEQUENCE_EDITOR` via /bin/sh and appends the
   // auto-generated todo path as the final arg, so the bridge sees the git
   // todo path on `process.argv[2]`. The pre-built todo path travels through
   // an env var to dodge shell-splitting on user paths with spaces (e.g.
   // `process.execPath` under a `/Users/John Doe/…` profile).
-  fs.writeFileSync(
-    bridgeFile,
-    "const fs=require('fs');fs.copyFileSync(process.env.DUBSTACK_REORDER_TODO,process.argv[2]);\n",
-  );
+  await Promise.all([
+    writeFile(todoFile, todoBody),
+    writeFile(
+      bridgeFile,
+      "const fs=require('fs');fs.copyFileSync(process.env.DUBSTACK_REORDER_TODO,process.argv[2]);\n",
+    ),
+  ]);
 
   try {
     await execa('git', ['rebase', '-i', base], {
@@ -611,6 +755,8 @@ function cleanupTempFile(filePath: string): void {
 /**
  * Internal helpers exposed for tests so picker state-transformation logic
  * (move up/down, toggle drop, finalise) can be covered without a real TTY.
+ *
+ * @internal Not part of the public API surface — do not import outside tests.
  */
 export const _testing = {
   buildActionPromptInput,

@@ -178,7 +178,120 @@ describe('reorder command', () => {
 
     expect(promptCalls).toEqual(['feat/branch']);
     expect(result.status).toBe('cancelled');
+    expect(result.conflictSource).toBeUndefined(); // cancelled path never sets conflictSource
     // Cancel-and-rollback restores the original branch tip.
     expect(await getBranchTip('feat/branch', dir)).toBe(originalTip);
+  });
+
+  it('conflict path with `exit` decision returns status exit and tags conflictSource=reorder', async () => {
+    await create('feat/branch', dir);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'first\n');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'A']);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'second\n');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'B']);
+
+    const shas = await getCommitShas('feat/branch');
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[0], action: 'pick' },
+      { sha: shas[1], action: 'pick' },
+    ];
+
+    const result = await reorder(dir, {
+      entries,
+      promptConflict: async () => 'exit',
+    });
+
+    expect(result.status).toBe('exit');
+    expect(result.conflictBranch).toBe('feat/branch');
+    expect(result.conflictSource).toBe('reorder');
+
+    // Tidy up the in-progress rebase so the next test can run cleanly.
+    await gitInRepo(dir, ['rebase', '--abort']);
+  });
+
+  it('conflict path with `continue` decision returns status conflict and tags conflictSource=reorder', async () => {
+    await create('feat/branch', dir);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'first\n');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'A']);
+    fs.writeFileSync(path.join(dir, 'shared.txt'), 'second\n');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'B']);
+
+    const shas = await getCommitShas('feat/branch');
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[0], action: 'pick' },
+      { sha: shas[1], action: 'pick' },
+    ];
+
+    const result = await reorder(dir, {
+      entries,
+      promptConflict: async () => 'continue',
+    });
+
+    expect(result.status).toBe('conflict');
+    expect(result.conflictBranch).toBe('feat/branch');
+    expect(result.conflictSource).toBe('reorder');
+
+    await gitInRepo(dir, ['rebase', '--abort']);
+  });
+
+  // Note: a "branch checked out in two worktrees" scenario can't be set up
+  // in a portable test — git refuses to check the same branch out twice, so
+  // we cannot construct the state `listWorktreeCheckouts` would need to
+  // report. The defensive guard in `reorder.ts` remains as documented.
+
+  it('rejects single-commit branches with a guiding DubError', async () => {
+    await create('feat/branch', dir);
+    await commitFile('a.txt', 'A', 'A');
+
+    const entries: RebaseTodoEntry[] = [
+      { sha: (await getCommitShas('feat/branch'))[0], action: 'pick' },
+    ];
+    await expect(reorder(dir, { entries })).rejects.toThrow(/only one commit/);
+  });
+
+  it('rejects supplied entries that do not cover every commit on the branch', async () => {
+    await create('feat/branch', dir);
+    await commitFile('a.txt', 'A', 'A');
+    await commitFile('b.txt', 'B', 'B');
+    await commitFile('c.txt', 'C', 'C');
+
+    const shas = await getCommitShas('feat/branch'); // [C, B, A]
+    // Only supply two of the three commits — should reject before touching git.
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[0], action: 'pick' },
+      { sha: shas[1], action: 'pick' },
+    ];
+    await expect(reorder(dir, { entries })).rejects.toThrow(
+      /has 2 item\(s\) but the branch has 3/,
+    );
+  });
+
+  it('rejects supplied entries that reference an unknown SHA', async () => {
+    await create('feat/branch', dir);
+    await commitFile('a.txt', 'A', 'A');
+    await commitFile('b.txt', 'B', 'B');
+
+    const shas = await getCommitShas('feat/branch'); // [B, A]
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[1], action: 'pick' }, // A
+      // Made-up SHA that is not on the branch.
+      { sha: '0000000000000000000000000000000000000000', action: 'pick' },
+    ];
+    await expect(reorder(dir, { entries })).rejects.toThrow(
+      /references SHA '0+' which is not on the current branch/,
+    );
+  });
+
+  it('rejects when the current branch is not tracked', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'untracked']);
+    await commitFile('a.txt', 'A', 'A');
+    await commitFile('b.txt', 'B', 'B');
+
+    const entries: RebaseTodoEntry[] = [];
+    await expect(reorder(dir, { entries })).rejects.toThrow(/is not tracked/);
   });
 });
