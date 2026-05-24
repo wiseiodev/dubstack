@@ -1,0 +1,114 @@
+---
+title: dub unlink
+description: Detach a tracked branch from its parent and promote it to the root of a new stack — without touching any local git branches.
+---
+
+`dub unlink` removes the parent edge for `<branch>` in DubStack state, promotes
+`<branch>` to the root of a brand-new stack, and (by default) retargets its open
+PR to the original trunk. Local git branches are untouched — only the tracking
+metadata moves.
+
+## Usage
+
+```bash
+dub unlink <branch>
+dub unlink <branch> --orphan-children
+dub unlink <branch> --no-retarget
+```
+
+| Flag | Description |
+|---|---|
+| `--keep-children` | Move descendants of `<branch>` with it into the new stack (default). |
+| `--orphan-children` | Re-parent direct children onto `<branch>`'s old parent so they stay in the original stack. |
+| `--no-retarget` | Skip the `gh pr edit` retarget. Surface a warning that the PR will be out of sync. |
+
+`--keep-children` and `--orphan-children` are mutually exclusive.
+
+## Examples
+
+### Default (`--keep-children`)
+
+```
+Before:                           After (dub unlink feat/auth-login):
+main                              main
+└─ feat/auth-base                 └─ feat/auth-base
+   └─ feat/auth-login
+      └─ feat/auth-mfa            feat/auth-login (new root)
+                                  └─ feat/auth-mfa
+```
+
+`feat/auth-login` becomes the root of a new stack. Any open PR for it is
+retargeted from `feat/auth-base` to `main` via `gh pr edit`.
+
+### `--orphan-children`
+
+```
+Before:                           After (dub unlink feat/auth-login --orphan-children):
+main                              main
+└─ feat/auth-base                 └─ feat/auth-base
+   └─ feat/auth-login                └─ feat/auth-mfa (reparented)
+      └─ feat/auth-mfa
+                                  feat/auth-login (new root)
+```
+
+Only `feat/auth-login` moves. Direct children are reparented onto its old
+parent so the original stack stays connected.
+
+### `--no-retarget`
+
+```bash
+dub unlink feat/auth-login --no-retarget
+```
+
+The PR base is left unchanged. DubStack prints a warning with the exact
+`gh pr edit` command needed to retarget manually.
+
+## What it does
+
+1. Validates `<branch>` is tracked, non-root, and the working tree is clean.
+2. If `<branch>` has an open PR, preflights `gh` and plans a retarget to the
+   original trunk.
+3. Records the planned retarget in the cleanup journal **before** touching
+   disk so a crash mid-`gh pr edit` is resumable via `dub continue`.
+4. Splits state atomically: removes the moved branches from the original
+   stack, creates a new stack with `<branch>` as its root.
+5. Writes an `unlink` undo entry so `dub undo` rolls the split back.
+6. Runs `gh pr edit --base <trunk>` for the planned retarget, then clears
+   the journal.
+
+## Crash safety
+
+If `dub unlink` is interrupted between `writeState` and the `gh pr edit`,
+`dub continue` replays the cleanup journal idempotently: it re-reads the
+current PR base and retargets only if it still differs from the new base.
+
+The journal is only created when a retarget is actually needed — if the
+branch has no PR, the PR is already on trunk, or `--no-retarget` is passed,
+no journal is written, so unrelated commands aren't blocked by an empty
+in-flight operation marker.
+
+## How `dub sync` treats a detached root
+
+The promoted root carries a `detached_root: true` flag in state. `dub sync`
+skips its trunk fast-forward loop for these branches — they're feature
+branches, and FFing them from `origin/<branch>` would silently overwrite
+local commits under `--force`. Use `dub restack` / `git pull` to update a
+detached root as you would any other feature branch.
+
+## Errors
+
+| Situation | Behavior |
+|---|---|
+| `<branch>` is not tracked | Fail with a hint to run `dub track`. |
+| `<branch>` is the root of its stack | Fail — root branches have no parent edge. |
+| Working tree has uncommitted changes | Fail with a hint to commit or stash. |
+| Both `--keep-children` and `--orphan-children` passed | Fail — flags are mutually exclusive. |
+
+## Related
+
+- `dub track <branch> --parent <branch>` — re-attach a previously unlinked
+  branch onto a new parent.
+- `dub move <branch>` — reorder branches **within** a stack instead of
+  splitting them off.
+- `dub undo` — roll back the most recent unlink, restoring the original
+  stack metadata.

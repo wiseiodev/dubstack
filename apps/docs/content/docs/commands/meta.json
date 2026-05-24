@@ -17,6 +17,7 @@
     "merge-next",
     "post-merge",
     "move",
+    "unlink",
     "undo",
     "doctor",
     "track",
