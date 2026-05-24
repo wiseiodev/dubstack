@@ -398,6 +398,7 @@ function validateProvidedEntries(
       ],
     );
   }
+  const seen = new Set<string>();
   for (const [idx, entry] of entries.entries()) {
     if (!validShas.has(entry.sha)) {
       throw new DubError(
@@ -408,6 +409,23 @@ function validateProvidedEntries(
         ],
       );
     }
+    if (seen.has(entry.sha)) {
+      throw new DubError(
+        `'entries' lists SHA '${entry.sha}' more than once. Each commit may appear only once.`,
+        [
+          'Remove the duplicate; mark commits you want to skip with `action: "drop"` instead of repeating them.',
+        ],
+      );
+    }
+    seen.add(entry.sha);
+  }
+  if (entries.every((e) => e.action === 'drop')) {
+    throw new DubError(
+      "Supplied 'entries' marks every commit as 'drop'; the rebase would leave the branch empty.",
+      [
+        "Keep at least one commit as 'pick' (use 'dub delete' if you really want to remove the branch).",
+      ],
+    );
   }
   return entries as RebaseTodoEntry[];
 }

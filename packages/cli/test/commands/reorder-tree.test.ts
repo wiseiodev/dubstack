@@ -286,6 +286,34 @@ describe('reorder command', () => {
     );
   });
 
+  it('rejects supplied entries that repeat a SHA', async () => {
+    await create('feat/branch', dir);
+    await commitFile('a.txt', 'A', 'A');
+    await commitFile('b.txt', 'B', 'B');
+
+    const shas = await getCommitShas('feat/branch'); // [B, A]
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[1], action: 'pick' },
+      { sha: shas[1], action: 'pick' }, // duplicate
+    ];
+    await expect(reorder(dir, { entries })).rejects.toThrow(/more than once/);
+  });
+
+  it('rejects supplied entries that mark every commit as drop', async () => {
+    await create('feat/branch', dir);
+    await commitFile('a.txt', 'A', 'A');
+    await commitFile('b.txt', 'B', 'B');
+
+    const shas = await getCommitShas('feat/branch'); // [B, A]
+    const entries: RebaseTodoEntry[] = [
+      { sha: shas[1], action: 'drop' },
+      { sha: shas[0], action: 'drop' },
+    ];
+    await expect(reorder(dir, { entries })).rejects.toThrow(
+      /marks every commit as 'drop'/,
+    );
+  });
+
   it('rejects when the current branch is not tracked', async () => {
     await gitInRepo(dir, ['checkout', '-b', 'untracked']);
     await commitFile('a.txt', 'A', 'A');
