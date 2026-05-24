@@ -577,6 +577,79 @@ function computeCiRollup(checks: unknown): CiStatusRollup {
   return 'NONE';
 }
 
+/** Merge metadata for a PR, used by `dub revert`. */
+export interface PrMergeInfo {
+  number: number;
+  state: BranchPrLifecycleState;
+  mergeCommitSha: string | null;
+  headRefName: string | null;
+}
+
+/**
+ * Fetches the merge metadata for a PR by number. Returns `null` when the PR
+ * does not exist. `mergeCommitSha` is populated only for merged PRs; the
+ * caller is responsible for translating "not merged" / "no merge commit" into
+ * the right user-facing error.
+ */
+export async function getPrMergeInfoByNumber(
+  prNumber: number,
+  cwd: string,
+): Promise<PrMergeInfo | null> {
+  let stdout: string;
+  try {
+    const result = await runGh(
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'number,state,mergedAt,mergeCommit,headRefName',
+        '--jq',
+        '.',
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    if (isPrNotFoundError(root)) return null;
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`, [
+      `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      number?: number;
+      state?: string;
+      mergedAt?: string | null;
+      mergeCommit?: { oid?: string | null } | null;
+      headRefName?: string | null;
+    };
+    const number = typeof parsed.number === 'number' ? parsed.number : prNumber;
+    const mergeCommitSha =
+      parsed.mergeCommit && typeof parsed.mergeCommit.oid === 'string'
+        ? parsed.mergeCommit.oid
+        : null;
+    return {
+      number,
+      state: classifyPrState(parsed.state, parsed.mergedAt),
+      mergeCommitSha,
+      headRefName: parsed.headRefName ?? null,
+    };
+  } catch {
+    throw new DubError(`Failed to parse PR #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json number,state,mergedAt,mergeCommit,headRefName' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+}
+
 /**
  * Returns coarse lifecycle state of a PR by number.
  */
