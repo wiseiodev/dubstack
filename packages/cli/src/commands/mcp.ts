@@ -634,7 +634,7 @@ async function callTool(
         }),
       );
     case 'dubstack.status':
-      return jsonToolResult(toJsonValue(await status(cwd)));
+      return jsonToolResult(await status(cwd));
     case 'dubstack.parent':
       return jsonToolResult(await parent(cwd, optionalString(args.branch)));
     case 'dubstack.children':

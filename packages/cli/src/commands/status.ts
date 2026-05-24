@@ -31,7 +31,10 @@ export interface DriftSnapshot {
 
 export interface StatusResult {
   schemaVersion: 1;
-  currentBranch: string | null;
+  // `getCurrentBranch` throws DubError on detached HEAD, so callers always
+  // receive a resolved branch name here. The CLI in DUB-28 may add a wrapper
+  // that catches and surfaces a null/error snapshot to its consumers.
+  currentBranch: string;
   operation: ActiveOperation;
   branch: BranchSnapshot;
   pr: PrSnapshot;
