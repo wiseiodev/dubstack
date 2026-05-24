@@ -716,7 +716,10 @@ program
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
-  .option('--branch <name>', 'Submit only the specified branch')
+  .option(
+    '--branch <name>',
+    'Submit exactly this one branch (no ancestors, no descendants)',
+  )
   .option(
     '--path <mode>',
     "[deprecated] Use --downstack (for 'current') or --stack",
@@ -745,7 +748,10 @@ program
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
-  .option('--branch <name>', 'Submit only the specified branch')
+  .option(
+    '--branch <name>',
+    'Submit exactly this one branch (no ancestors, no descendants)',
+  )
   .option(
     '--path <mode>',
     "[deprecated] Use --downstack (for 'current') or --stack",
@@ -1467,7 +1473,15 @@ async function runSubmit(options: {
     for (const branch of [...result.created, ...result.updated]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
+    return;
   }
+
+  const scopeLabel = describeScopeLabel(result.scope);
+  console.log(
+    chalk.yellow(
+      `⚠ Nothing to push for ${scopeLabel}. The selected scope contains no submittable branches.`,
+    ),
+  );
 }
 
 async function runFlow(options: {

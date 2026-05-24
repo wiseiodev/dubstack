@@ -17,7 +17,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
-import { type SubmitPathMode, submit } from './submit';
+import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
 
@@ -766,7 +766,7 @@ async function mutatingToolResult<T>(
   }
 }
 
-function optionalSubmitPath(value: unknown): SubmitPathMode | undefined {
+function optionalSubmitPath(value: unknown): 'current' | 'stack' | undefined {
   if (value === 'current' || value === 'stack') return value;
   return undefined;
 }

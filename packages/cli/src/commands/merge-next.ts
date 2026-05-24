@@ -29,7 +29,7 @@ export async function mergeNext(
   await ensureGhInstalled();
   await checkGhAuth();
 
-  const plan = await getSubmitPlan(cwd, { downstack: true, fix: true });
+  const plan = await getSubmitPlan(cwd, { downstack: true });
   const nextBranch = plan.branches[0]?.name;
   if (!nextBranch) {
     throw new DubError('No mergeable branch found in the current path.', [

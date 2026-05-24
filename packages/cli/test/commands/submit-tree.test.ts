@@ -179,6 +179,44 @@ describe('submit tree integration', () => {
     warn.mockRestore();
   });
 
+  it('--upstack throws an actionable error when stack metadata has a cycle', async () => {
+    const cyclic: DubState = {
+      stacks: [
+        {
+          id: 'cyclic-stack',
+          branches: [
+            {
+              name: 'main',
+              parent: null,
+              type: 'root',
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'feat/b',
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(cyclic, dir);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+
+    await expect(getSubmitPlan(dir, { upstack: true })).rejects.toThrow(
+      /cycle detected while walking upstack/,
+    );
+  });
+
   it("'--path stack' emits a deprecation warning and behaves like --stack", async () => {
     await writeState(makeTreeState(), dir);
     await createTreeBranches();

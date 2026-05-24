@@ -342,12 +342,18 @@ export function resolveScope(options: SubmitOptions): SubmitScope {
   ];
   const activeFlags = flags.filter((f) => f.set).map((f) => f.name);
   if (activeFlags.length > 1) {
+    const recovery = [
+      'Pass exactly one of --upstack, --downstack, --stack, --branch <name>.',
+      'Omit all scope flags to submit the current branch and its ancestors (default).',
+    ];
+    if (activeFlags.includes('--path')) {
+      recovery.push(
+        "Drop '--path' — it is deprecated and cannot be combined with the new scope flags.",
+      );
+    }
     throw new DubError(
       `Scope flags are mutually exclusive: ${activeFlags.join(', ')}.`,
-      [
-        'Pass exactly one of --upstack, --downstack, --stack, --branch <name>.',
-        'Omit all scope flags to submit the current branch and its ancestors (default).',
-      ],
+      recovery,
     );
   }
 
@@ -410,7 +416,16 @@ function getUpstackBranches(stack: Stack, startBranch: string): Branch[] {
   const seen = new Set<string>();
   while (queue.length > 0) {
     const current = queue.shift();
-    if (!current || seen.has(current.name)) continue;
+    if (!current) continue;
+    if (seen.has(current.name)) {
+      throw new DubError(
+        `Stack metadata is invalid: cycle detected while walking upstack from '${startBranch}'.`,
+        [
+          "Run 'dub doctor' to inspect the stack and surface the bad parent link.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch.",
+        ],
+      );
+    }
     seen.add(current.name);
     result.push(current);
     const children = childMap.get(current.name) ?? [];
