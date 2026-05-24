@@ -201,8 +201,12 @@ async function executeRestackSteps(
 
       const parentNewTip = await getBranchTip(step.parent, cwd);
       if (parentNewTip === step.parentOldTip) {
-        step.status = 'skipped';
         updateParentRevision(state, step.branch, parentNewTip);
+        // Persist state BEFORE marking the step skipped in progress, so a
+        // writeState failure leaves the step pending (retryable) rather than
+        // marked done with stale parent_revision on disk.
+        await writeState(state, cwd);
+        step.status = 'skipped';
         await writeProgress(progress, cwd);
         continue;
       }
@@ -220,9 +224,15 @@ async function executeRestackSteps(
 
       try {
         await rebaseOnto(parentNewTip, step.parentOldTip, step.branch, cwd);
+        updateParentRevision(state, step.branch, parentNewTip);
+        // Persist state BEFORE marking the step done in progress: if
+        // writeState fails, the step stays pending and the next run retries
+        // the rebase; if we wrote progress first, a writeState failure would
+        // leave parent_revision stale on disk and continue would skip the
+        // already-done step (the original DUB-75 bug, in a different shape).
+        await writeState(state, cwd);
         step.status = 'done';
         rebased.push(step.branch);
-        updateParentRevision(state, step.branch, parentNewTip);
         await writeProgress(progress, cwd);
       } catch (error) {
         if (error instanceof DubError && error.message.includes('Conflict')) {
