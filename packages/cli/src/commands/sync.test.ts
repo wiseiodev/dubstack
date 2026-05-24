@@ -16,11 +16,26 @@ vi.mock('../lib/git.js', () => ({
   getCurrentBranch: vi.fn(),
   getRefSha: vi.fn(),
   hardResetBranchToRef: vi.fn(),
+  hasUniquePatchCommits: vi.fn().mockResolvedValue(true),
   isAncestor: vi.fn(),
   listWorktreeCheckouts: vi.fn(),
   pruneRemote: vi.fn(),
   rebaseBranchOntoRef: vi.fn(),
   remoteBranchExists: vi.fn(),
+}));
+
+vi.mock('../lib/sync/journal.js', () => ({
+  startCleanupJournal: vi.fn().mockResolvedValue({
+    version: 1,
+    started_at: 'mock',
+    operations: [],
+  }),
+  appendCleanupOperation: vi.fn().mockResolvedValue(undefined),
+  clearCleanupJournal: vi.fn().mockResolvedValue(undefined),
+  hasCleanupJournal: vi.fn().mockResolvedValue(false),
+  readCleanupJournal: vi.fn().mockResolvedValue(null),
+  getCleanupJournalPath: vi.fn().mockResolvedValue('/tmp/journal.json'),
+  CLEANUP_JOURNAL_FILENAME: 'cleanup-journal.json',
 }));
 
 vi.mock('../lib/git/is-merged-by-patch-id.js', () => ({
@@ -630,6 +645,39 @@ describe('sync', () => {
     expect(
       writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
     ).toBeTruthy();
+  });
+
+  it('still reparents an excluded-from-sync child when its parent gets deleted', async () => {
+    // trunk → feat/a (MERGED, will delete) → feat/b (CLOSED, commits not in
+    // trunk → skipped + added to excludedFromSync). The reparent op for
+    // feat/b must still apply or its `parent` would dangle on a now-deleted
+    // ancestor.
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetBranchPrSyncInfo.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') return { state: 'MERGED', baseRefName: 'main' };
+      if (branch === 'feat/b')
+        return { state: 'CLOSED', baseRefName: 'feat/a' };
+      return { state: 'NONE', baseRefName: null };
+    });
+    // CLOSED + not merged into any root → skipped + excluded.
+    mockIsAncestor.mockResolvedValue(false);
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    const writtenState = mockWriteState.mock.calls.at(-1)?.[0] as DubState;
+    const featB = writtenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/b',
+    );
+    expect(featB?.parent).toBe('main');
+    expect(
+      writtenState.stacks[0].branches.find((b) => b.name === 'feat/a'),
+    ).toBeUndefined();
   });
 
   it('warns when auto-cleaning a merged branch with dependent children', async () => {

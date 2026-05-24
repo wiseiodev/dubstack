@@ -2,12 +2,14 @@ import { execa } from 'execa';
 import { DubError } from '../lib/errors';
 import { rebaseContinue } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
+import { resumeCleanup } from '../lib/sync/cleanup-resume';
 import { aiResolve } from './ai-resolve';
 import { restackContinue } from './restack';
 
 interface ContinueCommandResult {
-  continued: 'rebase' | 'restack' | 'ai-resolve';
+  continued: 'rebase' | 'restack' | 'ai-resolve' | 'cleanup';
   restackResult?: Awaited<ReturnType<typeof restackContinue>>;
+  cleanupResult?: Awaited<ReturnType<typeof resumeCleanup>>;
 }
 
 export async function continueCommand(
@@ -49,6 +51,11 @@ export async function continueCommand(
   if (active === 'restack') {
     const restackResult = await restackContinue(cwd);
     return { continued: 'restack', restackResult };
+  }
+
+  if (active === 'cleanup') {
+    const cleanupResult = await resumeCleanup(cwd);
+    return { continued: 'cleanup', cleanupResult };
   }
 
   await rebaseContinue(cwd);

@@ -2,8 +2,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getRepoRoot } from './git';
 import { getDubDir } from './state';
+import { hasCleanupJournal } from './sync/journal';
 
-export type ActiveOperation = 'none' | 'rebase' | 'restack';
+export type ActiveOperation = 'none' | 'rebase' | 'restack' | 'cleanup';
 
 export async function getRestackProgressPath(cwd: string): Promise<string> {
   const dubDir = await getDubDir(cwd);
@@ -27,6 +28,9 @@ export async function detectActiveOperation(
 ): Promise<ActiveOperation> {
   if (await hasRestackProgress(cwd)) return 'restack';
   if (await hasGitRebaseInProgress(cwd)) return 'rebase';
+  // Cleanup is the lowest-priority signal: a git rebase or restack in flight
+  // takes precedence so users finish their interactive operation first.
+  if (await hasCleanupJournal(cwd)) return 'cleanup';
   return 'none';
 }
 

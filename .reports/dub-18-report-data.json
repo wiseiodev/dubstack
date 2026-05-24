@@ -1,0 +1,366 @@
+{
+  "meta": {
+    "workId": "DUB-18",
+    "title": "DFS-greedy cleanup with eager re-parenting + idempotent continue-replay journal",
+    "artifactId": "dub-18",
+    "repo": "dubstack",
+    "date": "2026-05-23",
+    "branch": "feature/dub-18-dfs-greedy-cleanup-with-eager-re-parenting-idempotent",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-18",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 15,
+    "additions": 1112,
+    "deletions": 60,
+    "diffStat": "15 files changed, 1112 insertions(+), 60 deletions(-)"
+  },
+  "prompt": "Adopt Graphite's DFS-greedy cleanup algorithm with eager re-parenting and add an idempotent replay journal so `dub continue` can resume cleanup mid-flow.",
+  "tldr": "Replace `dub sync`'s flat cleanup scan with a DFS-greedy algorithm that interleaves re-parent and delete ops, and journal every decision to `.git/dubstack/cleanup-journal.json` before execution so `dub continue` can replay it idempotently after a crash or Ctrl-C.",
+  "why": {
+    "motivation": [
+      "Cleanup ran as an undifferentiated flat scan: a merged middle branch deleted, its child was reparented as a side-effect — no plan, no log, no replay path.",
+      "If sync crashed or was cancelled mid-cleanup, the only recovery was to re-run `dub sync` and hope the second pass converged to the same answer.",
+      "Stacks with multi-branch chains where intermediate branches got merged didn't get the rest of the chain collapsed greedily — each branch survived independently until its turn came up."
+    ],
+    "before": [
+      "`buildCleanupPlan` returned `{ toDelete, skipped }` — a flat list with no awareness of parent/child relationships.",
+      "Re-parenting happened implicitly inside `removeBranchFromState` when each delete was applied, with no journal of the decision.",
+      "There was no `cleanup` active operation; an interrupted cleanup left the repo half-changed with no way to resume."
+    ],
+    "after": [
+      "`buildCleanupPlan` walks the tree DFS from trunk children, deferring each deletable branch until its child blockers are also deletable, and emits an ordered `operations` list interleaving `reparent` and `delete` ops.",
+      "`sync` writes every op to `.git/dubstack/cleanup-journal.json` *before* executing it; the journal is cleared only on full success.",
+      "`detectActiveOperation` reports `cleanup` when the journal is left behind, and `dub continue` dispatches to `resumeCleanup` for idempotent replay (deletes no-op when the ref is gone, reparents no-op when state already matches, ghost state entries get swept). `dub abort` clears the journal."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/sync/cleanup.ts",
+      "changeType": "mod",
+      "additions": 248,
+      "deletions": 21,
+      "explanation": "Rewrites `buildCleanupPlan` as a DFS-greedy walk with eager re-parenting. New optional `parentOf`, `isEmpty`, `force` inputs; returns an ordered `operations` list plus per-category `toDelete`/`toReparent`/`skipped`. Backwards compatible when `parentOf` is omitted (flat mode preserves prior behavior).",
+      "snippet": "while (queue.length > 0) {\n  const branch = queue.shift();\n  if (branch == null) break;\n  if (visited.has(branch) || deleted.has(branch)) continue;\n\n  const reason = await getDeleteReason(branch);\n  if (reason != null) {\n    visited.add(branch);\n    const liveChildren = (childrenOf.get(branch) ?? []).filter(\n      (c) => !deleted.has(c),\n    );\n    pendingDelete.set(branch, { reason, blockers: new Set(liveChildren) });\n    for (let i = liveChildren.length - 1; i >= 0; i--) {\n      const child = liveChildren[i];\n      if (!visited.has(child) && !deleted.has(child)) queue.unshift(child);\n    }\n    greedilyDeleteUnblocked();\n    continue;\n  }\n  // ... reparent path releases old-parent blocker so greedy delete can fire",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/sync/journal.ts",
+      "changeType": "new",
+      "additions": 108,
+      "deletions": 0,
+      "explanation": "New atomic append-only journal at `.git/dubstack/cleanup-journal.json`. `start` / `append` / `read` / `clear`; writes go through a tmp + rename so a crash mid-write can't leave a half-flushed file. `version: 1` validated on read.",
+      "snippet": "const tmp = `${journalPath}.tmp`;\nfs.writeFileSync(tmp, `${JSON.stringify(journal, null, 2)}\\n`, 'utf8');\nfs.renameSync(tmp, journalPath);",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/cleanup-resume.ts",
+      "changeType": "new",
+      "additions": 113,
+      "deletions": 0,
+      "explanation": "Idempotent journal replay used by `dub continue`. Always cleans the state entry for a delete op (sweeps ghost entries from a crash between `git branch -D` and `writeState`), no-ops when the git ref or parent assignment is already gone/matching, and clears the journal after a successful pass.",
+      "snippet": "if (op.type === 'delete') {\n  const stateChanged = removeBranchFromStacks(state.stacks, op.branch);\n  if (stateChanged) stateDirty = true;\n\n  if (op.branch === currentBranch) {\n    console.log(`⚠ Branch '${op.branch}' is currently checked out; left it in place. ...`);\n    alreadyApplied.push(op);\n    continue;\n  }\n  const exists = await branchExists(op.branch, cwd);\n  if (!exists) { alreadyApplied.push(op); continue; }\n  await deleteBranch(op.branch, cwd);\n  applied.push(op);\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 95,
+      "deletions": 36,
+      "explanation": "Threads stack `parentOf`, `--force`, and an `isEmpty` check (via `hasUniquePatchCommits`) into `buildCleanupPlan`. Iterates the returned `operations` list in order, journaling each op before applying it, then calls `clearCleanupJournal` on success. Auto-clean warning now derives dependent branches from the in-plan reparent set; `reparentedDueToMergedParent` derives from a look-ahead at the matching `delete` op.",
+      "snippet": "const cleanupJournal = await startCleanupJournal(cwd);\nfor (const op of cleanupPlan.operations) {\n  if (op.type === 'reparent') {\n    await appendCleanupOperation(cwd, cleanupJournal, op);\n    const stateEntry = stateBranchMap.get(op.branch);\n    if (stateEntry) stateEntry.parent = op.newParent;\n    reparentedBranchNames.add(op.branch);\n    // ... mark orphan-due-to-merged-parent\n    continue;\n  }\n  // delete: log, journal, checkout, deleteBranch, drop state entry\n}\nawait clearCleanupJournal(cwd);",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/operation-state.ts",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 1,
+      "explanation": "Adds `'cleanup'` to `ActiveOperation` and reports it from `detectActiveOperation` when the journal is present and no rebase/restack is in flight (rebase/restack still take precedence).",
+      "snippet": "if (await hasRestackProgress(cwd)) return 'restack';\nif (await hasGitRebaseInProgress(cwd)) return 'rebase';\nif (await hasCleanupJournal(cwd)) return 'cleanup';\nreturn 'none';",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/continue.ts",
+      "changeType": "mod",
+      "additions": 8,
+      "deletions": 1,
+      "explanation": "Dispatches to `resumeCleanup` when the active operation is `cleanup` and surfaces the replay result on the command return value.",
+      "snippet": "if (active === 'cleanup') {\n  const cleanupResult = await resumeCleanup(cwd);\n  return { continued: 'cleanup', cleanupResult };\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/abort.ts",
+      "changeType": "mod",
+      "additions": 6,
+      "deletions": 1,
+      "explanation": "Clears the cleanup journal when the user aborts a pending cleanup, so the next `dub sync` starts from scratch instead of replaying.",
+      "snippet": "if (active === 'cleanup') {\n  await clearCleanupJournal(cwd);\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/conflict-context.ts",
+      "changeType": "mod",
+      "additions": 11,
+      "deletions": 0,
+      "explanation": "Throws a clear `DubError` if conflict-context is invoked during a cleanup operation — cleanup replay can't produce merge conflicts so there's nothing for `--ai` to resolve.",
+      "snippet": "if (operation === 'cleanup') {\n  throw new DubError(\n    'Cleanup replay does not produce merge conflicts requiring AI resolution.',\n    [\"Run 'dub continue' to replay the pending cleanup journal.\", \"Run 'dub abort' to discard the pending cleanup journal.\"],\n  );\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/cleanup.test.ts",
+      "changeType": "mod",
+      "additions": 134,
+      "deletions": 0,
+      "explanation": "Adds a `DFS-greedy with re-parenting` describe block: 3-deep stack reparents child onto grandparent, cascading reparent through multiple merged ancestors, empty-branch safety with and without `--force`, bottom-up greedy deletion order.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/lib/sync/journal.test.ts",
+      "changeType": "new",
+      "additions": 75,
+      "deletions": 0,
+      "explanation": "Integration tests against a real temp git repo: journal records ops in order then clears, malformed payloads are rejected with a clear DubError, no-op clear is safe.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/test/lib/sync/cleanup-resume.test.ts",
+      "changeType": "new",
+      "additions": 197,
+      "deletions": 0,
+      "explanation": "End-to-end replay tests: full replay deletes the branch and reparents state, ghost state entry is swept when the branch ref is already gone, idempotent second replay is a no-op, journal is cleared after a successful pass.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/continue.test.ts",
+      "changeType": "mod",
+      "additions": 21,
+      "deletions": 1,
+      "explanation": "Asserts `dub continue` dispatches to `resumeCleanup` and returns the replay payload when active operation is `cleanup`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/abort.test.ts",
+      "changeType": "mod",
+      "additions": 18,
+      "deletions": 0,
+      "explanation": "Asserts `dub abort` clears the cleanup journal and reports `aborted: 'cleanup'` when the active operation is `cleanup`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.test.ts",
+      "changeType": "mod",
+      "additions": 15,
+      "deletions": 0,
+      "explanation": "Adds `hasUniquePatchCommits` to the git mock and mocks the new journal module so the 50 existing sync tests continue to pass unchanged against the new ops-based cleanup loop.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-18-qa.md",
+      "changeType": "new",
+      "additions": 60,
+      "deletions": 0,
+      "explanation": "Self-QA fallback document — non-browser CLI change, deterministic vitest evidence in lieu of a video.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "DFS-greedy algorithm correctness",
+      "location": "packages/cli/src/lib/sync/cleanup.ts:170-240",
+      "rationale": "Verify the reparent path releases the old parent's blocker (so greedy delete can collapse the chain), and the walk-up-to-non-deleted helper correctly skips both deleted and pending-delete ancestors."
+    },
+    {
+      "title": "Crash-safety of the journal write path",
+      "location": "packages/cli/src/lib/sync/journal.ts:97-108",
+      "rationale": "Writes go through tmp + atomic rename so a partial flush can't poison the next `dub continue`. Worth double-checking the version validation on read rejects old/unknown shapes loudly."
+    },
+    {
+      "title": "Idempotent replay sweeps ghost state",
+      "location": "packages/cli/src/lib/sync/cleanup-resume.ts:54-78",
+      "rationale": "A crash between `git branch -D` and `writeState` in the original sync can leave the state entry pointing at a now-missing branch. Replay must clean that ghost entry unconditionally — covered by the new `drops a ghost state entry` test."
+    },
+    {
+      "title": "Existing `dub sync` UX preserved",
+      "location": "packages/cli/src/commands/sync.ts:300-395",
+      "rationale": "Auto-clean dependent-branch warning, `parent-merged-orphan` outcome, and `sync-parent-merged-reparent` reconcile source must keep working under the new ops-based loop. Covered by the 50 prior sync tests still passing."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "DFS-greedy cleanup algorithm cases (6 new + 9 existing)",
+      "status": "done",
+      "evidence": "packages/cli/src/lib/sync/cleanup.test.ts — `buildCleanupPlan` + `DFS-greedy with re-parenting` describe blocks."
+    },
+    {
+      "kind": "integration",
+      "label": "Journal round-trip and replay against a real temp git repo (7 cases)",
+      "status": "done",
+      "evidence": "packages/cli/test/lib/sync/journal.test.ts (3) + packages/cli/test/lib/sync/cleanup-resume.test.ts (4)."
+    },
+    {
+      "kind": "unit",
+      "label": "`dub continue` / `dub abort` cleanup dispatch",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/continue.test.ts + packages/cli/src/commands/abort.test.ts — new `cleanup` operation cases."
+    },
+    {
+      "kind": "unit",
+      "label": "Existing `dub sync` behavior preserved end-to-end",
+      "status": "done",
+      "evidence": "packages/cli/src/commands/sync.test.ts — 50 cases including dependent-child warning, surviving-child refresh, parent_revision preservation, per-branch error isolation."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 225 files in 47ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit clean for `dubstack` and `docs` packages."
+    },
+    {
+      "name": "vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "655 tests passing across 77 files (was 639 / 75 pre-DUB-18)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No `.tsx` files touched, no UI surface — pure CLI behavior change exercised by deterministic vitest cases against a real temp git repo.",
+    "fallbackApprovedByUser": true,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-18-qa.md",
+    "caption": "Self-QA fallback for the new cleanup algorithm, journal, and continue/abort dispatch — all AC items covered by tests.",
+    "scenarios": [
+      "3-deep stack with middle merged → child reparented onto trunk, middle deleted (cleanup.test.ts).",
+      "Cascading reparent through multiple merged ancestors → leaf attaches to trunk (cleanup.test.ts).",
+      "Empty branch with no PR is preserved by default; deleted only with `--force` (cleanup.test.ts).",
+      "Journal records every decision before execution and clears on success (journal.test.ts).",
+      "`dub continue` replays the journal idempotently: ghost state entries swept, no-op on second replay (cleanup-resume.test.ts).",
+      "`dub abort` clears the cleanup journal (abort.test.ts)."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`buildCleanupPlan` in `lib/sync/cleanup.ts` implements DFS-greedy with eager re-parenting",
+      "status": "satisfied",
+      "evidence": "packages/cli/src/lib/sync/cleanup.ts — DFS queue starts at trunk children, recurses into a deletable parent's children, eager-deletes when blockers clear."
+    },
+    {
+      "criterion": "Branches whose blocking children are deleted are themselves immediately deleted",
+      "status": "satisfied",
+      "evidence": "`greedilyDeleteUnblocked` iterates `pendingDelete` and deletes any entry whose blocker set is empty; verified by `greedy-deletes a chain when both ancestor and child are merged` test."
+    },
+    {
+      "criterion": "Re-parented orphans correctly attach to nearest non-deleted ancestor",
+      "status": "satisfied",
+      "evidence": "`walkUpToNonDeleted` skips both deleted and pending-delete ancestors; verified by `re-parents an open child onto the grandparent` and `cascades reparenting through several merged ancestors`."
+    },
+    {
+      "criterion": "Empty branches without PRs are NOT auto-deleted unless `--force`",
+      "status": "satisfied",
+      "evidence": "`getDeleteReason` only returns `empty-branch` for `NONE`-PR branches when `input.force === true`. Verified by `does not delete an empty branch with no PR by default` and `deletes an empty branch with no PR when --force is set`."
+    },
+    {
+      "criterion": "`.git/dubstack/cleanup-journal.json` records every cleanup decision before execution",
+      "status": "satisfied",
+      "evidence": "`sync.ts` calls `appendCleanupOperation` before each `deleteBranch` / state mutation. Verified by `records operations in order and clears on success` in `journal.test.ts`."
+    },
+    {
+      "criterion": "`dub continue` replays the journal idempotently",
+      "status": "satisfied",
+      "evidence": "`resumeCleanup` no-ops when the branch ref or parent assignment is already in the target state; ghost state entries get swept. Verified by `is idempotent: a second replay ... is a no-op` and `drops a ghost state entry` in `cleanup-resume.test.ts`."
+    },
+    {
+      "criterion": "Tests: 3-deep stack with middle merged → child re-parented onto grandparent, middle deleted",
+      "status": "satisfied",
+      "evidence": "`re-parents an open child onto the grandparent when the middle is merged` in cleanup.test.ts asserts ordered `[reparent, delete]` ops."
+    },
+    {
+      "criterion": "Tests: interruption mid-cleanup → `dub continue` resumes from journal",
+      "status": "satisfied",
+      "evidence": "`replays a journal: reparents a child and deletes the merged middle` in cleanup-resume.test.ts simulates a paused cleanup and verifies branch ref + state both reach the intended end state."
+    },
+    {
+      "criterion": "Tests: empty-branch safety rule",
+      "status": "satisfied",
+      "evidence": "Both branches of the rule (no-force keeps, force deletes) are covered in cleanup.test.ts."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 1,
+    "nitpick": 0,
+    "findings": [
+      "Critical (fixed): `dropBranchFromState` after a `delete` op only removed the entry without forwarding children. Combined with a crash between `git branch -D` and `writeState`, replay would leave a ghost state entry pointing at a missing branch — fixed by always sweeping the entry in `resumeCleanup` and adding the `drops a ghost state entry` test.",
+      "Important (fixed): `abort.test.ts` had no coverage for the new `cleanup` operation — fixed by adding `aborts a pending cleanup by clearing the journal`.",
+      "Minor: when the journal references the user's current HEAD branch, replay skips the git delete (state is still swept). A clearer warning is now printed; the next `dub sync` will re-plan and delete once the user moves off."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-1 — Universal recovery hints in DubError",
+      "status": "Done (landed)"
+    },
+    {
+      "name": "DUB-14 — Expand sync status taxonomy + reconciliation source tags",
+      "status": "Done (landed)"
+    }
+  ],
+  "rollout": {
+    "summary": "Source-only change in the CLI package — no migration, no flag, ships with the next `dub` release.",
+    "steps": [
+      {
+        "when": "Merge",
+        "label": "Land on `main`",
+        "details": "Squash-merge the PR. No data migration; `.git/dubstack/cleanup-journal.json` is created on demand and cleaned up after each successful sync."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Verify on a real stack",
+        "details": "Run `dub sync` on a stack with a merged middle branch; confirm the child reparents and the middle is deleted with the `↪ Reparenting … onto …` log line."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "808c497ab4175f58fd56fb467d1c928f6119516b",
+    "shortSha": "808c497",
+    "message": "feat(sync): dfs-greedy cleanup with eager reparenting + journal replay [DUB-18]"
+  }
+}

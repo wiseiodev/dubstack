@@ -44,6 +44,17 @@ export async function gatherConflictContext(
       "Run 'git status' to confirm whether a rebase is actually in progress.",
     ]);
   }
+  if (operation === 'cleanup') {
+    // Cleanup replay is non-interactive and can't generate merge conflicts —
+    // there's no conflict context to gather for it.
+    throw new DubError(
+      'Cleanup replay does not produce merge conflicts requiring AI resolution.',
+      [
+        "Run 'dub continue' to replay the pending cleanup journal.",
+        "Run 'dub abort' to discard the pending cleanup journal.",
+      ],
+    );
+  }
 
   const conflictedFiles = await getConflictedFiles(cwd);
 
