@@ -250,7 +250,14 @@ describe('postMerge — tree scenarios', () => {
     for (const entry of result.reparented) {
       expect(entry.parent).toBe('main');
     }
-    expect(result.retargeted).toEqual(['feat/a', 'feat/b', 'feat/c']);
+    // Set-equality: the WHICH matters, not the iteration order. The order
+    // contract (alphabetical via retargetOpenPrBranches sort) is pinned by a
+    // dedicated test below.
+    expect([...result.retargeted].sort()).toEqual([
+      'feat/a',
+      'feat/b',
+      'feat/c',
+    ]);
 
     const retargetCalls = mockRetargetPrBase.mock.calls
       .map((c) => c[0] as string)
@@ -296,7 +303,7 @@ describe('postMerge — tree scenarios', () => {
     }
     // Only the reparented siblings need their PR base retargeted; grandchildren
     // keep their existing parent so no retarget is requested for them.
-    expect(result.retargeted).toEqual(['feat/sib-a', 'feat/sib-b']);
+    expect([...result.retargeted].sort()).toEqual(['feat/sib-a', 'feat/sib-b']);
     const retargetedNames = mockRetargetPrBase.mock.calls
       .map((c) => c[0] as string)
       .sort();
@@ -334,7 +341,7 @@ describe('postMerge — tree scenarios', () => {
     );
     expect(reparentedMap.get('feat/leaf')).toBe('main');
     expect(reparentedMap.get('feat/sib')).toBe('main');
-    expect(result.retargeted).toEqual(['feat/leaf', 'feat/sib']);
+    expect([...result.retargeted].sort()).toEqual(['feat/leaf', 'feat/sib']);
 
     const retargetedNames = mockRetargetPrBase.mock.calls
       .map((c) => c[0] as string)
@@ -408,5 +415,25 @@ describe('postMerge — tree scenarios', () => {
     await postMerge('/repo', { submit: false });
 
     expect(mockCheckoutBranch).toHaveBeenCalledWith('feat/leaf', '/repo');
+  });
+
+  it('returns retargeted branches in alphabetical order regardless of state insertion order', async () => {
+    // Insertion order is intentionally non-alphabetical (z, m, a) to prove
+    // the sort happens in `retargetOpenPrBranches` rather than relying on
+    // the order branches were declared in state.
+    const state = makeStackState([
+      { name: 'main', parent: null, type: 'root' },
+      { name: 'feat/middle', parent: 'main', pr_number: 1 },
+      { name: 'feat/z', parent: 'feat/middle', pr_number: 2 },
+      { name: 'feat/m', parent: 'feat/middle', pr_number: 3 },
+      { name: 'feat/a', parent: 'feat/middle', pr_number: 4 },
+    ]);
+    mockReadState.mockResolvedValue(state);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockPrState(state, new Set(['feat/middle']));
+
+    const result = await postMerge('/repo', { restack: false, submit: false });
+
+    expect(result.retargeted).toEqual(['feat/a', 'feat/m', 'feat/z']);
   });
 });
