@@ -10,17 +10,17 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack';
+  undone: 'create' | 'restack' | 'move';
   details: string;
 }
 
 /**
- * Undoes the last `dub create` or `dub restack` operation.
+ * Undoes the last `dub create`, `dub restack`, or `dub move` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
- * - **restack**: Resets every rebased branch to its pre-rebase tip via `git branch -f`,
- *   restores state, checks out the previous branch.
+ * - **restack** or **move**: Resets every rebased branch to its pre-mutation tip
+ *   via `git branch -f`, restores state, checks out the previous branch.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *
@@ -65,7 +65,7 @@ export async function undo(cwd: string): Promise<UndoResult> {
     };
   }
 
-  // restack undo: reset all branches to their pre-rebase tips
+  // restack/move undo: reset all branches to their pre-mutation tips
   // First checkout a safe branch so we don't conflict with force-moves
   await checkoutBranch(entry.previousBranch, cwd);
 
@@ -86,8 +86,13 @@ export async function undo(cwd: string): Promise<UndoResult> {
   await writeState(entry.previousState, cwd);
   await clearUndoEntry(cwd);
 
+  const details =
+    entry.operation === 'move'
+      ? `Restored ${Object.keys(entry.branchTips).length} branches to pre-move state`
+      : `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`;
+
   return {
-    undone: 'restack',
-    details: `Reset ${Object.keys(entry.branchTips).length} branches to pre-restack state`,
+    undone: entry.operation,
+    details,
   };
 }
