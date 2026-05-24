@@ -14,9 +14,11 @@
     "split",
     "merge-next",
     "post-merge",
+    "move",
     "undo",
     "doctor",
     "track",
+    "rename",
     "skills"
   ]
 }
