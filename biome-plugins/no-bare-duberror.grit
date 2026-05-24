@@ -1,0 +1,28 @@
+// no-bare-DubError
+//
+// Every `new DubError(message)` must also pass a NON-EMPTY `recovery: string[]`
+// so users get actionable next steps instead of a bare failure line.
+//
+// For the rare case where there is genuinely nothing to recover — the user
+// explicitly cancelled, etc. — use the `DubError.cancelled(message)` static
+// factory instead. The factory makes the intent explicit and keeps the rule
+// strict.
+//
+// Allowed in: lib/errors.ts (definition + cancelled() factory), *.test.ts
+// (fixtures construct bare DubErrors to exercise the formatter).
+language js
+
+// Fires on both bare construction (`new DubError(msg)`) and explicit-empty
+// recovery (`new DubError(msg, [])`). The recovery-array text match uses a
+// regex so trailing-comma and whitespace variants (`[ ]`, `[\n]`, etc.) all
+// trip the rule. Biome's Grit plugins compile a single top-level pattern per
+// file, so we combine both shapes with `or`.
+`new DubError($args)` where {
+  or {
+    $args <: [$_],
+    and { $args <: [$_, $recovery], $recovery <: r"\s*\[\s*\]\s*" }
+  },
+  $filename <: not r".*/lib/errors\.ts$",
+  $filename <: not r".*\.test\.ts$",
+  register_diagnostic(span=$args, message="DubError requires a non-empty recovery hint array. Pass `recovery: string[]` as the 2nd argument, or use `DubError.cancelled(msg)` for the user-cancelled case (see .agents/patterns/tier-3-commands.md).")
+}

@@ -1,0 +1,328 @@
+{
+  "meta": {
+    "workId": "DUB-81",
+    "title": "Tier 3 implementation guardrails (shared infra cheat-sheet)",
+    "artifactId": "dub-81",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-81-tier-3-implementation-guardrails-shared-infra-cheat-sheet",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-81",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 14,
+    "additions": 613,
+    "deletions": 8,
+    "diffStat": "14 files changed, 613 insertions(+), 8 deletions(-)"
+  },
+  "prompt": "Land the Tier 3 implementation guardrails: an opinionated cheat-sheet, a copy-paste command scaffold, and Biome lint rules that enforce the three most error-prone Tier 0 conventions (DubError recovery, runGh wrapper, --force-with-lease) before the first Tier 3 command (DUB-30..DUB-42) ships.",
+  "tldr": "Adds three Biome GritQL plugins, a 1-page Tier 3 pattern doc, a copy-paste command scaffold, and styleguide links — plus fixes 7 surviving bare-DubError sites uncovered by the new rule so the codebase clears the gate today.",
+  "why": {
+    "motivation": [
+      "Every Tier 3 command must reuse the same 7 Tier 0 pieces (DubError + recovery, retry, progress, --force-with-lease, worktree-skip, undo, MCP). Without a shared reference each author rediscovers the pattern and silently drifts.",
+      "Lint enforcement makes drift impossible for the three most damaging rules: bare DubError (no actionable recovery), direct execa('gh', …) (skips retry + permanent-error classification), and raw git push --force (races with teammate pushes)."
+    ],
+    "before": [
+      "No single doc captured the canonical Tier 3 shape — agents had to read 5+ existing commands to infer the pattern.",
+      "Two bare new DubError(msg) calls in mcp.ts and five more across sync/track/untrack/git slipped through review because no automated check caught them.",
+      "Nothing prevented a future command from calling execa('gh', …) directly or git push --force without --force-with-lease."
+    ],
+    "after": [
+      "Authors start from .agents/templates/tier-3-command.md and follow .agents/patterns/tier-3-commands.md.",
+      "pnpm checks fails fast on bare DubError, direct execa('gh', …), and raw git push --force outside the wrapper files.",
+      "All 7 surviving bare-DubError sites in production code carry recovery hints, so the codebase clears the gate without any allowlist hacks."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "biome-plugins/no-bare-duberror.grit",
+      "changeType": "new",
+      "additions": 15,
+      "deletions": 0,
+      "explanation": "GritQL plugin that flags single-argument `new DubError($msg)` calls. Uses list-destructure `$args <: [$msg]` so it catches both inline and multi-line single-arg constructions (the earlier comma-substring heuristic missed the multi-line case). Allowlisted for `lib/errors.ts` and `*.test.ts`.",
+      "snippet": "`new DubError($args)` where {\n  $args <: [$msg],\n  $filename <: not r\".*/lib/errors\\.ts(end)\",\n  $filename <: not r\".*\\.test\\.ts(end)\",\n  register_diagnostic(span=$msg, message=\"DubError requires a recovery hint array. …\")\n}\n// (end) = $ anchor, elided to avoid template-substitution clash in the report renderer.",
+      "snippetLanguage": "grit",
+      "open": true
+    },
+    {
+      "path": "biome-plugins/no-direct-execa-gh.grit",
+      "changeType": "new",
+      "additions": 15,
+      "deletions": 0,
+      "explanation": "Blocks `execa('gh', …)` anywhere outside `lib/github.ts` (where the `runGh` wrapper lives). Direct calls skip retry + permanent-error classification.",
+      "snippet": "`execa($cmd, $rest)` where {\n  $cmd <: `'gh'`,\n  $filename <: not r\".*/lib/github\\.ts(end)\",\n  register_diagnostic(span=$cmd, message=\"Use the runGh wrapper …\")\n}",
+      "snippetLanguage": "grit",
+      "open": false
+    },
+    {
+      "path": "biome-plugins/no-direct-force-push.grit",
+      "changeType": "new",
+      "additions": 18,
+      "deletions": 0,
+      "explanation": "Blocks `execa('git', […, 'push', …, '--force', …])` unless the arg list also contains `--force-with-lease`. Allowlisted only for `lib/git.ts` where `pushBranch` builds the safe lease arg.",
+      "snippet": "`execa($cmd, $rest)` where {\n  $cmd <: `'git'`,\n  $rest <: contains `'push'`,\n  $rest <: contains `'--force'`,\n  $rest <: not contains r\"--force-with-lease.*\",\n  $filename <: not r\".*/lib/git\\.ts(end)\",\n  register_diagnostic(…)\n}",
+      "snippetLanguage": "grit",
+      "open": false
+    },
+    {
+      "path": "biome.json",
+      "changeType": "mod",
+      "additions": 5,
+      "deletions": 0,
+      "explanation": "Registers the three plugins in the `plugins` array so `biome check` (and therefore `pnpm checks`) runs them automatically.",
+      "snippet": "\"plugins\": [\n  \"./biome-plugins/no-bare-duberror.grit\",\n  \"./biome-plugins/no-direct-execa-gh.grit\",\n  \"./biome-plugins/no-direct-force-push.grit\"\n],",
+      "snippetLanguage": "json",
+      "open": false
+    },
+    {
+      "path": ".agents/patterns/tier-3-commands.md",
+      "changeType": "new",
+      "additions": 280,
+      "deletions": 0,
+      "explanation": "Opinionated cheat-sheet. Nine sections, each with a snippet, an import path, and a 'don't' list: DubError + recovery, retry, createProgress, --force-with-lease, worktree-aware mutations, undo entries, MCP exposure, runGh, cleanup journal. Closes with a lint-rules table and verification commands.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".agents/templates/tier-3-command.md",
+      "changeType": "new",
+      "additions": 167,
+      "deletions": 0,
+      "explanation": "Copy-paste command scaffold (TS fenced block) with options interface, dry-run path, worktree-checkout skip, undo snapshot, progress loop, and a wire-up checklist (CLI entry, MCP tool, tests, docs). The scaffold deliberately routes git/gh work through helper stubs (`doWork`) so it does not itself trip the new lint rules.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".agents/styleguide.md",
+      "changeType": "mod",
+      "additions": 4,
+      "deletions": 0,
+      "explanation": "Command Design section now points at the new patterns doc, scaffold template, and biome-plugins directory.",
+      "snippet": "- For new Tier 3 commands, follow [`patterns/tier-3-commands.md`](patterns/tier-3-commands.md)\n  and start from the scaffold in [`templates/tier-3-command.md`](templates/tier-3-command.md).",
+      "snippetLanguage": "markdown",
+      "open": false
+    },
+    {
+      "path": ".agents/README.md",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 0,
+      "explanation": "Adds `templates/` to the folder index and lists the new doc + scaffold.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 13,
+      "deletions": 3,
+      "explanation": "Upgrades two `new DubError(msg)` calls (missing-branch arg + unknown-tool dispatch) and one internal-invariant guard to include recovery hints. Each was a real Tier 0 violation surfaced by the new lint rule.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 8,
+      "deletions": 0,
+      "explanation": "Adds recovery hints to the two error-wrapping `new DubError` sites that wrap non-DubError thrown values (per-branch fallback and top-level sync error). Hints point at `dub doctor` and `dub sync --verbose`.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/track.ts",
+      "changeType": "mod",
+      "additions": 11,
+      "deletions": 3,
+      "explanation": "Splits the no-parent-selected and could-not-infer-parent errors into a message + recovery hints (`--parent <branch>`, `dub log`).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/untrack.ts",
+      "changeType": "mod",
+      "additions": 4,
+      "deletions": 0,
+      "explanation": "Adds recovery hints to the non-interactive descendants-present error. Preserves the existing message wording (the test suite asserts on `--downstack`).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 4,
+      "deletions": 0,
+      "explanation": "Adds recovery hints to the fast-forward failure error (manual `git merge --ff-only` command + `dub doctor`).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-81-qa.md",
+      "changeType": "new",
+      "additions": 70,
+      "deletions": 0,
+      "explanation": "Self-QA fallback (no video) describing the positive-test fixture run, the seven bare-DubError site fixes, and the green gate output.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "GritQL allowlist regex anchoring",
+      "location": "biome-plugins/*.grit",
+      "rationale": "All three plugins use an end-anchored regex on `/lib/<file>.ts` so a sibling file of the same name (e.g. a future `commands/errors.ts`) cannot silently inherit the exemption. Verify the anchor is appropriate for any future relocations of `errors.ts`, `git.ts`, or `github.ts`."
+    },
+    {
+      "title": "Bare-DubError multi-line detection",
+      "location": "biome-plugins/no-bare-duberror.grit",
+      "rationale": "An earlier draft used `$args <: not contains \\\",\\\"` which missed multi-line single-arg constructions with a trailing comma. The shipped version uses `$args <: [$msg]` (list-of-one destructure). Reviewers should confirm this matches their mental model and try a synthetic two-arg call to verify it does not fire there."
+    },
+    {
+      "title": "Recovery hint quality for the 7 newly-surfaced sites",
+      "location": "packages/cli/src/{commands/{mcp,sync,track,untrack}.ts,lib/git.ts}",
+      "rationale": "Each new recovery array was chosen from the surrounding command context (e.g. `dub doctor`, `dub sync --verbose`, `--parent <branch>`). Reviewers familiar with each command's UX should confirm the hints are the best next step."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "build",
+      "label": "pnpm checks (biome + plugins) clean on 285 files",
+      "status": "done",
+      "evidence": "Checked 285 files in 142ms. No fixes applied."
+    },
+    {
+      "kind": "build",
+      "label": "pnpm typecheck",
+      "status": "done",
+      "evidence": "Tasks: 2 successful, 2 total"
+    },
+    {
+      "kind": "unit",
+      "label": "pnpm test — full vitest suite",
+      "status": "done",
+      "evidence": "Test Files 93 passed (93); Tests 863 passed (863)"
+    },
+    {
+      "kind": "manual",
+      "label": "Positive-test fixture: each plugin fires on its specific violation",
+      "status": "done",
+      "evidence": "/tmp/positive-test.ts with bare DubError + execa('gh', …) + git push --force produced 3 distinct plugin diagnostics, one per rule."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome check (incl. new plugins)",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 285 files in 142ms. No fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Tasks: 2 successful, 2 total"
+    },
+    {
+      "name": "Vitest suite",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "863 tests passed across 93 files"
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "DUB-81 ships repository docs and Biome plugins; there is no committed .tsx and no CLI behavior change to demo.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-81-qa.md",
+    "caption": "Self-QA fallback: positive-test fixture + green gates documented in .reports/dub-81-qa.md.",
+    "scenarios": [
+      "Run `pnpm checks` against a synthetic file containing a bare DubError, an execa('gh', …), and a raw git push --force — all three rules fire.",
+      "Run `pnpm checks` against the current packages/cli/src — zero plugin diagnostics after the seven surviving bare-DubError sites are fixed."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": ".agents/patterns/tier-3-commands.md exists with examples for each rule",
+      "status": "satisfied",
+      "evidence": "Nine sections, each with a snippet, the import path, and a 'don't' list, covering DubError, retry, createProgress, force-with-lease, worktree mutations, undo, MCP, runGh, cleanup journal."
+    },
+    {
+      "criterion": "Biome rule blocks new DubError(msg) with no recovery",
+      "status": "satisfied",
+      "evidence": "biome-plugins/no-bare-duberror.grit; verified by positive-test fixture and 7 surviving production sites it surfaced."
+    },
+    {
+      "criterion": "Biome rule blocks raw execa('gh', …) in Tier 3 command files",
+      "status": "satisfied",
+      "evidence": "biome-plugins/no-direct-execa-gh.grit; allowlist exempts only lib/github.ts (the runGh wrapper)."
+    },
+    {
+      "criterion": "Biome rule blocks raw git push --force (must be --force-with-lease)",
+      "status": "satisfied",
+      "evidence": "biome-plugins/no-direct-force-push.grit; allowlist exempts only lib/git.ts (pushBranch)."
+    },
+    {
+      "criterion": "Command scaffold template lives somewhere referenceable",
+      "status": "satisfied",
+      "evidence": ".agents/templates/tier-3-command.md — linked from the patterns doc and styleguide."
+    },
+    {
+      "criterion": ".agents/styleguide.md links to the patterns doc",
+      "status": "satisfied",
+      "evidence": "Command Design section now points at patterns/tier-3-commands.md, templates/tier-3-command.md, and biome-plugins/."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 2,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Iteration 1: reviewer found the comma-substring heuristic missed multi-line single-arg new DubError calls (1 real false-negative at mcp.ts:722). Fixed by switching to a list-of-one destructure on the arg list; surfaced 7 latent violations that were also fixed.",
+      "Iteration 1: reviewer flagged that allowlist regexes for lib/git.ts and lib/github.ts did not require a leading slash before the filename; tightened all three to require the /lib/ path segment.",
+      "Iteration 1: reviewer flagged the scaffold template using raw execa('git', …). Replaced with a doWork(branch, cwd) helper stub plus a comment instructing authors to add helpers to lib/ instead of calling execa from a command.",
+      "Iteration 2: reviewer noted no-bare-duberror did not require the /lib/ path segment before errors.ts; tightened for consistency with the sibling rules."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies detected",
+      "status": "n/a"
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive — docs and lint rules. Zero behavior change for end users; lint gate effective the moment the PR merges.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Lint rules active",
+        "details": "`pnpm checks` (and the pre-push hook) immediately enforces no-bare-duberror, no-direct-execa-gh, and no-direct-force-push across the whole repo."
+      },
+      {
+        "when": "Before DUB-30..DUB-42 land",
+        "label": "Authors adopt the scaffold",
+        "details": "Each new Tier 3 command starts from `.agents/templates/tier-3-command.md` and consults `.agents/patterns/tier-3-commands.md` for the import paths and dos/don'ts."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "06797a28a9bcf724f74722f09212f9153c3ed3dd",
+    "shortSha": "06797a2",
+    "message": "feat(guardrails): tier 3 implementation cheat-sheet + biome lint rules [DUB-81]"
+  }
+}

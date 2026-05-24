@@ -1,0 +1,18 @@
+// no-direct-force-push
+//
+// Raw `git push --force` is unsafe in stacked-diff workflows — it can clobber
+// teammate commits that landed between our last fetch and the push. Every push
+// must use `--force-with-lease=refs/heads/<branch>:<sha>` scoped to our locally
+// tracked `refs/dubstack/last-pushed/*` ref (see lib/git.ts: pushBranch).
+//
+// Allowed in: lib/git.ts (the pushBranch helper itself).
+language js
+
+`execa($cmd, $rest)` where {
+  $cmd <: `'git'`,
+  $rest <: contains `'push'`,
+  $rest <: contains `'--force'`,
+  $rest <: not contains r"--force-with-lease.*",
+  $filename <: not r".*/lib/git\.ts$",
+  register_diagnostic(span=$rest, message="Use --force-with-lease=refs/heads/<branch>:<sha> via pushBranch (lib/git.ts) instead of raw `git push --force` (see .agents/patterns/tier-3-commands.md).")
+}

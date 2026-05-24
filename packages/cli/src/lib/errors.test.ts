@@ -22,6 +22,23 @@ describe('DubError', () => {
       'Pick a different branch name and retry.',
     ]);
   });
+
+  describe('cancelled', () => {
+    it('defaults the message to "Cancelled." and uses an empty recovery array', () => {
+      const error = DubError.cancelled();
+
+      expect(error).toBeInstanceOf(DubError);
+      expect(error.message).toBe('Cancelled.');
+      expect(error.recovery).toEqual([]);
+    });
+
+    it('accepts a custom message', () => {
+      const error = DubError.cancelled('Aborted by user.');
+
+      expect(error.message).toBe('Aborted by user.');
+      expect(error.recovery).toEqual([]);
+    });
+  });
 });
 
 describe('formatDubError', () => {

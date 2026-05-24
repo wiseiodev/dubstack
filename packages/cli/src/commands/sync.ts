@@ -976,6 +976,10 @@ export async function sync(
                 branchError instanceof Error
                   ? branchError.message
                   : 'Unexpected error during branch sync.',
+                [
+                  "Run 'dub doctor' to inspect stack + repo health.",
+                  "Re-run 'dub sync' with --verbose to surface the underlying command.",
+                ],
               );
         const errorOutcome: BranchSyncOutcome = {
           branch,
@@ -1126,6 +1130,10 @@ async function wrapSyncError(error: unknown, cwd: string): Promise<Error> {
       ? error
       : new DubError(
           error instanceof Error ? error.message : 'Sync failed unexpectedly.',
+          [
+            "Run 'dub doctor' to inspect stack + repo health.",
+            "Re-run 'dub sync' with --verbose to surface the underlying command.",
+          ],
         );
   const activeOperation = await detectActiveOperation(cwd).catch(() => 'none');
   if (activeOperation === 'none') {
