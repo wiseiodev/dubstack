@@ -1,0 +1,243 @@
+{
+  "meta": {
+    "workId": "DUB-21",
+    "title": "Tree-shaped stack table in PR bodies",
+    "artifactId": "dub-21",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-21-tree-shaped-stack-table-in-pr-bodies",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-21",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 4,
+    "additions": 648,
+    "deletions": 81,
+    "diffStat": ".reports/dub-21-qa.md                |  49 ++++++\npackages/cli/src/commands/submit.ts  |  87 +++++++---\npackages/cli/src/lib/pr-body.test.ts | 286 ++++++++++++++++++++++++++++++--\npackages/cli/src/lib/pr-body.ts      | 307 ++++++++++++++++++++++++++++++-----\n4 files changed, 648 insertions(+), 81 deletions(-)"
+  },
+  "prompt": "Replace the flat `- #N title` stack list in PR bodies with an indented tree that reflects sibling branches, and extend the hidden metadata block with a versioned v1 schema that carries the full tree shape (parent, children, siblings, depth-tagged tree). Migrate legacy metadata blocks transparently at parse time so existing PRs keep working.",
+  "tldr": "PR bodies now render the stack as a tree (2-space indent per level, siblings alphabetical, 👈 on current). Hidden metadata is bumped to v1 and includes parent/children/siblings plus a flat tree array; legacy blocks are migrated to v1 at parse time. Submit now derives prev/next from actual parent/single-child relationships and pulls PR numbers from persisted state so siblings submitted earlier still render with their #N in the tree.",
+  "why": {
+    "motivation": [
+      "Tier 1 branching-stack support: the flat list lost sibling information once stacks became trees, so reviewers couldn't see the shape of the work landing alongside their PR.",
+      "Downstream consumers (the action webhook tracked in DUB-71) need a versioned, tree-aware metadata block they can rebuild the stack from without reading repo state — DUB-71's parser concern is satisfied by the v1 schema this PR introduces.",
+      "merge-check.ts was using positional BFS to infer prev_pr, which made independent siblings spuriously block each other once submit started walking trees."
+    ],
+    "before": [
+      "buildStackTable produced `- #N title` for every non-root branch in submission order, with no visual distinction between parent/child/sibling.",
+      "DubstackMetadata stored only stack_id, pr_number, prev_pr, next_pr, branch — no schema_version, no way to express siblings or tree shape.",
+      "submit.ts iterated `plan.branches` (no root) and computed prev/next positionally, so submitting `feat/bravo` next to a previously-submitted sibling `feat/alpha` rendered `feat/alpha` as a bare branch name and pointed prev_pr at the wrong PR."
+    ],
+    "after": [
+      "buildStackTable renders the stack as an indented tree from the root, siblings alphabetical, 👈 preserved, with deterministic truncation past 40 branches (current + ancestors + their direct children + descendants).",
+      "DubstackMetadata is `schema_version: 1` and carries parent (string|null), children (string[]), siblings (string[]), and tree ({name, depth, pr_number?, is_current?}[]). parseDubstackMetadata accepts both old and v1 shapes and emits v1 in either case.",
+      "submit walks the full stack for table/metadata construction, pulls PR numbers for prior-run siblings from Branch.pr_number, sets prev_pr from the actual parent's PR, and only sets next_pr when the branch has exactly one child."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/pr-body.ts",
+      "changeType": "mod",
+      "additions": 307,
+      "deletions": 0,
+      "explanation": "New DubstackMetadata v1 interface and DubstackMetadataTreeNode; buildStackTable now builds a tree from parent links, sorts siblings alphabetically, applies the >40-branch truncation rule with a hidden-branch summary line, and preserves the 👈 marker. buildMetadataBlock takes a structured DubstackMetadata input and serializes the v1 shape. New buildMetadataTree emits the flat depth-tagged tree for the metadata block. parseDubstackMetadata accepts both legacy (no schema_version) and v1 shapes — legacy is migrated to v1 with empty tree/siblings/children/parent so consumers always see the v1 surface, and unknown schema_version values are rejected.",
+      "snippet": "export function buildStackTable(\n  branches: Branch[],\n  prMap: Map<string, StackEntry>,\n  currentBranch: string,\n): string {\n  const root = buildTree(branches);\n  const truncate = branches.length > TRUNCATION_THRESHOLD;\n  // ...renders indented tree with truncation summary...\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/submit.ts",
+      "changeType": "mod",
+      "additions": 87,
+      "deletions": 0,
+      "explanation": "updateAllPrBodies now receives the full stack (plan.stack.branches) alongside the current-path branches it iterates. The PR-table lookup falls back to Branch.pr_number from persisted state so siblings submitted in prior runs still render with their #N. prev_pr is derived from the actual parent's table entry; next_pr is only set when the branch has exactly one child (linear continuation). children/siblings on the metadata block are derived from the stack's parent map and sorted alphabetically for deterministic output.",
+      "snippet": "for (const branch of stackBranches) {\n  const pr = prMap.get(branch.name);\n  if (pr) {\n    tableEntries.set(branch.name, { number: pr.number, title: pr.title });\n  } else if (branch.pr_number != null) {\n    tableEntries.set(branch.name, {\n      number: branch.pr_number,\n      title: branch.name,\n    });\n  }\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/pr-body.test.ts",
+      "changeType": "mod",
+      "additions": 286,
+      "deletions": 0,
+      "explanation": "Updated existing tests to assert the tree shape and added inline-snapshot tests for the three required tree shapes from the issue spec (3-sibling, 5-deep, large+truncated). New tests cover legacy→v1 metadata migration, unknown-schema_version rejection, and the buildMetadataTree depth+is_current output.",
+      "snippet": "expect(result).toMatchInlineSnapshot(`\n  \"<!-- dubstack:start -->\\n---\\n### 🥞 DubStack\\n- main\\n  - #100 feat/auth-base\\n    - #101 feat/auth-login 👈\\n    - #102 feat/auth-signup\\n    - #103 feat/auth-tests\\n<!-- dubstack:end -->\"\n`);",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-21-qa.md",
+      "changeType": "new",
+      "additions": 49,
+      "deletions": 0,
+      "explanation": "Fallback self-QA artifact: the work is CLI library code with no .tsx changes, so deterministic snapshot tests + lint + typecheck + 696/696 vitest pass replace a browser video.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Truncation visible-set semantics",
+      "location": "packages/cli/src/lib/pr-body.ts (computeVisibleNames)",
+      "rationale": "Only stacks with >40 branches truncate. The visible set is current + ancestor chain + each ancestor's direct children + all descendants of current — i.e. siblings and aunts/uncles are kept, but deeper niece/nephew subtrees collapse into the hidden-count line. The test `shows hidden-count summary when siblings have hidden descendants` pins this behavior; flagged for any sharper semantic concerns."
+    },
+    {
+      "title": "Legacy metadata migration",
+      "location": "packages/cli/src/lib/pr-body.ts (parseDubstackMetadata)",
+      "rationale": "PR bodies written before this PR have no schema_version and lack parent/children/siblings/tree. The parser accepts them and emits v1 with empty tree fields, which keeps merge-check.ts working on existing PRs. Worth confirming the validation predicate matches the legacy fields the wild PRs actually have."
+    },
+    {
+      "title": "prev_pr / next_pr semantics for trees",
+      "location": "packages/cli/src/commands/submit.ts (updateAllPrBodies)",
+      "rationale": "prev_pr is now derived from the actual parent branch's PR rather than positional BFS order; next_pr is null when the branch has more than one child. This is intentional and stops merge-check.ts from gating sibling merges on each other, but it's a behavioral change worth scrutinizing for any downstream that relied on the BFS-positional meaning."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "Tree shape + truncation + legacy migration in pr-body.test.ts",
+      "status": "done",
+      "evidence": "26/26 in pr-body.test.ts including inline snapshots for 3-sibling, 5-deep, and >40-branch truncation."
+    },
+    {
+      "kind": "integration",
+      "label": "submit-tree integration still walks trees correctly",
+      "status": "done",
+      "evidence": "test/commands/submit-tree.test.ts continues to pass with the new caller wiring (full stack + per-branch metadata)."
+    },
+    {
+      "kind": "build",
+      "label": "biome lint + format",
+      "status": "done",
+      "evidence": "pnpm checks → 246 files checked, no errors."
+    },
+    {
+      "kind": "build",
+      "label": "tsc --noEmit across workspace",
+      "status": "done",
+      "evidence": "pnpm typecheck passes for dubstack and docs apps."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 246 files in 78ms. No fixes applied."
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Tasks: 2 successful, 2 total (dubstack + docs)."
+    },
+    {
+      "name": "Tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "Test Files 84 passed (84); Tests 696 passed (696)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files changed; this is CLI library code (pr-body string builders + submit caller). The rendered output is Markdown that GitHub displays — verified via inline snapshot assertions rather than a browser recording.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-21-qa.md",
+    "caption": "Deterministic proof in lieu of video: inline snapshot tests for the three required tree shapes, legacy metadata migration test, plus full pnpm checks/typecheck/test pass.",
+    "scenarios": [
+      "3-sibling tree (the exact example from the DUB-21 spec) with 👈 on the middle sibling.",
+      "5-deep linear stack — verifies depth indentation past three levels.",
+      "Stack of 41 sibling subtrees — verifies the >40 truncation rule with the hidden-count summary line.",
+      "Legacy (pre-v1) metadata block parses to v1 with empty tree fields."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "buildStackTable renders tree shape correctly",
+      "status": "satisfied",
+      "evidence": "Inline snapshot in `renders a 3-sibling tree with alphabetical sibling order` matches the issue spec example byte-for-byte."
+    },
+    {
+      "criterion": "Sibling order alphabetical",
+      "status": "satisfied",
+      "evidence": "buildTree() sorts childMap entries with localeCompare; covered by the 3-sibling and large-stack snapshots."
+    },
+    {
+      "criterion": "👈 marker preserved",
+      "status": "satisfied",
+      "evidence": "renderNodeLabel appends ' 👈' iff branch.name === currentBranch; asserted in the marks-correct-branch test and the snapshots."
+    },
+    {
+      "criterion": "Truncation rule applied for stacks > 40 branches",
+      "status": "satisfied",
+      "evidence": "TRUNCATION_THRESHOLD = 40; computeVisibleNames builds the visible set (current + ancestors + each ancestor's direct children + descendants of current); hidden-count summary line tagged at the bottom. Covered by `truncates stacks larger than 40 branches` and `shows hidden-count summary when siblings have hidden descendants`."
+    },
+    {
+      "criterion": "buildMetadataBlock writes all v1 fields including tree",
+      "status": "satisfied",
+      "evidence": "buildMetadataBlock takes a structured DubstackMetadata and serializes it; `serializes a v1 metadata block` asserts schema_version/parent/siblings/tree/is_current are all present."
+    },
+    {
+      "criterion": "parseDubstackMetadata accepts old and v1 metadata blocks",
+      "status": "satisfied",
+      "evidence": "`parses a v1 metadata block from a composed PR body` and `migrates a legacy (pre-v1) metadata block to v1 with empty tree fields` both pass; unknown schema_version values are rejected by `returns null when schema_version is unknown`."
+    },
+    {
+      "criterion": "Snapshot tests for several tree shapes (3-sibling, 5-deep, large+truncated)",
+      "status": "satisfied",
+      "evidence": "Three new inline snapshots in pr-body.test.ts cover exactly these shapes."
+    },
+    {
+      "criterion": "pr-body.test.ts updated; flat-list assertions migrated",
+      "status": "satisfied",
+      "evidence": "Existing buildStackTable tests now assert the indented tree form (e.g. `  - #101 feat: api`, `    - #102 feat: ui 👈`); root is included via a helper `root('main')` in the new fixtures."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Fixed (critical): In updateAllPrBodies, the PR-number lookup was only populated from this run's prMap, so siblings submitted in prior runs rendered as bare branch names in the tree table. Fixed by falling back to Branch.pr_number from persisted state.",
+      "Fixed (major): prev_pr/next_pr were computed positionally over BFS-ordered submission branches, which assigned arbitrary 'previous' relationships to independent siblings and caused merge-check.ts to block sibling merges on each other. Fixed by deriving prev_pr from the actual parent's PR and setting next_pr only for linear (single-child) continuations."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 (tree-walking submit)",
+      "status": "merged 2026-05-24 in commit 86303e2 — unblocks DUB-21 by ensuring submit walks tree-shaped stacks instead of rejecting them."
+    },
+    {
+      "name": "DUB-71 (parser for tree-aware metadata)",
+      "status": "Subsumed by DUB-21 per the issue description — the v1 metadata schema introduced here is the parser contract DUB-71 needed."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure CLI change. The first `dub submit` after this lands rewrites each PR body atomically with the new tree table + v1 metadata block; legacy metadata blocks still in the wild keep parsing because parseDubstackMetadata migrates them at read time.",
+    "steps": [
+      {
+        "when": "On merge to main",
+        "label": "Bump dubstack CLI",
+        "details": "Users on the new CLI version see tree-shaped tables on their next `dub submit`; metadata blocks on existing PRs continue to parse via the legacy migration path until those PRs are re-submitted."
+      },
+      {
+        "when": "Follow-up",
+        "label": "Action webhook (DUB-71 territory)",
+        "details": "Downstream consumers of `parseDubstackMetadata` can now rely on the v1 surface (parent/children/siblings/tree) regardless of which CLI version wrote the PR body."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "4f9487a1d264fe4a9922fed7968f9410592af232",
+    "shortSha": "4f9487a",
+    "message": "feat(pr-body): tree-shaped stack table + v1 metadata schema [DUB-21]"
+  }
+}
