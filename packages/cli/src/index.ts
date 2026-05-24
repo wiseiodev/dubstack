@@ -58,6 +58,7 @@ import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
 import { untrack } from './commands/untrack';
+import { watch } from './commands/watch';
 import {
   collectKnownTopLevelCommands,
   preprocessCliArgs,
@@ -621,6 +622,28 @@ program
   .action(async (branch?: string) => {
     const result = await trunk(process.cwd(), branch);
     console.log(result.trunk);
+  });
+
+program
+  .command('watch')
+  .description(
+    'Long-lived monitor: polls GitHub + watches .git for stack-state changes',
+  )
+  .option(
+    '--interval <duration>',
+    'Poll interval — duration like 30s, 2m (default 60s)',
+  )
+  .option('--ui', 'Render the live TUI status pane')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub watch                     Start watcher with default 60s interval
+  $ dub watch --interval 30s      Poll GitHub every 30 seconds
+  $ dub watch --ui                Render live status pane`,
+  )
+  .action(async (options: { interval?: string; ui?: boolean }) => {
+    await watch(process.cwd(), options);
   });
 
 program
