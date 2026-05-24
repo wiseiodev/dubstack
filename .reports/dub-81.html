@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-81 - Tier 3 implementation guardrails (shared infra cheat-sheet)</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-81</div>
+        <h1>DUB-81 - Tier 3 implementation guardrails (shared infra cheat-sheet)</h1>
+        <div class="meta"><span><strong>14</strong> files</span>
+<span><span class="add">+613</span> / <span class="del">-8</span></span>
+<span>branch <strong>feature/dub-81-tier-3-implementation-guardrails-shared-infra-cheat-sheet</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Land the Tier 3 implementation guardrails: an opinionated cheat-sheet, a copy-paste command scaffold, and Biome lint rules that enforce the three most error-prone Tier 0 conventions (DubError recovery, runGh wrapper, --force-with-lease) before the first Tier 3 command (DUB-30..DUB-42) ships.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Adds three Biome GritQL plugins, a 1-page Tier 3 pattern doc, a copy-paste command scaffold, and styleguide links — plus fixes 7 surviving bare-DubError sites uncovered by the new rule so the codebase clears the gate today.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Every Tier 3 command must reuse the same 7 Tier 0 pieces (DubError + recovery, retry, progress, --force-with-lease, worktree-skip, undo, MCP). Without a shared reference each author rediscovers the pattern and silently drifts.</p>
+<p class="lede">Lint enforcement makes drift impossible for the three most damaging rules: bare DubError (no actionable recovery), direct execa(&#39;gh&#39;, …) (skips retry + permanent-error classification), and raw git push --force (races with teammate pushes).</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>No single doc captured the canonical Tier 3 shape — agents had to read 5+ existing commands to infer the pattern.</li>
+<li>Two bare new DubError(msg) calls in mcp.ts and five more across sync/track/untrack/git slipped through review because no automated check caught them.</li>
+<li>Nothing prevented a future command from calling execa(&#39;gh&#39;, …) directly or git push --force without --force-with-lease.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>Authors start from .agents/templates/tier-3-command.md and follow .agents/patterns/tier-3-commands.md.</li>
+<li>pnpm checks fails fast on bare DubError, direct execa(&#39;gh&#39;, …), and raw git push --force outside the wrapper files.</li>
+<li>All 7 surviving bare-DubError sites in production code carry recovery hints, so the codebase clears the gate without any allowlist hacks.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">biome-plugins/no-bare-duberror.grit</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+15</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>GritQL plugin that flags single-argument `new DubError($msg)` calls. Uses list-destructure `$args &lt;: [$msg]` so it catches both inline and multi-line single-arg constructions (the earlier comma-substring heuristic missed the multi-line case). Allowlisted for `lib/errors.ts` and `*.test.ts`.</p>
+    <div class="code"><pre>`new DubError($args)` where {
+  $args &lt;: [$msg],
+  $filename &lt;: not r&quot;.*/lib/errors\.ts(end)&quot;,
+  $filename &lt;: not r&quot;.*\.test\.ts(end)&quot;,
+  register_diagnostic(span=$msg, message=&quot;DubError requires a recovery hint array. …&quot;)
+}
+// (end) = $ anchor, elided to avoid template-substitution clash in the report renderer.</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">biome-plugins/no-direct-execa-gh.grit</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+15</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Blocks `execa(&#39;gh&#39;, …)` anywhere outside `lib/github.ts` (where the `runGh` wrapper lives). Direct calls skip retry + permanent-error classification.</p>
+    <div class="code"><pre>`execa($cmd, $rest)` where {
+  $cmd &lt;: `&#39;gh&#39;`,
+  $filename &lt;: not r&quot;.*/lib/github\.ts(end)&quot;,
+  register_diagnostic(span=$cmd, message=&quot;Use the runGh wrapper …&quot;)
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">biome-plugins/no-direct-force-push.grit</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+18</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Blocks `execa(&#39;git&#39;, […, &#39;push&#39;, …, &#39;--force&#39;, …])` unless the arg list also contains `--force-with-lease`. Allowlisted only for `lib/git.ts` where `pushBranch` builds the safe lease arg.</p>
+    <div class="code"><pre>`execa($cmd, $rest)` where {
+  $cmd &lt;: `&#39;git&#39;`,
+  $rest &lt;: contains `&#39;push&#39;`,
+  $rest &lt;: contains `&#39;--force&#39;`,
+  $rest &lt;: not contains r&quot;--force-with-lease.*&quot;,
+  $filename &lt;: not r&quot;.*/lib/git\.ts(end)&quot;,
+  register_diagnostic(…)
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">biome.json</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+5</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Registers the three plugins in the `plugins` array so `biome check` (and therefore `pnpm checks`) runs them automatically.</p>
+    <div class="code"><pre>&quot;plugins&quot;: [
+  &quot;./biome-plugins/no-bare-duberror.grit&quot;,
+  &quot;./biome-plugins/no-direct-execa-gh.grit&quot;,
+  &quot;./biome-plugins/no-direct-force-push.grit&quot;
+],</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.agents/patterns/tier-3-commands.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+280</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Opinionated cheat-sheet. Nine sections, each with a snippet, an import path, and a &#39;don&#39;t&#39; list: DubError + recovery, retry, createProgress, --force-with-lease, worktree-aware mutations, undo entries, MCP exposure, runGh, cleanup journal. Closes with a lint-rules table and verification commands.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.agents/templates/tier-3-command.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+167</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Copy-paste command scaffold (TS fenced block) with options interface, dry-run path, worktree-checkout skip, undo snapshot, progress loop, and a wire-up checklist (CLI entry, MCP tool, tests, docs). The scaffold deliberately routes git/gh work through helper stubs (`doWork`) so it does not itself trip the new lint rules.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.agents/styleguide.md</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+4</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Command Design section now points at the new patterns doc, scaffold template, and biome-plugins directory.</p>
+    <div class="code"><pre>- For new Tier 3 commands, follow [`patterns/tier-3-commands.md`](patterns/tier-3-commands.md)
+  and start from the scaffold in [`templates/tier-3-command.md`](templates/tier-3-command.md).</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.agents/README.md</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+3</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `templates/` to the folder index and lists the new doc + scaffold.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/mcp.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+13</span> <span class="del">-3</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Upgrades two `new DubError(msg)` calls (missing-branch arg + unknown-tool dispatch) and one internal-invariant guard to include recovery hints. Each was a real Tier 0 violation surfaced by the new lint rule.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/sync.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+8</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds recovery hints to the two error-wrapping `new DubError` sites that wrap non-DubError thrown values (per-branch fallback and top-level sync error). Hints point at `dub doctor` and `dub sync --verbose`.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/track.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+11</span> <span class="del">-3</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Splits the no-parent-selected and could-not-infer-parent errors into a message + recovery hints (`--parent &lt;branch&gt;`, `dub log`).</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/untrack.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+4</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds recovery hints to the non-interactive descendants-present error. Preserves the existing message wording (the test suite asserts on `--downstack`).</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+4</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds recovery hints to the fast-forward failure error (manual `git merge --ff-only` command + `dub doctor`).</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">.reports/dub-81-qa.md</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+70</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Self-QA fallback (no video) describing the positive-test fixture run, the seven bare-DubError site fixes, and the green gate output.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">GritQL allowlist regex anchoring</div>
+    <div class="note"><code>biome-plugins/*.grit</code> All three plugins use an end-anchored regex on `/lib/&lt;file&gt;.ts` so a sibling file of the same name (e.g. a future `commands/errors.ts`) cannot silently inherit the exemption. Verify the anchor is appropriate for any future relocations of `errors.ts`, `git.ts`, or `github.ts`.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Bare-DubError multi-line detection</div>
+    <div class="note"><code>biome-plugins/no-bare-duberror.grit</code> An earlier draft used `$args &lt;: not contains \&quot;,\&quot;` which missed multi-line single-arg constructions with a trailing comma. The shipped version uses `$args &lt;: [$msg]` (list-of-one destructure). Reviewers should confirm this matches their mental model and try a synthetic two-arg call to verify it does not fire there.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Recovery hint quality for the 7 newly-surfaced sites</div>
+    <div class="note"><code>packages/cli/src/{commands/{mcp,sync,track,untrack}.ts,lib/git.ts}</code> Each new recovery array was chosen from the surrounding command context (e.g. `dub doctor`, `dub sync --verbose`, `--parent &lt;branch&gt;`). Reviewers familiar with each command&#39;s UX should confirm the hints are the best next step.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pnpm checks (biome + plugins) clean on 285 files</div>
+      <div class="note">Checked 285 files in 142ms. No fixes applied.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pnpm typecheck</div>
+      <div class="note">Tasks: 2 successful, 2 total</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">pnpm test — full vitest suite</div>
+      <div class="note">Test Files 93 passed (93); Tests 863 passed (863)</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Positive-test fixture: each plugin fires on its specific violation</div>
+      <div class="note">/tmp/positive-test.ts with bare DubError + execa(&#39;gh&#39;, …) + git push --force produced 3 distinct plugin diagnostics, one per rule.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome check (incl. new plugins)</div>
+      <div class="note">Command: pnpm checks. Checked 285 files in 142ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. Tasks: 2 successful, 2 total</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest suite</div>
+      <div class="note">Command: pnpm test. 863 tests passed across 93 files</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback: positive-test fixture + green gates documented in .reports/dub-81-qa.md.</div>
+      <div class="note">DUB-81 ships repository docs and Biome plugins; there is no committed .tsx and no CLI behavior change to demo.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-81-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Run `pnpm checks` against a synthetic file containing a bare DubError, an execa(&#39;gh&#39;, …), and a raw git push --force — all three rules fire.</li>
+<li>Run `pnpm checks` against the current packages/cli/src — zero plugin diagnostics after the seven surviving bare-DubError sites are fixed.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">.agents/patterns/tier-3-commands.md exists with examples for each rule</div>
+      <div class="note">Nine sections, each with a snippet, the import path, and a &#39;don&#39;t&#39; list, covering DubError, retry, createProgress, force-with-lease, worktree mutations, undo, MCP, runGh, cleanup journal.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome rule blocks new DubError(msg) with no recovery</div>
+      <div class="note">biome-plugins/no-bare-duberror.grit; verified by positive-test fixture and 7 surviving production sites it surfaced.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome rule blocks raw execa(&#39;gh&#39;, …) in Tier 3 command files</div>
+      <div class="note">biome-plugins/no-direct-execa-gh.grit; allowlist exempts only lib/github.ts (the runGh wrapper).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome rule blocks raw git push --force (must be --force-with-lease)</div>
+      <div class="note">biome-plugins/no-direct-force-push.grit; allowlist exempts only lib/git.ts (pushBranch).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Command scaffold template lives somewhere referenceable</div>
+      <div class="note">.agents/templates/tier-3-command.md — linked from the patterns doc and styleguide.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">.agents/styleguide.md links to the patterns doc</div>
+      <div class="note">Command Design section now points at patterns/tier-3-commands.md, templates/tier-3-command.md, and biome-plugins/.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">2</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Iteration 1: reviewer found the comma-substring heuristic missed multi-line single-arg new DubError calls (1 real false-negative at mcp.ts:722). Fixed by switching to a list-of-one destructure on the arg list; surfaced 7 latent violations that were also fixed.</li>
+<li>Iteration 1: reviewer flagged that allowlist regexes for lib/git.ts and lib/github.ts did not require a leading slash before the filename; tightened all three to require the /lib/ path segment.</li>
+<li>Iteration 1: reviewer flagged the scaffold template using raw execa(&#39;git&#39;, …). Replaced with a doWork(branch, cwd) helper stub plus a comment instructing authors to add helpers to lib/ instead of calling execa from a command.</li>
+<li>Iteration 2: reviewer noted no-bare-duberror did not require the /lib/ path segment before errors.ts; tightened for consistency with the sibling rules.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">No external dependencies detected</div>
+  <div class="note">n/a</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Pure additive — docs and lint rules. Zero behavior change for end users; lint gate effective the moment the PR merges.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Lint rules active</div>
+  <div class="note">`pnpm checks` (and the pre-push hook) immediately enforces no-bare-duberror, no-direct-execa-gh, and no-direct-force-push across the whole repo.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Before DUB-30..DUB-42 land</div>
+  <div class="label">Authors adopt the scaffold</div>
+  <div class="note">Each new Tier 3 command starts from `.agents/templates/tier-3-command.md` and consults `.agents/patterns/tier-3-commands.md` for the import paths and dos/don&#39;ts.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>06797a2</strong> <code>06797a28a9bcf724f74722f09212f9153c3ed3dd</code></div>
+  <pre>feat(guardrails): tier 3 implementation cheat-sheet + biome lint rules [DUB-81]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">no-bare-duberror.grit</a>
+<a href="#tour" class="sub">no-direct-execa-gh.grit</a>
+<a href="#tour" class="sub">no-direct-force-push.grit</a>
+<a href="#tour" class="sub">biome.json</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>

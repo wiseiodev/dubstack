@@ -25,9 +25,10 @@ async function promptForParent(
     );
     const parent = answer.trim() || suggestedParent;
     if (!parent) {
-      throw new DubError(
-        `No parent selected for '${branch}'. Re-run with --parent <branch>.`,
-      );
+      throw new DubError(`No parent selected for '${branch}'.`, [
+        `Re-run with '--parent <branch>' to set the parent explicitly.`,
+        "Run 'dub log' to see candidate parent branches.",
+      ]);
     }
     return parent;
   } finally {
@@ -73,9 +74,10 @@ export async function track(
   }
 
   if (!parent) {
-    throw new DubError(
-      `Could not infer parent for '${branch}'. Re-run with --parent <branch>.`,
-    );
+    throw new DubError(`Could not infer parent for '${branch}'.`, [
+      `Re-run with '--parent <branch>' to set the parent explicitly.`,
+      "Run 'dub log' to see candidate parent branches.",
+    ]);
   }
 
   return trackBranch(cwd, { branch, parent });

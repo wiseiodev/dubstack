@@ -68,6 +68,25 @@ function isValidBranchOverview(value: unknown): value is BranchOverview {
   );
 }
 
+/**
+ * Reads the persisted stack-overview cache if present and still within the
+ * {@link OVERVIEW_CACHE_TTL_MS} window. Returns `null` on miss, corruption,
+ * or stale data. Read-only — never refreshes or writes the cache.
+ */
+export async function readStackOverviewCache(
+  cwd: string,
+  now: number = Date.now(),
+): Promise<StackOverview | null> {
+  const cached = await readCache(cwd);
+  if (!cached) return null;
+  const cachedAtMs = Date.parse(cached.cachedAt);
+  const age = now - cachedAtMs;
+  if (!Number.isFinite(age) || age < 0 || age >= OVERVIEW_CACHE_TTL_MS) {
+    return null;
+  }
+  return cached;
+}
+
 async function readCache(cwd: string): Promise<StackOverview | null> {
   let raw: string;
   try {

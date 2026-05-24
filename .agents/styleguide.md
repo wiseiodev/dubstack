@@ -15,6 +15,10 @@ Use this as a quick implementation checklist for both human and agent contributo
 - Prefer explicit, user-facing behavior in command output.
 - Use `DubError` for actionable failures with clear next steps.
 - Keep command modules thin; move reusable logic into `src/lib/*`.
+- For new Tier 3 commands, follow [`patterns/tier-3-commands.md`](patterns/tier-3-commands.md)
+  and start from the scaffold in [`templates/tier-3-command.md`](templates/tier-3-command.md).
+  Biome plugins under `biome-plugins/` enforce the most error-prone rules
+  (`no-bare-duberror`, `no-direct-execa-gh`, `no-direct-force-push`).
 
 ## State And Git Safety
 

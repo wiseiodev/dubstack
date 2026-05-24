@@ -5,6 +5,7 @@
     "conflict-resolution",
     "ai-assistant",
     "mcp",
+    "shell-integration",
     "migration-from-graphite"
   ]
 }

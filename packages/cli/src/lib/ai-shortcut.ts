@@ -95,7 +95,7 @@ export async function preprocessCliArgs(
       };
     }
     if (choice === 'cancel') {
-      throw new DubError('Cancelled.', []);
+      throw DubError.cancelled();
     }
     return {
       finalArgs: ['ai', 'ask', ...rawArgs],
