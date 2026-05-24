@@ -1,0 +1,154 @@
+---
+title: GitHub Action — Stack Retarget
+description: A drop-in GitHub Action that retargets dependent stacked PRs when a Dubstack PR merges. Zero infra, runs on your repo's own Actions minutes.
+---
+
+When a Dubstack PR merges, its dependents still point at the now-deleted
+branch as their base. The `dubstack-retarget` Action fixes that
+automatically: it reads the merged PR's hidden `dubstack-metadata` block,
+finds open PRs whose `parent` matches the merged branch, and updates each
+one's base ref (plus its own metadata + visible stack table) so the stack
+stays valid.
+
+Zero infrastructure. No webhook server, no state store. Every signal the
+Action needs is already in the PR body that the `dub` CLI maintains.
+
+## Install
+
+The fastest path is `dub install retarget-action` from inside the repo:
+
+```bash
+dub install retarget-action
+```
+
+That writes a workflow file at `.github/workflows/dubstack-retarget.yml`:
+
+```yaml
+name: Dubstack stack retarget
+on:
+  pull_request:
+    types: [closed]
+permissions:
+  contents: read
+  pull-requests: write
+concurrency:
+  group: dubstack-retarget-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  retarget:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: wiseiodev/dubstack-retarget@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Commit and push the file. On the next stack PR merge, the Action runs and
+retargets each dependent.
+
+### Flags
+
+```bash
+dub install retarget-action --dry-run    # Preview the planned write
+dub install retarget-action --force      # Overwrite without confirming
+```
+
+The CLI prompts before overwriting an existing file with different content.
+`--force` skips the prompt; `--dry-run` prints the workflow YAML without
+touching disk.
+
+## How it works
+
+On every `pull_request.closed` event where `merged == true`, the Action:
+
+1. Parses the merged PR's `dubstack-metadata` block. If absent, exits 0
+   silently (non-Dubstack PRs are ignored).
+2. Lists all open PRs and parses their metadata.
+3. Filters to PRs whose `parent` field equals the merged PR's `branch`.
+4. For each dependent: updates `base` to the merged PR's parent (or trunk
+   if the merged PR was the root of the stack), rewrites the metadata +
+   visible stack table to drop the merged branch, and posts a comment
+   explaining the retarget.
+
+The Action never deletes branches or closes PRs — only base refs and PR
+bodies change.
+
+## Permissions
+
+The workflow needs `pull-requests: write` to update bases and post
+comments. The default `${{ secrets.GITHUB_TOKEN }}` works in most repos;
+the workflow template enables both `contents: read` and
+`pull-requests: write` explicitly so it works on repos with restrictive
+default token scopes.
+
+If you see `Resource not accessible by integration` (HTTP 403), check that
+the `permissions:` block is present and that your repo settings allow
+workflows to write to PRs.
+
+## Edge cases
+
+The Action is intentionally permissive. It exits 0 (rather than failing
+the workflow) in any of these cases:
+
+- **No metadata on the merged PR** — a non-Dubstack PR landed; nothing to
+  do.
+- **Legacy metadata** (no `parent` field) — pre-`DUB-21` metadata. The
+  Action logs a hint to re-run `dub submit` on the affected branches so
+  the next merge has a valid `parent` link.
+- **No dependents** — the merged PR had no open children pointing at it.
+- **Dependent already retargeted** — a teammate manually updated the base
+  before the Action ran.
+- **Dependent has auto-merge queued** — the Action declines to retarget
+  PRs that are mid-merge to avoid races.
+
+Only real GitHub API failures (network errors, 403s) fail the workflow.
+
+## Outputs
+
+| Output       | Shape                                                       |
+| ------------ | ----------------------------------------------------------- |
+| `status`     | `done`, `no-dependents`, `skipped-no-metadata`, etc.        |
+| `retargeted` | JSON array: `[{ number, fromBase, toBase }, ...]`           |
+| `skipped`    | JSON array: `[{ number, reason }, ...]`                     |
+
+Useful for chaining a notification step:
+
+```yaml
+- uses: wiseiodev/dubstack-retarget@v1
+  id: retarget
+  with:
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+- run: echo "Retargeted ${{ steps.retarget.outputs.retargeted }}"
+```
+
+## Troubleshooting
+
+**The Action ran but didn't retarget my dependent PR.**
+Check the Action logs. The most common causes are:
+
+- The dependent PR has no `dubstack-metadata` block (it wasn't submitted
+  through `dub submit`).
+- The dependent PR's metadata `parent` field doesn't match the merged
+  branch name (perhaps you renamed a branch without re-submitting).
+- The dependent PR has `auto_merge` enabled; the Action skipped it
+  deliberately.
+
+**The Action failed with `Resource not accessible by integration`.**
+Your workflow doesn't have `pull-requests: write`. The error message
+includes the exact YAML snippet to add.
+
+**Multiple stack PRs merge in quick succession.**
+The Action runs once per merge event. Each invocation re-reads the
+current state of open PRs, so concurrent runs converge correctly — a PR
+retargeted by an earlier run will simply be skipped (`already
+retargeted`) by a later one.
+
+## Limitations
+
+- Only `pull_request.closed` with `merged == true` triggers retargeting.
+  Forks-from-fork or external PRs hitting `secrets.GITHUB_TOKEN`
+  restrictions follow GitHub's default rules.
+- The Action does not preserve PR-title text for branches that aren't in
+  the current open-PR list (i.e., the merged-and-gone branch). The CLI
+  refreshes that on the next `dub submit`.
