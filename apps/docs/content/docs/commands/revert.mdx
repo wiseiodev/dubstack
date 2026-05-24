@@ -1,0 +1,80 @@
+---
+title: dub revert
+description: Create a branch on trunk that reverts a merged PR or commit. Tracks the new branch as a stack root so `dub submit`, `dub merge-next`, and friends work normally on the rollback.
+---
+
+## Usage
+
+```bash
+# Revert a merged PR by number
+dub revert 123
+
+# Revert by commit SHA (any 7-40 hex chars)
+dub revert abc1234
+
+# Revert + immediately push and open a PR
+dub revert 123 --submit
+
+# Use a custom branch name
+dub revert 123 -b revert/api-rollback
+
+# Edit the revert commit message in your editor
+dub revert 123 --edit-message
+```
+
+## Behavior
+
+`dub revert`:
+
+1. Refuses to run if the working tree is dirty.
+2. Resolves the target:
+   - **PR number** (`123` or `#123`): calls `gh pr view <num>` to look up the
+     merge commit and verify the PR is `MERGED`.
+   - **Commit SHA**: verifies the commit exists locally via `git rev-parse`.
+3. Picks a trunk:
+   - The root of the current branch's tracked stack, if there is one.
+   - Otherwise the single tracked root across all stacks.
+   - Otherwise `main` or `master` if they exist locally.
+4. Best-effort `git fetch origin <trunk>` so the new branch starts from
+   the freshest tip the remote knows about (offline runs fall back to the
+   local trunk ref).
+5. `git checkout -b <branch> origin/<trunk>` (or the local trunk when no
+   remote ref exists). Default branch name is `revert/<source>-<short-sha>`
+   where `<source>` is the PR head ref leaf or `commit`; override with `-b`.
+6. `git revert <sha> --no-edit` (or `--edit` when `--edit-message` is passed).
+7. Records a one-level undo entry. `dub undo` deletes the created branch.
+8. Tracks the new branch under trunk (new stack rooted at trunk).
+9. If `--submit` is set, runs `dub submit --branch <branch>` to push the
+   branch and open a PR.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-b, --branch <name>` | Override the auto-generated branch name |
+| `--submit` | Push the revert branch and open a PR after creating it |
+| `--edit-message` | Open the editor for the revert commit message instead of `--no-edit` |
+
+## Errors
+
+| Condition | Behavior |
+|---|---|
+| Target neither PR number nor SHA | `DubError` listing both accepted forms |
+| Working tree dirty | `DubError` pointing at `git stash` or `dub modify -am` |
+| PR not found | `DubError` with `gh pr view` hint |
+| PR not merged | `DubError` reporting current state and suggesting waiting until merge |
+| PR has no merge commit recorded | `DubError` pointing at passing the SHA directly |
+| SHA cannot be resolved locally | `DubError` with `git fetch origin` hint |
+| Branch name collides with an existing branch | `DubError` pointing at `-b` or `dub delete` |
+| `git revert` fails (e.g. conflicts) | Aborts the in-progress revert, deletes the partial branch, switches back to the original branch, then throws |
+
+## Undo
+
+```bash
+dub revert 123
+dub undo   # → deletes the created revert branch and restores state
+```
+
+Undo only removes the local revert branch. Any push performed via `--submit`
+is not rolled back — close the PR or delete the remote branch manually if
+needed.
