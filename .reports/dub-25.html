@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-25 - Batched PR/CI data layer for log and checkout</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-25</div>
+        <h1>DUB-25 - Batched PR/CI data layer for log and checkout</h1>
+        <div class="meta"><span><strong>6</strong> files</span>
+<span><span class="add">+873</span> / <span class="del">-0</span></span>
+<span>branch <strong>feature/dub-25-batched-prci-data-layer-for-log-and-checkout</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise</strong></span></div>
+        <div class="prompt"><span class="label">Prompt</span>Extend the batched gh pr list helper into a rich stack overview, persist it to a 30s on-disk cache, and surface a truncation flag — so dub log / dub co / dub status / dub watch can render the whole stack from one gh call + one git for-each-ref instead of N round-trips per branch.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>Adds `getStackOverviewBatch` in `lib/stack-overview.ts`: one `gh pr list` (rich fields) + one `git for-each-ref` (commit metadata), joined with Dubstack state, cached for 30 s at `.git/dubstack/overview-cache.json`. `--refresh` busts the cache; truncation flag flows through; cache writes are best-effort so a read-only `.git` cannot crash callers.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Tier 2 views (`dub log`, `dub co`, `dub status`, `dub watch`) need richer PR data (title, draft, reviewDecision, CI rollup, last-commit relative time) than the existing `getAllPrSyncInfoBatch` returns.</p>
+<p class="lede">Without batching, each branch in a stack costs one `gh pr view` + one `git log` round-trip — O(N) latency that gets painful past a handful of branches.</p>
+<p class="lede">Repeated invocations in a short window (e.g. `dub log` followed immediately by `dub co`) should not re-hit GitHub — hence the 30 s on-disk cache.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>`getAllPrSyncInfoBatch` returned only `{state, baseRefName}` — fine for sync, insufficient for richer UI views.</li>
+<li>No batched git helper for commit metadata: callers were forced to loop `getLastCommitMessage` per branch.</li>
+<li>No on-disk cache. Every TUI tick that wanted the overview paid the full fetch cost.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>`getStackOverviewBatch(cwd, { refresh? })` returns a materialized `StackOverview` joining PR + commit + Dubstack state for every tracked branch.</li>
+<li>One `gh pr list` (richer `--json` field set) + one `git for-each-ref` regardless of stack size.</li>
+<li>30 s TTL on-disk cache at `.git/dubstack/overview-cache.json`; `refresh: true` (or stale / future-dated `cachedAt`) busts it.</li>
+<li>Truncation passthrough: when `gh pr list` hits the page limit, the consumer learns and can render an &#39;N of N+&#39; notice.</li>
+<li>Cache write is best-effort — a read-only or full `.git` directory can&#39;t crash the caller after the fetch already succeeded.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/stack-overview.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+150</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>New orchestrator. `getStackOverviewBatch` reads the on-disk cache (rejects negative ages from clock skew), and on a miss runs `getStackOverviewPrBatch` + `getBranchCommitMetaBatch` in parallel, joins each tracked branch with state fields (`pr_link`, `last_synced_at`, `sync_source`), and writes the result back to `.git/dubstack/overview-cache.json`. The write is wrapped in try/catch so disk failures don&#39;t propagate.</p>
+    <div class="code"><pre>export async function getStackOverviewBatch(
+  cwd: string,
+  options: GetStackOverviewOptions = {},
+): Promise&lt;StackOverview&gt; {
+  const now = options.now?.() ?? Date.now();
+
+  if (!options.refresh) {
+    const cached = await readCache(cwd);
+    if (cached) {
+      const age = now - Date.parse(cached.cachedAt);
+      if (Number.isFinite(age) &amp;&amp; age &gt;= 0 &amp;&amp; age &lt; OVERVIEW_CACHE_TTL_MS) {
+        return cached;
+      }
+    }
+  }
+
+  const state = await readState(cwd);
+  const allBranchNames = state.stacks.flatMap((s) =&gt; s.branches.map((b) =&gt; b.name));
+  const [prBatch, commitBatch] = await Promise.all([
+    getStackOverviewPrBatch(cwd),
+    getBranchCommitMetaBatch(cwd, allBranchNames),
+  ]);</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+170</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `getStackOverviewPrBatch` — richer cousin of `getAllPrSyncInfoBatch` that pulls `number,title,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,isDraft` and rolls the mixed CheckRun + StatusContext array up to a single `CiStatusRollup` (FAILURE &gt; PENDING &gt; SUCCESS). Kept separate from the existing sync helper so its tight field set and parser tests stay untouched.</p>
+    <div class="code"><pre>export async function getStackOverviewPrBatch(
+  cwd: string,
+): Promise&lt;StackOverviewPrBatch&gt; {
+  // ... one `gh pr list --json ...` call ...
+}
+
+function computeCiRollup(checks: unknown): CiStatusRollup {
+  // FAILURE dominates PENDING dominates SUCCESS.
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+68</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds `getBranchCommitMetaBatch(cwd, branchNames)` — one `git for-each-ref` call over `refs/heads/&lt;branch&gt;` for each requested branch. Fields are joined by ASCII unit-separator (`\x1f`) so spaces inside `committerdate:relative` and angle brackets inside `authoremail` can&#39;t break parsing. Missing-locally branches are simply absent from the returned map.</p>
+    <div class="code"><pre>export async function getBranchCommitMetaBatch(
+  cwd: string,
+  branchNames: readonly string[],
+): Promise&lt;Map&lt;string, BranchCommitMeta&gt;&gt; {
+  const refs = branchNames.map((name) =&gt; `refs/heads/${name}`);
+  const format =
+    `%(refname:short)${SEP}%(committerdate:relative)${SEP}` +
+    `%(authoremail)${SEP}%(objectname:short=8)`;
+  // ...
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/stack-overview.test.ts</span>
+    <span class="badge new">new</span>
+    <span class="stat"><span class="add">+252</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>9 tests covering: fresh fetch (single gh + single for-each-ref, joined correctly), null pr/commit for unmatched branches, cache hit, cache stale, refresh override, on-disk persistence, future-dated cache rejection, truncation passthrough, and cache-write-failure resilience.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/github.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+192</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>6 new tests for `getStackOverviewPrBatch`: rich field parsing, exact gh args, CI rollup precedence (PENDING/SUCCESS/NONE), truncation, duplicate-PR handling, and gh failure path.</p>
+    
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/lib/git.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+41</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>3 new tests for `getBranchCommitMetaBatch`: empty input, two-branch parse against a real test repo, and missing-branch handling.</p>
+    
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">Cache TTL logic and clock-skew handling</div>
+    <div class="note"><code>packages/cli/src/lib/stack-overview.ts:97-105</code> The freshness check rejects negative ages so a future-dated `cachedAt` (e.g. NTP correction) can&#39;t pin us to stale data indefinitely. Worth a second look that the comparison is right and the test covers it.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">CI rollup precedence</div>
+    <div class="note"><code>packages/cli/src/lib/github.ts:531-577</code> GitHub mixes CheckRun (`status`/`conclusion`) and StatusContext (`state`) shapes in the same `statusCheckRollup` array. The rollup handles both shapes and gives FAILURE &gt; PENDING &gt; SUCCESS precedence.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Cache write resilience</div>
+    <div class="note"><code>packages/cli/src/lib/stack-overview.ts:131-138</code> Added after adversarial review: a read-only or full `.git` directory must not crash callers after the fetch already succeeded. Covered by `stack-overview.test.ts &gt; cache write failure`.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">stack-overview.test.ts — 9 tests</div>
+      <div class="note">All 9 tests pass via `pnpm vitest run src/lib/stack-overview.test.ts`.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">github.test.ts — getStackOverviewPrBatch (6 new tests)</div>
+      <div class="note">All 55 github.test.ts tests pass.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">git.test.ts — getBranchCommitMetaBatch (3 new tests, real git repo)</div>
+      <div class="note">All 55 git.test.ts tests pass.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">End-to-end exercise via dub log / dub co</div>
+      <div class="note">Deferred to DUB-26 which wires this data layer into the renderers.</div>
+    </div>
+    <span class="status pending">pending</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. `Checked 263 files in 52ms. No fixes applied.`</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. tsc --noEmit succeeded for both `dubstack` and `docs` packages.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest</div>
+      <div class="note">Command: pnpm test. 87 test files, 806 tests passed.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Self-QA fallback documenting which automated test covers each acceptance criterion.</div>
+      <div class="note">No `.tsx` files changed; the work is a pure data-layer library not yet wired to any rendered output.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-25-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>Fresh fetch — one gh + one for-each-ref, state joined.</li>
+<li>Cache hit within TTL — no gh/git calls.</li>
+<li>Cache stale past TTL — refetch.</li>
+<li>Refresh override — refetch even when fresh.</li>
+<li>Future-dated cache — rejected.</li>
+<li>Truncation passthrough — flag flows through.</li>
+<li>Cache write failure — overview still returned.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`getStackOverviewBatch` exported from `lib/stack-overview.ts`</div>
+      <div class="note">stack-overview.ts:79 export.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">One `gh pr list` + one `git for-each-ref` for the whole stack</div>
+      <div class="note">stack-overview.test.ts &gt; &#39;issues one gh call + one for-each-ref&#39; asserts call counts == 1.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">30-second on-disk TTL cache at `.git/dubstack/overview-cache.json`</div>
+      <div class="note">`OVERVIEW_CACHE_TTL_MS = 30_000`; cache path constant `CACHE_FILENAME = &#39;overview-cache.json&#39;` under `getDubDir(cwd)`.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">`--refresh` flag (consumed by callers) busts the cache</div>
+      <div class="note">`options.refresh` short-circuits the cache read; tested in &#39;refetches when refresh: true even if the cache is fresh&#39;.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Truncation flag surfaced to callers</div>
+      <div class="note">`StackOverview.truncated` mirrors `prBatch.truncated`; tested in &#39;surfaces truncated:true from getStackOverviewPrBatch&#39;.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">No regression for `getAllPrSyncInfoBatch` callers (sync still works)</div>
+      <div class="note">`getAllPrSyncInfoBatch` and its 5 tests are untouched; `getStackOverviewPrBatch` is added alongside.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: fresh fetch, cache hit, cache stale, refresh override, truncation flag</div>
+      <div class="note">All 5 named scenarios covered in stack-overview.test.ts (plus future-date and write-failure).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Critical: cache write error propagated to caller. Resolved by wrapping `writeCache` in try/catch (stack-overview.ts:135-138) and adding the `cache write failure` test.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-7 (batched gh pr list)</div>
+  <div class="note">Merged — provides `getAllPrSyncInfoBatch` and `BATCH_PR_LIST_LIMIT`.</div>
+</div>
+<div class="dep">
+  <div class="item-title">DUB-37 (freeze/unfreeze)</div>
+  <div class="note">Backlog — `frozen` field join deferred per issue description; not blocking.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Pure library addition — no command wired to it yet. Zero user-visible behavior change. The follow-up issue (DUB-26) lights it up in `dub log`.</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Land library</div>
+  <div class="note">Squash-merge to main; no migration, no flag, no config change.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">After merge</div>
+  <div class="label">Wire renderers (DUB-26)</div>
+  <div class="note">Update `dub log`, `dub co`, `dub status`, `dub watch` to call `getStackOverviewBatch` instead of per-branch helpers.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Future</div>
+  <div class="label">Add `frozen` join (after DUB-37)</div>
+  <div class="note">Once `Branch.frozen` exists in state, include it in the `BranchOverview` shape.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>6e5a21f</strong> <code>6e5a21f6d431adf0670e119be8b974e653798228</code></div>
+  <pre>feat(stack-overview): batched PR/CI data layer with 30s on-disk cache [DUB-25]</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">stack-overview.ts</a>
+<a href="#tour" class="sub">github.ts</a>
+<a href="#tour" class="sub">git.ts</a>
+<a href="#tour" class="sub">stack-overview.test.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
