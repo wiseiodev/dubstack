@@ -474,7 +474,6 @@ describe('postMerge', () => {
     expect(appendCalls).toContainEqual({
       type: 'retarget',
       branch: 'feat/b',
-      oldBase: 'feat/a',
       newBase: 'main',
     });
     const retargetAppendIdx = appendCalls.findIndex(
@@ -485,6 +484,24 @@ describe('postMerge', () => {
     const appendCallOrder =
       mockAppendCleanupOperation.mock.invocationCallOrder[retargetAppendIdx];
     expect(appendCallOrder).toBeLessThan(retargetCallOrder);
+  });
+
+  it('leaves the journal in place when retargetPrBase fails mid-loop', async () => {
+    mockRetargetPrBase.mockRejectedValueOnce(new Error('gh edit failed'));
+
+    await expect(
+      postMerge('/repo', { restack: false, submit: false }),
+    ).rejects.toThrow('gh edit failed');
+    expect(mockStartCleanupJournal).toHaveBeenCalled();
+    // Append for the retarget op must have happened before the throw, so the
+    // op survives on disk for `dub continue` to replay.
+    const appendCalls = mockAppendCleanupOperation.mock.calls.map(
+      (call) => call[2],
+    );
+    expect(appendCalls.some((op) => op.type === 'retarget')).toBe(true);
+    // Journal stays on disk: clear must not be called when retarget throws.
+    expect(mockClearCleanupJournal).not.toHaveBeenCalled();
+    expect(mockWriteState).not.toHaveBeenCalled();
   });
 
   it('leaves the journal in place when writeState fails so dub continue can resume', async () => {

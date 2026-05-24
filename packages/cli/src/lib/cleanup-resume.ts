@@ -66,9 +66,10 @@ async function replayJournal(
       if (op.branch === currentBranch) {
         // Skip deletion of the checked-out branch — git rejects -D on HEAD.
         // The state was already cleaned above; the user just needs to move
-        // off this branch and re-run sync to drop the branch ref itself.
+        // off this branch and re-run the interrupted cleanup command to drop
+        // the branch ref itself.
         console.log(
-          `⚠ Branch '${op.branch}' is currently checked out; left it in place. Switch to another branch and re-run \`dub sync\` to finish removing the ref.`,
+          `⚠ Branch '${op.branch}' is currently checked out; left it in place. Switch to another branch and re-run the interrupted cleanup command (\`dub sync\`, \`dub post-merge\`, or \`dub merge-next\`) to finish removing the ref.`,
         );
         alreadyApplied.push(op);
         continue;

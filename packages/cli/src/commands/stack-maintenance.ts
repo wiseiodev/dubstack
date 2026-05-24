@@ -37,7 +37,6 @@ export async function retargetOpenPrBranches(
           await appendCleanupOperation(cwd, options.journal, {
             type: 'retarget',
             branch: branch.name,
-            oldBase: prInfo.baseRefName ?? null,
             newBase: branch.parent,
           });
         }

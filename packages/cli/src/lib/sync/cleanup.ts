@@ -6,13 +6,6 @@ import type {
 } from '../cleanup-journal';
 import type { BranchPrLifecycleState } from '../github';
 
-export type {
-  CleanupDeleteOp,
-  CleanupOperation,
-  CleanupReason,
-  CleanupReparentOp,
-};
-
 export interface CleanupPlan {
   /** Ordered list of operations to apply (deletes + reparents). */
   operations: CleanupOperation[];

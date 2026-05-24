@@ -72,4 +72,13 @@ describe('cleanup journal', () => {
   it('clearCleanupJournal is a no-op when nothing is on disk', async () => {
     await expect(clearCleanupJournal(dir)).resolves.toBeUndefined();
   });
+
+  it('refuses to start a new journal when one already exists', async () => {
+    await startCleanupJournal(dir);
+    await expect(startCleanupJournal(dir)).rejects.toThrow(
+      /cleanup journal already exists/,
+    );
+    // The original journal file is left untouched so `dub continue` can replay.
+    expect(await hasCleanupJournal(dir)).toBe(true);
+  });
 });

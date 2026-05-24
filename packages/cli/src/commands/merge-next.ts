@@ -91,7 +91,6 @@ export async function mergeNext(
       await appendCleanupOperation(cwd, journal, {
         type: 'retarget',
         branch: childBranch,
-        oldBase: nextBranch,
         newBase: nextParent,
       });
       await retargetPrBase(childBranch, nextParent, cwd);

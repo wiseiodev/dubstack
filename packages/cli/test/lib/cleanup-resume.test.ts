@@ -220,7 +220,6 @@ describe('resumeCleanup', () => {
     await appendCleanupOperation(dir, journal, {
       type: 'retarget',
       branch: 'feat/b',
-      oldBase: 'feat/a',
       newBase: 'main',
     });
 
@@ -256,7 +255,6 @@ describe('resumeCleanup', () => {
     await appendCleanupOperation(dir, journal, {
       type: 'retarget',
       branch: 'feat/b',
-      oldBase: 'feat/a',
       newBase: 'main',
     });
 
@@ -282,7 +280,6 @@ describe('resumeCleanup', () => {
     await appendCleanupOperation(dir, journal, {
       type: 'retarget',
       branch: 'feat/b',
-      oldBase: 'feat/a',
       newBase: 'main',
     });
 

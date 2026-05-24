@@ -173,7 +173,6 @@ describe('mergeNext', () => {
       {
         type: 'retarget',
         branch: 'feat/b',
-        oldBase: 'feat/a',
         newBase: 'main',
       },
     );

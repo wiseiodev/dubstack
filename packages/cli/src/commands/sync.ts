@@ -3,6 +3,7 @@ import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
 import {
   appendCleanupOperation,
+  type CleanupDeleteOp,
   clearCleanupJournal,
   startCleanupJournal,
 } from '../lib/cleanup-journal';
@@ -48,7 +49,7 @@ import {
   writeState,
 } from '../lib/state';
 import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
-import { buildCleanupPlan, type CleanupDeleteOp } from '../lib/sync/cleanup';
+import { buildCleanupPlan } from '../lib/sync/cleanup';
 import { partitionFreshBranches } from '../lib/sync/fresh';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
 import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
