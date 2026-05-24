@@ -48,6 +48,11 @@ export type WatchEvent =
       to: CiStatusRollup;
     }
   | {
+      kind: 'pr-opened';
+      branch: string;
+      prNumber: number;
+    }
+  | {
       kind: 'pr-merged';
       branch: string;
       prNumber: number;
@@ -117,6 +122,18 @@ export function diffSnapshots(
     if (!before) continue;
 
     if (after.prNumber != null) {
+      // Branch just got a PR opened (null → number, or replaced PR
+      // number). Surface it as `pr-opened` so the user gets an explicit
+      // signal; the review/CI/merged events below all gate on
+      // `before.prNumber === after.prNumber` and would otherwise drop
+      // every signal on the very first poll after `dub submit`.
+      if (before.prNumber !== after.prNumber) {
+        events.push({
+          kind: 'pr-opened',
+          branch,
+          prNumber: after.prNumber,
+        });
+      }
       if (
         before.reviewDecision !== after.reviewDecision &&
         before.prNumber === after.prNumber
@@ -198,6 +215,14 @@ export function renderEvent(event: WatchEvent): {
   inline: string;
 } {
   switch (event.kind) {
+    case 'pr-opened':
+      return {
+        notification: {
+          title: `PR #${event.prNumber} opened`,
+          message: `${event.branch} now tracks a pull request.`,
+        },
+        inline: `ℹ PR #${event.prNumber} opened for ${event.branch}.`,
+      };
     case 'pr-merged':
       return {
         notification: {
@@ -280,9 +305,13 @@ export interface WatcherDeps {
    */
   scheduleTimer: (cb: () => void, ms: number) => () => void;
   /**
-   * Watches each absolute path for change events. Returns a single
-   * teardown function. Implementations should be resilient to missing
-   * files (the cleanup-journal only exists mid-recovery).
+   * Watches each path for change events. Paths are passed as repo-
+   * relative strings (e.g. `.git/HEAD`); implementations are responsible
+   * for resolving them against the watcher's `cwd`. Returns a single
+   * teardown function. Implementations must be resilient to missing
+   * files — the cleanup-journal only exists mid-recovery — and should
+   * still emit events when the file is created later (e.g. by watching
+   * the parent directory).
    */
   watchFiles: (paths: string[], onChange: (file: string) => void) => () => void;
   now: () => number;
@@ -297,6 +326,11 @@ export interface PauseState {
 
 export interface Watcher {
   start(): Promise<void>;
+  /**
+   * Stops the watcher: cancels the timer, releases file-watcher handles,
+   * and resolves once any in-flight poll completes. Idempotent — repeat
+   * calls are no-ops and resolve to the same promise.
+   */
   stop(): Promise<void>;
   /** Visible for tests: run one poll cycle synchronously. */
   pollOnce(opts?: { trigger?: 'timer' | 'file' | 'manual' }): Promise<{
@@ -305,6 +339,8 @@ export interface Watcher {
   }>;
   /** Returns the current pause state (or null when actively polling). */
   pauseState(): PauseState | null;
+  /** The resolved poll interval in milliseconds. */
+  readonly intervalMs: number;
 }
 
 const RATE_LIMIT_BACKOFF_MS = 30_000;
@@ -331,6 +367,9 @@ export function createWatcher(deps: WatcherDeps): Watcher {
   // first and effectively halves the configured interval.
   let polling = false;
   let pollPendingFollowup = false;
+  // Tracks the active poll promise so stop() can await it instead of
+  // returning before fetchOverview / notify resolve.
+  let inFlightPoll: Promise<unknown> | null = null;
 
   const watchedFiles = [
     '.git/HEAD',
@@ -340,9 +379,10 @@ export function createWatcher(deps: WatcherDeps): Watcher {
 
   function setPause(reason: PauseReason | null): void {
     if (reason == null) {
-      if (pause) {
-        deps.log(`▶ resumed (was paused: ${pause.reason})`);
-      }
+      // Don't log a "resumed" line here — the caller may immediately
+      // transition into a different pause (cleanup → offline → 429).
+      // The runPoll cycle logs the resume once at the end of a fully
+      // healthy poll. Internally, just clear the state.
       pause = null;
       return;
     }
@@ -362,16 +402,34 @@ export function createWatcher(deps: WatcherDeps): Watcher {
       return { events: [], skipped: pause?.reason ?? null };
     }
     polling = true;
-    try {
-      return await runPoll(opts);
-    } finally {
-      polling = false;
-      if (pollPendingFollowup && !stopped) {
-        pollPendingFollowup = false;
-        // Fire-and-forget: caller already got its result. The follow-up
-        // is a background reconciliation triggered by suppressed events.
-        void runPoll({ trigger: 'file' }).catch(() => {});
+    const wasPaused = pause;
+    const promise = (async () => {
+      try {
+        return await runPoll(opts);
+      } finally {
+        polling = false;
+        // Emit one resume log line per healthy poll cycle (not per
+        // gate-clear), so cleanup→offline transitions don't produce a
+        // noisy "resumed/paused" pair in the same tick.
+        if (wasPaused && !pause) {
+          deps.log(`▶ resumed (was paused: ${wasPaused.reason})`);
+        }
+        if (pollPendingFollowup && !stopped) {
+          pollPendingFollowup = false;
+          // Route the follow-up back through pollOnce so it honors the
+          // serialization guard — bypassing it would let a brand-new
+          // external trigger run in parallel with the follow-up.
+          void pollOnce({ trigger: 'file' }).catch(() => {});
+        }
       }
+    })();
+    inFlightPoll = promise;
+    try {
+      return await promise;
+    } finally {
+      // Clear the in-flight handle only if no later poll has replaced
+      // it — otherwise stop() would await the wrong promise.
+      if (inFlightPoll === promise) inFlightPoll = null;
     }
   }
 
@@ -419,7 +477,16 @@ export function createWatcher(deps: WatcherDeps): Watcher {
       backoffMs = 0;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      if (/\b429\b|rate.?limit/i.test(message)) {
+      // Tighter than a bare `rate.?limit` substring (which false-
+      // positives on a branch name like `rate-limit-experiment` echoed
+      // in error text). Match the explicit HTTP-429 status or
+      // GitHub's canonical "rate limit exceeded" / "you have exceeded
+      // a secondary rate limit" phrasing.
+      if (
+        /\bHTTP\s*:?\s*429\b|\b429\s+too\s+many\b|rate\s+limit\s+exceeded|secondary\s+rate\s+limit/i.test(
+          message,
+        )
+      ) {
         backoffMs = Math.min(
           backoffMs > 0 ? backoffMs * 2 : RATE_LIMIT_BACKOFF_MS,
           MAX_BACKOFF_MS,
@@ -490,12 +557,28 @@ export function createWatcher(deps: WatcherDeps): Watcher {
     schedule();
   }
 
-  async function stop(): Promise<void> {
+  let stopPromise: Promise<void> | null = null;
+  function stop(): Promise<void> {
+    if (stopPromise) return stopPromise;
     stopped = true;
     timerCancel?.();
     timerCancel = null;
     filesCancel?.();
     filesCancel = null;
+    stopPromise = (async () => {
+      // Wait for any in-flight poll to drain so callers (typically the
+      // SIGINT handler) don't race process.exit() against live I/O.
+      const pending = inFlightPoll;
+      if (pending) {
+        try {
+          await pending;
+        } catch {
+          // Poll errors are already logged inside runPoll; swallow here
+          // so shutdown is graceful regardless of the last poll's fate.
+        }
+      }
+    })();
+    return stopPromise;
   }
 
   return {
@@ -503,5 +586,6 @@ export function createWatcher(deps: WatcherDeps): Watcher {
     stop,
     pollOnce,
     pauseState: () => pause,
+    intervalMs: deps.intervalMs,
   };
 }

@@ -213,6 +213,44 @@ describe('diffSnapshots', () => {
     });
   });
 
+  it('emits pr-opened when a branch transitions from no PR to a PR', () => {
+    const baseNoPr = {
+      branch: 'feat/a',
+      isRoot: false,
+      prNumber: null as number | null,
+      prState: 'NONE' as const,
+      reviewDecision: null,
+      ciRollup: 'NONE' as const,
+      isDraft: false,
+      mergedAt: null,
+      localShortSha: 'abc12345',
+    };
+    const prev = snapshot({ byBranch: new Map([['feat/a', baseNoPr]]) });
+    const next = snapshot({
+      byBranch: new Map([
+        [
+          'feat/a',
+          {
+            ...baseNoPr,
+            prNumber: 99,
+            prState: 'OPEN',
+            ciRollup: 'PENDING',
+          },
+        ],
+      ]),
+    });
+    const events = diffSnapshots(prev, next);
+    expect(events.find((e) => e.kind === 'pr-opened')).toMatchObject({
+      kind: 'pr-opened',
+      branch: 'feat/a',
+      prNumber: 99,
+    });
+    // Critically, neither review-changed nor ci-changed fires for the
+    // same poll — those are guarded on `before.prNumber === after.prNumber`.
+    expect(events.find((e) => e.kind === 'pr-review-changed')).toBeUndefined();
+    expect(events.find((e) => e.kind === 'pr-ci-changed')).toBeUndefined();
+  });
+
   it('emits trunk-advanced when origin/<root> SHA changes', () => {
     const prev = snapshot({
       trunkRemoteShas: new Map([['main', 'old-sha-aaaa']]),
@@ -317,8 +355,16 @@ describe('createWatcher orchestration', () => {
     const w = createWatcher(deps);
     await w.start();
     expect(filesCb).not.toBeNull();
+    const fetchCalls = vi.mocked(deps.fetchOverview).mock.calls.length;
     filesCb?.('/tmp/repo/.git/HEAD');
+    // Yield so the file-event-triggered pollOnce reaches fetchOverview.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(logged.some((l) => l.includes('file event'))).toBe(true);
+    expect(vi.mocked(deps.fetchOverview).mock.calls.length).toBeGreaterThan(
+      fetchCalls,
+    );
   });
 
   it('pauses polling while a cleanup journal is active', async () => {
@@ -360,6 +406,17 @@ describe('createWatcher orchestration', () => {
     const result = await w.pollOnce({ trigger: 'timer' });
     expect(result.skipped).toBe('rate-limited');
     expect(w.pauseState()?.reason).toBe('rate-limited');
+  });
+
+  it('does NOT trip 429 backoff on a branch name like "rate-limit-fix"', async () => {
+    deps.fetchOverview = vi.fn(async () => {
+      throw new Error("Branch 'rate-limit-fix' not found on origin");
+    });
+    const w = createWatcher(deps);
+    const result = await w.pollOnce({ trigger: 'manual' });
+    // Generic error path — logged, not paused.
+    expect(result.skipped).toBeNull();
+    expect(w.pauseState()).toBeNull();
   });
 
   it('emits a pr-merged event end-to-end and forwards it to notify+log', async () => {
@@ -436,5 +493,49 @@ describe('createWatcher orchestration', () => {
     await w.stop();
     expect(timerCb).toBeNull();
     expect(filesCb).toBeNull();
+  });
+
+  it('stop() awaits the in-flight poll before resolving', async () => {
+    const resolvers: Array<() => void> = [];
+    let fetchResolved = false;
+    deps.fetchOverview = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolvers.push(resolve);
+      });
+      fetchResolved = true;
+      return overview([overviewBranch({ branch: 'main', isRoot: true })]);
+    });
+    const w = createWatcher(deps);
+    const poll = w.pollOnce({ trigger: 'manual' });
+    // Yield so pollOnce enters fetchOverview.
+    await Promise.resolve();
+    await Promise.resolve();
+    const stopPromise = w.stop();
+    let stopResolved = false;
+    void stopPromise.then(() => {
+      stopResolved = true;
+    });
+    // stop() must NOT resolve until the in-flight fetch settles.
+    await Promise.resolve();
+    expect(stopResolved).toBe(false);
+    resolvers[0]?.();
+    await poll;
+    await stopPromise;
+    expect(fetchResolved).toBe(true);
+    expect(stopResolved).toBe(true);
+  });
+
+  it('stop() is idempotent and returns the same promise on repeat calls', async () => {
+    const w = createWatcher(deps);
+    await w.start();
+    const a = w.stop();
+    const b = w.stop();
+    expect(a).toBe(b);
+    await a;
+  });
+
+  it('exposes the resolved intervalMs on the watcher handle', () => {
+    const w = createWatcher({ ...deps, intervalMs: 90_000 });
+    expect(w.intervalMs).toBe(90_000);
   });
 });

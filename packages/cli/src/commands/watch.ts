@@ -71,21 +71,49 @@ function defaultWatchFiles(
   onChange: (file: string) => void,
 ): () => void {
   const watchers: fs.FSWatcher[] = [];
+  // fs.watch fires the same event 2–3 times per write on macOS/Linux as
+  // editors do save-temp-rename cycles. Debounce so we coalesce those
+  // bursts into a single re-poll trigger per logical change.
+  const FILE_EVENT_DEBOUNCE_MS = 50;
+  const pendingTimers = new Map<string, NodeJS.Timeout>();
+  const emit = (file: string) => {
+    const existing = pendingTimers.get(file);
+    if (existing) clearTimeout(existing);
+    pendingTimers.set(
+      file,
+      setTimeout(() => {
+        pendingTimers.delete(file);
+        onChange(file);
+      }, FILE_EVENT_DEBOUNCE_MS),
+    );
+  };
   for (const file of paths) {
     try {
       // `persistent: false` so the watcher does not by itself keep the
       // event loop alive — the poll timer is the canonical lifeline.
-      const watcher = fs.watch(file, { persistent: false }, () =>
-        onChange(file),
-      );
+      const watcher = fs.watch(file, { persistent: false }, () => emit(file));
       watchers.push(watcher);
     } catch {
-      // Missing files (e.g. cleanup-journal before any recovery) are
-      // expected; we'll re-watch on the next start if the user manually
-      // restarts the watcher.
+      // The cleanup-journal only exists mid-recovery, so fs.watch on it
+      // throws ENOENT at startup. Fall back to watching its parent dir
+      // for creation events; HEAD/index always exist so they fall
+      // through to the swallow-and-move-on branch.
+      try {
+        const parent = path.dirname(file);
+        const base = path.basename(file);
+        const watcher = fs.watch(parent, { persistent: false }, (_, name) => {
+          if (name === base) emit(file);
+        });
+        watchers.push(watcher);
+      } catch {
+        // Parent missing too — give up; the next interval-driven poll
+        // will still surface any change via state-shape diff.
+      }
     }
   }
   return () => {
+    for (const t of pendingTimers.values()) clearTimeout(t);
+    pendingTimers.clear();
     for (const w of watchers) {
       try {
         w.close();
@@ -100,6 +128,11 @@ function defaultRenderUi(
   snapshot: WatchSnapshot,
   pause: PauseState | null,
 ): void {
+  // The TUI uses raw ANSI cursor controls to redraw in place. When stdout
+  // is piped (e.g. `dub watch --ui | tee log.txt`) those sequences are
+  // literal bytes in the log — fall back to no-op so non-TTY consumers
+  // aren't polluted with `\x1b[H\x1b[2J` garbage.
+  if (!process.stdout.isTTY) return;
   const lines: string[] = [];
   // Move cursor to home + clear screen below to redraw in place.
   process.stdout.write('\x1b[H\x1b[2J');
@@ -207,10 +240,11 @@ export async function watch(
   await getRepoRoot(cwd);
 
   const watcher = buildWatcher(cwd, options);
-  const intervalMs = resolveInterval(options.interval);
 
   console.log(
-    chalk.bold(`Watching stack — polling every ${formatDuration(intervalMs)}`),
+    chalk.bold(
+      `Watching stack — polling every ${formatDuration(watcher.intervalMs)}`,
+    ),
   );
   console.log(chalk.dim('Press Ctrl-C to stop.'));
 
