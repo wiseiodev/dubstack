@@ -1,0 +1,179 @@
+{
+  "meta": {
+    "workId": "DUB-79",
+    "title": "Submit progress bar adapts to tree scope (multi-sub-tree pushes)",
+    "artifactId": "dub-79",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-79-submit-progress-bar-adapts-to-tree-scope-multi-sub-tree",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-79",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 2,
+    "additions": 216,
+    "deletions": 2,
+    "diffStat": "2 files changed, 216 insertions(+), 2 deletions(-) across 2 commits"
+  },
+  "prompt": "DUB-79 — make the `dub submit` push/sync progress bar annotate each branch with its sub-tree root so tree-shaped stacks are easier to follow when adjacent updates jump between sibling sub-trees.",
+  "tldr": "Adds a `createSubTreeTagger(stack, trunk)` helper to `submit.ts` that derives the deepest ancestor-with-siblings for each branch, and feeds the result (`subtreeRoot · branch` or just `branch`) into the existing `progress.update(..., detail)` calls in both the push and PR-sync loops. Linear stacks and direct trunk children render unchanged.",
+  "why": {
+    "motivation": [
+      "Tree submit (DUB-20) and scope flags (DUB-24) made tree-shaped stacks first-class, but the progress bar still labels each line with only the branch name — adjacent updates can hop between unrelated sub-trees in sibling-alphabetical BFS order, which is hard to follow.",
+      "Annotating the label with the local fork point gives a stable visual anchor for which sub-tree each update belongs to."
+    ],
+    "before": [
+      "🚀 Pushing branches [████████░░░░░] 12/30  feat/auth-login",
+      "Next update may jump to `feat/dashboard-view` with no sub-tree context — the user has to mentally re-locate the branch in the tree on every line."
+    ],
+    "after": [
+      "🚀 Pushing branches [████████░░░░░] 12/30  feat/auth-base · feat/auth-login",
+      "Next line: `feat/dashboard · feat/dashboard-view` — the sub-tree root makes the jump explicit. Branches directly on trunk and purely linear stacks render unchanged (no breaking `·`)."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/submit.ts",
+      "changeType": "mod",
+      "additions": 80,
+      "deletions": 2,
+      "explanation": "Adds an exported `createSubTreeTagger(branches, trunkName)` helper (plus its private `deriveSubTreeTag` walker) and threads the tagger into both `progress.update` call sites (push loop + PR-sync loop). The walk starts at the branch's parent, scans toward trunk, and returns the first ancestor that itself has at least one sibling. Returns null for direct trunk children and linear stacks; a `seen` set guards against malformed cyclic state. The `·` separator lives in a named `SUB_TREE_SEPARATOR` constant.",
+      "snippet": "const subTreeTagger = createSubTreeTagger(\n  plan.stack.branches,\n  plan.rootBranch,\n);\n// ...\nprogress.update('🚀 Pushing branches', pushIndex, subTreeTagger(branch.name));\n// ...\nprogress.update('📬 Syncing PRs', prIndex, subTreeTagger(branch.name));\n\nconst SUB_TREE_SEPARATOR = ' · '; // U+00B7\n\nexport function createSubTreeTagger(\n  branches: Branch[],\n  trunkName: string,\n): (branchName: string) => string {\n  const branchByName = new Map(branches.map((b) => [b.name, b]));\n  const childCountByParent = new Map<string, number>();\n  for (const branch of branches) {\n    if (branch.parent != null) {\n      childCountByParent.set(\n        branch.parent,\n        (childCountByParent.get(branch.parent) ?? 0) + 1,\n      );\n    }\n  }\n  return (branchName) => {\n    const tag = deriveSubTreeTag(branchName, branchByName, childCountByParent, trunkName);\n    return tag ? `${tag}${SUB_TREE_SEPARATOR}${branchName}` : branchName;\n  };\n}",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/submit-progress.test.ts",
+      "changeType": "new",
+      "additions": 136,
+      "deletions": 0,
+      "explanation": "Eight unit tests cover the label format across the spec's required scenarios plus regression cases surfaced by an adversarial review: linear stack (no `·` anywhere), branches sitting directly on trunk (no prefix), a single-fork tree (matches the issue's worked example `feat/auth-base · feat/auth-login`), a two-deep nested fork (verifies we pick the *deepest* ancestor with siblings, not the shallowest), the `A → {B, C}` case where no ancestor has siblings, an unknown-branch fallback, the root branch name itself, and the `'(unknown)'` trunk fallback that `getSubmitPlan` emits for malformed state.",
+      "snippet": "it('prefixes descendants with the deepest ancestor that has siblings', () => {\n  const branches = makeBranches([\n    { name: 'main', parent: null, root: true },\n    { name: 'feat/auth-base', parent: 'main' },\n    { name: 'feat/auth-login', parent: 'feat/auth-base' },\n    { name: 'feat/auth-logout', parent: 'feat/auth-base' },\n    { name: 'feat/dashboard', parent: 'main' },\n  ]);\n  const tag = createSubTreeTagger(branches, 'main');\n  expect(tag('feat/auth-login')).toBe('feat/auth-base · feat/auth-login');\n  expect(tag('feat/auth-logout')).toBe('feat/auth-base · feat/auth-logout');\n  expect(tag('feat/auth-base')).toBe('feat/auth-base');\n  expect(tag('feat/dashboard')).toBe('feat/dashboard');\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "deriveSubTreeTag walks the right direction & stops at the deepest fork",
+      "location": "packages/cli/src/commands/submit.ts:539-560",
+      "rationale": "The spec's 'deepest shared ancestor with siblings' means the closest fork above the branch. The walk starts at branch.parent and returns on the FIRST ancestor whose parent has >1 children, which is correct (closest to the branch = deepest in tree). Confirm the early `branch.parent === trunkName` guard correctly skips direct trunk children, and that the `seen` set guard keeps malformed cyclic state from spinning forever."
+    },
+    {
+      "title": "Tagger uses full stack topology, not the scoped submit set",
+      "location": "packages/cli/src/commands/submit.ts:159",
+      "rationale": "`createSubTreeTagger(plan.stack, plan.rootBranch)` builds `childCountByParent` from the full stack so a `--branch X` run still labels X correctly relative to its actual sibling shape. Intentional — confirm reviewer agrees this matches 'sub-tree context' semantics rather than 'sub-tree of the submit set'."
+    },
+    {
+      "title": "Progress format string still fits the new detail",
+      "location": "packages/cli/src/lib/progress.ts:86-87",
+      "rationale": "The cli-progress format is `'{label} [{bar}] {value}/{total} {detail}'`. The new detail is just a longer string (`subtreeRoot · branch`); no format change needed. Confirm rendering looks right on a narrow terminal — cli-progress truncates/clears via cursor escapes, so longer detail strings simply consume more horizontal space."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "createSubTreeTagger covers linear / trunk-child / single-fork / deep-fork / branch-as-fork / unknown-branch",
+      "status": "done",
+      "evidence": "packages/cli/test/commands/submit-progress.test.ts — 6 cases, all passing."
+    },
+    {
+      "kind": "build",
+      "label": "Full vitest suite",
+      "status": "done",
+      "evidence": "pnpm test → 86 test files, 767 tests, all passing."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . — Checked 257 files in 36ms. No fixes applied."
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo typecheck — 2 tasks successful (docs cached, dubstack fresh)."
+    },
+    {
+      "name": "unit tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "767 tests passing across 86 files."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Change affects the `detail` text in a TTY progress bar emitted by a Node CLI. No .tsx, no browser surface, no visual UX worth recording — the output is fully deterministic from stack shape and is covered by equality assertions in the unit tests.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-79-qa.md",
+    "caption": "Fallback QA documenting the verified label formats for linear, trunk-child, and tree-shaped stacks, with acceptance-criteria → test mapping.",
+    "scenarios": [
+      "Linear stack: progress detail equals just the branch name.",
+      "Direct trunk child (with or without siblings): progress detail equals just the branch name.",
+      "Tree with sub-tree (worked example from issue): progress detail equals `feat/auth-base · feat/auth-login`.",
+      "Deep nested fork: tagger returns the deepest ancestor-with-siblings (e.g. `leftBranch · leftLeaf`), not the shallowest."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "Progress update lines show sub-tree context on tree-shaped stacks",
+      "status": "satisfied",
+      "evidence": "Tests `prefixes descendants with the deepest ancestor that has siblings` and `uses the deepest forked ancestor, not the trunk-child` in submit-progress.test.ts; integration sites at submit.ts push loop & PR-sync loop."
+    },
+    {
+      "criterion": "Linear stacks render unchanged (no breaking `·`)",
+      "status": "satisfied",
+      "evidence": "Test `returns the branch name unchanged in a linear stack` and `does not prefix branches that sit directly on trunk` both assert the detail is the bare branch name."
+    },
+    {
+      "criterion": "Snapshot tests for the update label format in linear and tree scenarios",
+      "status": "satisfied",
+      "evidence": "submit-progress.test.ts contains 6 equality assertions across the linear, trunk-child, single-fork, deep-fork, and edge cases."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 2,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 2,
+    "findings": [
+      "Pass 1 (clean) flagged only one nit: tagger re-walks ancestors O(N×D) without memoization — inconsequential at stack scale.",
+      "Pass 2 (more aggressive) surfaced fixable items addressed in commit a46c3c7: removed unnecessary `export` on `deriveSubTreeTag`, switched `createSubTreeTagger` parameter from `Stack` to `Branch[]` per the small-pure-helpers styleguide, corrected JSDoc that conflated \"deepest ancestor with siblings\" with \"closest fork point,\" hoisted the `·` magic separator to a named constant, moved the unit-test file from `test/commands/` to `src/commands/` (since it has no integration fixtures), and added regression tests for the root branch name and the `(unknown)` trunk fallback.",
+      "Skipped: relocating helpers into `lib/` (low-value; they are submit-specific) and renaming `siblingCount` (current name is clear in context)."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 — tree-walking submit",
+      "status": "Merged on main (commit 22e60bb and predecessors enabled tree-shaped submit ordering)."
+    },
+    {
+      "name": "DUB-24 — submit scope flags",
+      "status": "Merged on main (52ae5ac) — `--upstack`/`--downstack`/`--stack`/`--branch` all flow through `getSubmitPlan` and feed the tagger."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive change to the CLI's progress label text. No state shape, no flag, no breaking change. Lands on next dubstack release.",
+    "steps": [
+      {
+        "when": "On merge to main",
+        "label": "Ship in next CLI release",
+        "details": "No migration. Users on tree-shaped stacks see the new `subtreeRoot · branch` format on next `dub submit`. Users on linear stacks see no change."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "a46c3c76ae708e17a94db47d2d97ebb184722848",
+    "shortSha": "a46c3c7",
+    "message": "feat(submit): annotate progress bar with sub-tree context + review fixups"
+  }
+}

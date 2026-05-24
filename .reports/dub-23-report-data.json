@@ -1,0 +1,249 @@
+{
+  "meta": {
+    "workId": "DUB-23",
+    "title": "Tree-aware post-merge verification + cascade tests",
+    "artifactId": "dub-23",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-23-tree-aware-post-merge-verification-cascade-tests",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-23",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 2,
+    "additions": 472,
+    "deletions": 0,
+    "diffStat": ".reports/dub-23-qa.md (+60)\npackages/cli/test/commands/post-merge-tree.test.ts (+412)"
+  },
+  "prompt": "Verify and harden `dub post-merge` for tree-shaped stacks. Per DUB-23's verification notes, the production algorithm already handles trees correctly — the gap is test coverage. Add `packages/cli/test/commands/post-merge-tree.test.ts` covering five tree scenarios (leaf, middle/single-child, middle/multi-child, base/multi-sibling subtree, cascade), assert PR base retargeting fires for every reparented branch, and assert the post-cleanup stack-wide submit fires so DUB-21's tree-shaped PR body table gets refreshed.",
+  "tldr": "Test-only addition: 7 mock-based vitest scenarios in `post-merge-tree.test.ts` that pin tree-shape behavior for `dub post-merge` (cleanup, reparenting, PR retargeting, surviving-descendant checkout, post-cleanup stack-wide submit). No production code changes.",
+  "why": {
+    "motivation": [
+      "DUB-23 verification on 2026-05-23 confirmed `post-merge.ts` already handles trees: `getMergedBottomBranches` accepts any MERGED PR whose parent is root-or-already-merged (tree-shape agnostic), `removeBranchFromStack` reparents every child of the deleted branch in one pass, and `retargetOpenPrBranches` runs over the full working stack rather than a path.",
+      "Without coverage, a future refactor (DUB-77 cleanup-journal unification, or any change to topological iteration order) could silently break tree behavior — the existing `post-merge.test.ts` only exercises linear chains.",
+      "DUB-21 shipped the tree-shaped PR body table; nothing pinned that post-merge actually triggers a PR body refresh on the surviving tree."
+    ],
+    "before": [
+      "`post-merge.test.ts` covered only linear stacks (`main → feat/a → feat/b`).",
+      "No assertion that multiple children of a merged middle branch all get reparented in one pass.",
+      "No assertion that a base + descendant cascade leaves both surviving descendants on the root.",
+      "No assertion that the post-cleanup `submit(..., { stack: true })` fires — which is the mechanism that rewrites every PR body's stack table via `updateAllPrBodies`."
+    ],
+    "after": [
+      "Seven new tests in `post-merge-tree.test.ts` cover every tree shape DUB-23 enumerates plus PR body refresh plumbing and surviving-descendant checkout.",
+      "Linear `post-merge.test.ts` untouched and still green (768/768 total).",
+      "Any future regression in cleanup ordering, reparent fan-out, or stack-wide submit invocation will fail one of these tests."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/test/commands/post-merge-tree.test.ts",
+      "changeType": "new",
+      "additions": 412,
+      "deletions": 0,
+      "explanation": "Mock-based vitest spec modeled after `packages/cli/src/commands/post-merge.test.ts`. Mocks `lib/git.js`, `lib/github.js`, `lib/cleanup-journal.js`, `lib/state.js` (preserves real types/topo helpers), and the `restack` + `submit` command modules. Helper `mockPrState(state, merged)` snapshots each branch's parent at setup time so `getBranchPrSyncInfo` returns the ORIGINAL `baseRefName` — mirroring what GitHub would return before `gh pr edit --base` fires. This is what makes retarget assertions meaningful: after state mutation moves a child onto a new parent, `prInfo.baseRefName !== branch.parent` is true and `retargetPrBase` is invoked.",
+      "snippet": "function mockPrState(state: DubState, mergedBranches: Set<string>) {\n  const originalParent = new Map(\n    state.stacks.flatMap((s) =>\n      s.branches.map((b) => [b.name, b.parent] as const),\n    ),\n  );\n  // ... snapshotted base mirrors gh BEFORE post-merge edits the PR.\n  mockGetBranchPrSyncInfo.mockImplementation(async (branch) => {\n    const base = originalParent.get(branch) ?? null;\n    return { state: mergedBranches.has(branch) ? 'MERGED' : 'OPEN', baseRefName: base };\n  });\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": ".reports/dub-23-qa.md",
+      "changeType": "new",
+      "additions": 60,
+      "deletions": 0,
+      "explanation": "QA fallback per `do-issue` skill: no production code changed and no `.tsx` files were touched, so no browser video is required. Records the seven scenarios and the gates that passed (biome, tsc, vitest 768/768).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "`mockPrState` snapshot semantics",
+      "location": "packages/cli/test/commands/post-merge-tree.test.ts:113-145",
+      "rationale": "The mock intentionally returns the ORIGINAL parent as `baseRefName` rather than reading the live (mutated) state. Confirm this matches reality: GitHub returns whatever base the PR was opened against until `gh pr edit --base` fires. Without this snapshot, retarget assertions would be tautological (parent already equals current state)."
+    },
+    {
+      "title": "PR body refresh assertion scope",
+      "location": "packages/cli/test/commands/post-merge-tree.test.ts:355-393",
+      "rationale": "`updateAllPrBodies` lives inside the mocked `submit()` so it is NOT exercised here. The test only proves `submit(cwd, false, { stack: true })` is invoked after retargeting — the mechanism that triggers PR body refresh. Bodies-by-output content is pinned by DUB-21's `pr-body.test.ts` snapshots."
+    },
+    {
+      "title": "Cascade ordering",
+      "location": "packages/cli/test/commands/post-merge-tree.test.ts:314-353",
+      "rationale": "Asserts that when `feat/base` (MERGED) and `feat/child` (MERGED, parent feat/base) are cleaned in the same pass, the surviving descendants (`feat/leaf` under feat/child, `feat/sib` under feat/base) both end up parented on `main`. Relies on `getMergedBottomBranches` adding feat/base first (parent satisfied = root), then feat/child (parent satisfied = merged), and on `planReparents` reading the live (already-updated) parent at delete time."
+    },
+    {
+      "title": "Multi-sibling subtree boundary",
+      "location": "packages/cli/test/commands/post-merge-tree.test.ts:267-310",
+      "rationale": "Verifies that when `feat/base` is cleaned, `feat/sib-a`/`feat/sib-b` reparent onto `main` but `feat/grand-a`/`feat/grand-b` keep their original parents and are NOT retargeted. Confirms the retarget set is scoped strictly to branches whose parent actually moved."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "S1 leaf merged — sibling untouched, no reparent, no retarget",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:168-194 — `expect(mockRetargetPrBase).not.toHaveBeenCalled()`."
+    },
+    {
+      "kind": "unit",
+      "label": "S2 middle merged, single child — child reparented + retargeted to grandparent",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:196-227 — retargetPrBase called once with `('feat/child', 'main', '/repo')`."
+    },
+    {
+      "kind": "unit",
+      "label": "S3 middle merged, multiple children — all three reparented + retargeted",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:229-265 — retargetPrBase invoked exactly 3 times, all with newBase=main."
+    },
+    {
+      "kind": "unit",
+      "label": "S4 base merged, multi-sibling subtree — siblings reparent, grandchildren unchanged",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:267-310 — grand-a/grand-b parent still equals sib-a/sib-b; retargets scoped to sib-a, sib-b only."
+    },
+    {
+      "kind": "unit",
+      "label": "S5 cascade — base + child both merged, leaf + sib both end up on root",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:312-353 — cleaned=[base,child]; both leaf and sib reparented and retargeted to main."
+    },
+    {
+      "kind": "unit",
+      "label": "PR body refresh plumbing — stack-wide submit fires after cleanup",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:355-393 — asserts submit called with `{ stack: true }` AFTER retargetPrBase via invocationCallOrder check."
+    },
+    {
+      "kind": "unit",
+      "label": "Surviving descendant checkout — user lands on a real branch",
+      "status": "done",
+      "evidence": "post-merge-tree.test.ts:395-411 — `checkoutBranch('feat/leaf', '/repo')` invoked when current branch was the merged feat/base."
+    },
+    {
+      "kind": "unit",
+      "label": "No regressions for linear stacks",
+      "status": "done",
+      "evidence": "post-merge.test.ts (519 lines, untouched) still passes — full repo run 768/768."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 257 files in 37ms. No fixes applied."
+    },
+    {
+      "name": "Type check",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit across docs + dubstack — 2 successful, 2 total."
+    },
+    {
+      "name": "Test suite",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "86 files, 768 tests, all green (was 761 before; +7 new)."
+    },
+    {
+      "name": "Focused suite",
+      "command": "pnpm vitest run test/commands/post-merge-tree.test.ts",
+      "status": "passed",
+      "evidence": "1 file, 7 tests, 132ms."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "Test-only change in `packages/cli/test/commands/`. No production code edits, no UI surface, no .tsx files touched.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-23-qa.md",
+    "caption": "CLI test-only change — QA fallback records the gates that ran and what each new scenario proves.",
+    "scenarios": [
+      "Leaf merged: only the leaf is cleaned; sibling parent unchanged; retargetPrBase NOT called.",
+      "Middle/single-child: child reparented to grandparent; gh pr edit fires once.",
+      "Middle/multi-child: all three children reparented in one pass; three retargets, all to main.",
+      "Base/multi-sibling subtree: siblings reparent; grandchildren keep original parents; no spurious retargets.",
+      "Cascade: feat/base + feat/child cleaned together; surviving descendants end up parented on the root.",
+      "PR body refresh plumbing: post-cleanup submit called with `{ stack: true }`; retargets precede submit per invocationCallOrder.",
+      "Surviving-descendant checkout: if user was on the merged branch, checkoutBranch lands them on the survivor."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New packages/cli/test/commands/post-merge-tree.test.ts covering all 5 tree scenarios.",
+      "status": "satisfied",
+      "evidence": "post-merge-tree.test.ts — 5 scenario tests + 2 plumbing tests, all green."
+    },
+    {
+      "criterion": "Every still-open PR has the correct base after post-merge (verified via gh mock assertions).",
+      "status": "satisfied",
+      "evidence": "Each scenario asserts `mockRetargetPrBase` was/was-not called with the expected `(branch, newBase, cwd)` triples."
+    },
+    {
+      "criterion": "PR body stack tables refreshed to reflect the new tree shape.",
+      "status": "satisfied",
+      "evidence": "Plumbing test asserts `submit(cwd, false, { stack: true })` is invoked after cleanup; this routes through `updateAllPrBodies` (pinned by DUB-21's pr-body.test.ts snapshots). Invocation order asserted: retargets precede submit."
+    },
+    {
+      "criterion": "No regressions for linear stacks (existing post-merge.test.ts still passes).",
+      "status": "satisfied",
+      "evidence": "post-merge.test.ts untouched; full repo run 768/768 (86 files)."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 4,
+    "nitpick": 0,
+    "findings": [
+      "Reviewer (feature-dev:code-reviewer) returned no critical or major blocking findings.",
+      "Minor (acknowledged, not addressed): cascade test asserts result.retargeted order via toEqual — relies on alphabetical sort in retargetOpenPrBranches:48 plus the chosen names happening to be alphabetical. Renaming would require a test update; left as-is to keep the assertion readable.",
+      "Minor (acknowledged): PR body refresh test only proves `submit` was invoked, not that `updateAllPrBodies` ran — intentional, since updateAllPrBodies output is pinned by DUB-21's pr-body.test.ts snapshots and live-firing it here would require unmocking the entire submit chain.",
+      "Minor (resolved by design): `mockPrState` snapshot-at-setup is intentional — mirrors gh API which returns the PR's stored base until edited.",
+      "Minor (resolved by design): `findStackForBranch` works against state at `readState` time, before cleanup mutates it — verified for both 'user on surviving sibling' and 'user on the merged branch' setups."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 (tree-walking submit)",
+      "status": "Done — merged (commit 52ae5ac in recent log)."
+    },
+    {
+      "name": "DUB-21 (tree-shaped PR body + v1 metadata schema)",
+      "status": "Done — merged (commit 2dd70fc in recent log). Provides the buildStackTable/buildMetadataBlock that the post-cleanup submit invokes to refresh PR bodies."
+    },
+    {
+      "name": "DUB-77 (post-merge cleanup-journal unification)",
+      "status": "Tracked separately and intentionally out of scope per the issue description."
+    }
+  ],
+  "rollout": {
+    "summary": "Test-only — zero production code paths changed. Merge unlocks confidence that any future change to `post-merge.ts` (e.g., the deferred DUB-77 journal unification) does not silently regress tree handling.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "CI",
+        "details": "Existing CI runs `pnpm checks`, `pnpm typecheck`, `pnpm test`. The 7 new tests will run as part of `pnpm test` and gate future PRs."
+      },
+      {
+        "when": "Follow-up",
+        "label": "DUB-77",
+        "details": "When the cleanup-journal unification lands, this suite will catch any regression in tree cleanup ordering or reparent fan-out."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "df30848c645af3a08ed818834658adafa8d2e4fc",
+    "shortSha": "df30848",
+    "message": "test(post-merge): tree-shape coverage + cascade scenarios [DUB-23]"
+  }
+}
