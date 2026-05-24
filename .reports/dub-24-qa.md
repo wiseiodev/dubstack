@@ -19,10 +19,10 @@ No `.tsx` files changed. The work is entirely in the Node.js CLI (`packages/cli/
 
 ## Evidence
 
-- Diff stat: 21 files, +423/-95.
-- Implementation: `packages/cli/src/commands/submit.ts` lines 44-82 (types), 333-403 (`resolveScope`), 405-451 (scope dispatch + upstack BFS).
-- Tests: `packages/cli/test/commands/submit-tree.test.ts` covers each scope kind, the mutex error, and both deprecation warnings.
-- Adversarial review (feature-dev:code-reviewer subagent): no critical/major findings.
+- Diff stat (source + docs, excluding `.reports/`): 23 files, +672/-99 (after addressing two rounds of adversarial review + Copilot's PR review).
+- Implementation: `packages/cli/src/commands/submit.ts` (`SubmitScope` type, `resolveScope`, scope dispatch, upstack BFS with cycle guard) plus `packages/cli/src/lib/state.ts` (`topologicalOrder` cycle guard for `--stack`).
+- Tests: `packages/cli/test/commands/submit-tree.test.ts` and `packages/cli/src/commands/submit.test.ts` cover every scope kind, mutex errors (including the `--path`-specific recovery hint), both deprecation warnings, the upstack cycle guard, and `--branch` against untracked / root branches. 720+ tests passing.
+- Adversarial review iterations: 2 (feature-dev:code-reviewer). All critical/major findings resolved; Copilot's PR review followed.
 
 ## Follow-up flag
 

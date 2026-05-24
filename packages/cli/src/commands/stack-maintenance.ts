@@ -85,8 +85,7 @@ export async function submitRefreshedStacks(
     for (const branchName of submitTargets) {
       await checkoutBranch(branchName, cwd);
       const result = await submit(cwd, false, {
-        path: 'stack',
-        fix: true,
+        stack: true,
       });
       for (const branch of result.pushed) {
         pushed.add(branch);
@@ -96,8 +95,7 @@ export async function submitRefreshedStacks(
   }
 
   const result = await submit(cwd, false, {
-    path: 'stack',
-    fix: true,
+    stack: true,
   });
   return result.pushed;
 }

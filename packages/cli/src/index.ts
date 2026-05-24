@@ -918,7 +918,7 @@ program
         : 'downstack';
       console.log(
         chalk.dim(
-          `Submit path (${scopeLabel}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
+          `Submit scope (${scopeLabel}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
         ),
       );
     }

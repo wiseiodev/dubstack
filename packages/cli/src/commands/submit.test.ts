@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/git.js', () => ({
   getBranchTip: vi.fn(),
@@ -136,6 +136,10 @@ function makeState(
     ],
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(() => {
   vi.clearAllMocks();
