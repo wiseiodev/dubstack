@@ -321,6 +321,78 @@ describe('absorb option validation', () => {
     const tipAfter = await getBranchTip('feat/a', dir);
     expect(tipAfter).not.toBe(tipBefore);
   });
+
+  it('surfaces a deferred-restack conflict as conflict:true (auto mode)', async () => {
+    // feat/a → child feat/b created *before* the fixup, then fixup added on
+    // feat/a. After absorb folds the fixup, restacking feat/b replays its
+    // patch onto the rewritten parent and produces a 3-way merge conflict.
+    await create('feat/a', dir);
+    await commitFile('shared.txt', 'a-line\n', 'feat: add a');
+    await create('feat/b', dir);
+    await commitFile('shared.txt', 'b-edit\n', 'feat: tweak shared on b');
+    await gitInRepo(dir, ['checkout', 'feat/a']);
+    await commitFile('shared.txt', 'a-line-fixed\n', 'fixup! feat: add a');
+
+    const result = await absorb(dir);
+    expect(result.conflict).toBe(true);
+    // Absorb-progress is cleared so the next `dub continue` resumes the
+    // restack, not the already-finished absorb.
+    expect(await hasAbsorbProgress(dir)).toBe(false);
+  });
+
+  it('--ai discards a target that is not in the candidate list', async () => {
+    await create('feat/a', dir);
+    await commitFile('a.txt', 'a', 'feat: add a');
+    await commitFile('b.txt', 'b', 'feat: add b');
+    await commitFile('b.txt', 'b-fixed', 'wip');
+
+    const fakeDeps = makeFakeAiDeps({
+      // The AI hallucinates a SHA that is not in the candidates list.
+      assignments: [{ wipSha: 'abc1234', targetSha: 'deadbee' }],
+    });
+
+    const previousKey = process.env.DUBSTACK_GEMINI_API_KEY;
+    process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
+    try {
+      const result = await absorb(dir, { ai: true }, fakeDeps);
+      expect(result.absorbed).toBe(0);
+      // The single WIP commit was returned with targetSha:null, so it is
+      // counted as skipped rather than silently reordered.
+      expect(result.skipped).toBe(1);
+    } finally {
+      process.env.DUBSTACK_GEMINI_API_KEY = previousKey;
+    }
+  });
+
+  it('--ai rejects a target that is not strictly earlier than the WIP', async () => {
+    await create('feat/a', dir);
+    await commitFile('a.txt', 'a', 'feat: add a');
+    // Second commit is also "non-WIP-shaped" (long subject, conventional).
+    await commitFile('b.txt', 'b', 'feat: add b with a long description');
+    // WIP commit at index 2. AI will be told to point it at "feat: add b"
+    // (index 1), which is correctly earlier — that should succeed.
+    await commitFile('b.txt', 'b-fixed', 'wip');
+
+    const log = (
+      await gitInRepo(dir, ['log', '--reverse', '--format=%h', 'main..feat/a'])
+    ).stdout
+      .split('\n')
+      .filter(Boolean);
+    const earlierTarget = log[1];
+
+    const fakeDeps = makeFakeAiDeps({
+      assignments: [{ wipSha: log[2], targetSha: earlierTarget }],
+    });
+
+    const previousKey = process.env.DUBSTACK_GEMINI_API_KEY;
+    process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
+    try {
+      const result = await absorb(dir, { ai: true }, fakeDeps);
+      expect(result.absorbed).toBe(1);
+    } finally {
+      process.env.DUBSTACK_GEMINI_API_KEY = previousKey;
+    }
+  });
 });
 
 type GenerateTextResult = { text: string };

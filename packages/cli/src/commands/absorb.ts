@@ -221,17 +221,12 @@ async function runAutoMode(
     throw error;
   }
 
-  const restacked = await restackAfterAbsorb(cwd, state, stack);
-  await clearAbsorbProgress(cwd);
-  return {
-    mode: 'auto',
+  return finishAbsorbWithRestack(cwd, state, stack, 'auto', {
     branch: originalBranch,
     absorbed: fixupCount,
     skipped: 0,
     movedTo: [],
-    restacked,
-    conflict: false,
-  };
+  });
 }
 
 async function runAiMode(
@@ -274,6 +269,7 @@ async function runAiMode(
   const assignments = await aiPickTargets(
     wipCommits,
     candidates,
+    commits,
     deps,
     config.ai.provider,
   );
@@ -331,17 +327,12 @@ async function runAiMode(
     throw error;
   }
 
-  const restacked = await restackAfterAbsorb(cwd, state, stack);
-  await clearAbsorbProgress(cwd);
-  return {
-    mode: 'ai',
+  return finishAbsorbWithRestack(cwd, state, stack, 'ai', {
     branch: originalBranch,
     absorbed: assignedCount,
     skipped: skippedCount,
     movedTo: [],
-    restacked,
-    conflict: false,
-  };
+  });
 }
 
 interface CrossFixup {
@@ -450,17 +441,49 @@ async function runStackMode(
   }
 
   await execa('git', ['checkout', originalBranch], { cwd });
-  const restacked = await restackAfterAbsorb(cwd, state, stack);
-  await clearAbsorbProgress(cwd);
-  return {
-    mode: 'stack',
+  return finishAbsorbWithRestack(cwd, state, stack, 'stack', {
     branch: originalBranch,
     absorbed: crossFixups.length,
     skipped: 0,
     movedTo: Array.from(movedTo),
-    restacked,
-    conflict: false,
-  };
+  });
+}
+
+/**
+ * Runs the deferred restack after a successful absorb, then clears the
+ * absorb-progress marker. If the restack itself pauses on a conflict we
+ * clear the marker first (so `dub continue` routes to `restackContinue`,
+ * not back into the already-finished absorb) and surface `conflict: true`.
+ */
+async function finishAbsorbWithRestack(
+  cwd: string,
+  state: DubState,
+  stack: Stack,
+  mode: AbsorbMode,
+  fields: {
+    branch: string;
+    absorbed: number;
+    skipped: number;
+    movedTo: string[];
+  },
+): Promise<AbsorbResult> {
+  try {
+    const restacked = await restackAfterAbsorb(cwd, state, stack);
+    await clearAbsorbProgress(cwd);
+    return { mode, ...fields, restacked, conflict: false };
+  } catch (error) {
+    if (error instanceof RestackConflictDuringAbsorb) {
+      await clearAbsorbProgress(cwd);
+      return {
+        mode,
+        ...fields,
+        restacked: error.rebased,
+        conflict: true,
+      };
+    }
+    await clearAbsorbProgress(cwd);
+    throw error;
+  }
 }
 
 async function collectCrossBranchFixups(
@@ -581,21 +604,33 @@ export async function absorbContinue(cwd: string): Promise<AbsorbResult> {
 
   const state = await readState(cwd);
   const stack = findStackForBranch(state, progress.originalBranch);
-  const restacked =
-    progress.needsRestack && stack
-      ? await restackAfterAbsorb(cwd, state, stack)
-      : [];
-  await clearAbsorbProgress(cwd);
+  if (!stack || !progress.needsRestack) {
+    await clearAbsorbProgress(cwd);
+    return {
+      mode: progress.mode,
+      branch: progress.originalBranch,
+      absorbed: 0,
+      skipped: 0,
+      movedTo: [],
+      restacked: [],
+      conflict: false,
+    };
+  }
 
-  return {
-    mode: progress.mode,
+  // The paused rebase may have left HEAD on the original branch already, but
+  // --stack mode pauses on arbitrary branches. Restack keys off the current
+  // branch, so anchor it explicitly before deferring.
+  const current = await getCurrentBranch(cwd);
+  if (current !== progress.originalBranch) {
+    await execa('git', ['checkout', progress.originalBranch], { cwd });
+  }
+
+  return finishAbsorbWithRestack(cwd, state, stack, progress.mode, {
     branch: progress.originalBranch,
     absorbed: 0,
     skipped: 0,
     movedTo: [],
-    restacked,
-    conflict: false,
-  };
+  });
 }
 
 /**
@@ -631,11 +666,6 @@ function shellQuote(value: string): string {
   // POSIX single-quote escape: replace any internal single quote with
   // `'\''` so the resulting string is safe to drop into a `sh -c` argv.
   return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-export async function hasAbsorbProgress(cwd: string): Promise<boolean> {
-  const filePath = await getAbsorbProgressPath(cwd);
-  return fs.existsSync(filePath);
 }
 
 async function getAbsorbProgressPath(cwd: string): Promise<string> {
@@ -816,6 +846,7 @@ interface AiAssignment {
 async function aiPickTargets(
   wipCommits: CommitInfo[],
   candidates: CommitInfo[],
+  allCommits: CommitInfo[],
   deps: AbsorbDependencies,
   providerConfig: Parameters<typeof resolveAiProvider>[0]['providerConfig'],
 ): Promise<AiAssignment[]> {
@@ -828,7 +859,7 @@ async function aiPickTargets(
     prompt,
   });
 
-  return parseAiAbsorbResponse(result.text, wipCommits, candidates);
+  return parseAiAbsorbResponse(result.text, wipCommits, candidates, allCommits);
 }
 
 function buildAiAbsorbPrompt(
@@ -866,6 +897,7 @@ function parseAiAbsorbResponse(
   text: string,
   wipCommits: CommitInfo[],
   candidates: CommitInfo[],
+  allCommits: CommitInfo[],
 ): AiAssignment[] {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -896,9 +928,18 @@ function parseAiAbsorbResponse(
     ]);
   }
 
-  const shortToFull = new Map<string, string>();
-  for (const c of [...wipCommits, ...candidates]) {
-    shortToFull.set(c.shortSha, c.sha);
+  // Only resolve targets to *candidate* (non-WIP) commits. The AI is asked
+  // to pick from the candidate list, but a hallucinated SHA — including any
+  // WIP SHA — collapses to `null` so `buildCustomRebaseTodo` skips that WIP
+  // instead of silently reordering history.
+  const candidateShortToFull = new Map<string, string>();
+  for (const c of candidates) {
+    candidateShortToFull.set(c.shortSha, c.sha);
+  }
+  const candidateShaSet = new Set(candidates.map((c) => c.sha));
+  const commitIndex = new Map<string, number>();
+  for (let i = 0; i < allCommits.length; i++) {
+    commitIndex.set(allCommits[i].sha, i);
   }
 
   const assignments: AiAssignment[] = [];
@@ -911,9 +952,25 @@ function parseAiAbsorbResponse(
       typeof rawTarget === 'string' && rawTarget.trim().length > 0
         ? rawTarget.trim()
         : null;
-    const targetFull = targetShort
-      ? (shortToFull.get(targetShort) ?? null)
+    let targetFull = targetShort
+      ? (candidateShortToFull.get(targetShort) ?? null)
       : null;
+    // Enforce target must (a) be a known non-WIP candidate and (b) appear
+    // strictly earlier than the WIP in commit order. A later target would
+    // mean `buildCustomRebaseTodo` reorders the WIP fixup *forward* into a
+    // commit that didn't exist at the WIP's parent — silent history rewrite.
+    if (targetFull !== null) {
+      const wipIdx = commitIndex.get(wip.sha) ?? -1;
+      const targetIdx = commitIndex.get(targetFull) ?? -1;
+      if (
+        !candidateShaSet.has(targetFull) ||
+        wipIdx === -1 ||
+        targetIdx === -1 ||
+        targetIdx >= wipIdx
+      ) {
+        targetFull = null;
+      }
+    }
     assignments.push({ wipSha: wip.sha, targetSha: targetFull });
   }
   return assignments;
@@ -1007,6 +1064,23 @@ async function dropCommitsFromBranch(
   }
 }
 
+/**
+ * Sentinel thrown by {@link restackAfterAbsorb} when the deferred restack
+ * pauses on a merge conflict. Callers catch it, clear the absorb-progress
+ * marker, and surface `conflict: true` so `dub continue` routes to
+ * `restackContinue` (not back into the already-finished absorb).
+ */
+class RestackConflictDuringAbsorb extends Error {
+  readonly conflictBranch: string | undefined;
+  readonly rebased: string[];
+  constructor(rebased: string[], conflictBranch: string | undefined) {
+    super(`Restack paused on conflict during absorb on '${conflictBranch}'.`);
+    this.name = 'RestackConflictDuringAbsorb';
+    this.conflictBranch = conflictBranch;
+    this.rebased = rebased;
+  }
+}
+
 async function restackAfterAbsorb(
   cwd: string,
   _state: DubState,
@@ -1014,8 +1088,15 @@ async function restackAfterAbsorb(
 ): Promise<string[]> {
   try {
     const result = await restack(cwd, { skipUndoEntry: true });
+    if (result.status === 'conflict') {
+      throw new RestackConflictDuringAbsorb(
+        result.rebased,
+        result.conflictBranch,
+      );
+    }
     return result.rebased;
   } catch (error) {
+    if (error instanceof RestackConflictDuringAbsorb) throw error;
     if (error instanceof DubError) throw error;
     throw new DubError(
       `Auto-restack after absorb failed: ${error instanceof Error ? error.message : String(error)}`,
