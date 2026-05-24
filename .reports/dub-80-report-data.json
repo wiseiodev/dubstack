@@ -1,0 +1,201 @@
+{
+  "meta": {
+    "workId": "DUB-80",
+    "title": "Extract MCP private status() into shared command/lib",
+    "artifactId": "dub-80",
+    "repo": "dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-80-extract-mcp-private-status-into-shared-commandlib",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-80",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 3,
+    "additions": 259,
+    "deletions": 45,
+    "diffStat": "packages/cli/src/commands/mcp.ts | 48 +---------\npackages/cli/src/commands/status.test.ts | 158 +++++++++++++++++++++++++++++++\npackages/cli/src/commands/status.ts | 98 +++++++++++++++++++"
+  },
+  "prompt": "Structural refactor: move private status() out of commands/mcp.ts into commands/status.ts so the upcoming `dub status` CLI (DUB-28) can share the impl with the MCP tool. No behavior change for the dubstack.status MCP tool aside from an additive schemaVersion: 1 field. Includes typed StatusResult interface and three shape tests.",
+  "tldr": "Extracted the private status() function from commands/mcp.ts into a new commands/status.ts module with a typed StatusResult interface, so DUB-28 (dub status CLI) can consume the same impl. The dubstack.status MCP tool's behavior is unchanged aside from an additive schemaVersion: 1 field required by the spec.",
+  "why": {
+    "motivation": [
+      "DUB-28 (dub status CLI) is blocked on having a shared, typed entrypoint that both the MCP tool and the CLI command can call.",
+      "Keeping status() inline in commands/mcp.ts forced duplication or a circular import once a CLI command was added."
+    ],
+    "before": [
+      "commands/mcp.ts owned a private async status(cwd) returning a loose JsonValue.",
+      "There was no shared status module; the MCP tool was the only caller and the impl was not type-safe across consumers."
+    ],
+    "after": [
+      "commands/status.ts owns the impl, exports a typed StatusResult, and is the single source of truth.",
+      "commands/mcp.ts imports status() and wraps it through toJsonValue at the call site; inline impl deleted.",
+      "DUB-28 can now add a dub status CLI command by importing the same status() function."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/status.ts",
+      "changeType": "new",
+      "additions": 98,
+      "deletions": 0,
+      "explanation": "New shared module. Exports StatusResult (with schemaVersion: 1, currentBranch, operation, branch, pr, drift), BranchSnapshot, PrSnapshot, DriftSnapshot, StatusOptions (live/pr reserved for DUB-28), the async status(cwd, options?) function, and isDriftIssue() helper. Body is the same logic that previously lived inline in mcp.ts, returning a typed object instead of a JsonValue.",
+      "snippet": "export interface StatusResult {\n  schemaVersion: 1;\n  currentBranch: string | null;\n  operation: ActiveOperation;\n  branch: BranchSnapshot;\n  pr: PrSnapshot;\n  drift: DriftSnapshot;\n}\n\nexport async function status(\n  cwd: string,\n  _options?: StatusOptions,\n): Promise<StatusResult> { ... }",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/mcp.ts",
+      "changeType": "mod",
+      "additions": 3,
+      "deletions": 45,
+      "explanation": "Deleted the inline status() and isDriftIssue() bodies. Imports the shared status() from ./status. The dubstack.status case now wraps the typed StatusResult through toJsonValue to keep the MCP JSON envelope identical. Trimmed unused imports (branchInfo, getBranchPrSyncInfo, DoctorIssue).",
+      "snippet": "import { status } from './status';\n\n...\n\ncase 'dubstack.status':\n  return jsonToolResult(toJsonValue(await status(cwd)));",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/status.test.ts",
+      "changeType": "new",
+      "additions": 158,
+      "deletions": 0,
+      "explanation": "Three shape tests using the same mock pattern as commands/doctor.test.ts: tracked branch with healthy drift and OPEN PR, untracked branch with empty stack metadata, and missing-gh-auth path where getBranchPrSyncInfo rejects and status() returns pr.state = 'UNKNOWN' with the error message preserved.",
+      "snippet": "describe('status', () => {\n  it('reports a tracked branch with healthy drift and PR info', ...);\n  it('reports an untracked branch with empty stack metadata', ...);\n  it('returns UNKNOWN pr state with error when gh auth is missing', ...);\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "MCP behavior parity",
+      "location": "packages/cli/src/commands/mcp.ts (dubstack.status case) + status.ts status()",
+      "rationale": "The extracted body must produce the same shape as before, modulo the additive schemaVersion: 1 field required by the spec. toJsonValue still wraps the result at the call site so the MCP JSON envelope is unchanged."
+    },
+    {
+      "title": "Reserved options are visibly inert",
+      "location": "packages/cli/src/commands/status.ts StatusOptions",
+      "rationale": "StatusOptions exists per the issue spec but its live/pr fields are intentionally not wired yet; an inline comment marks them reserved for DUB-28 so future callers don't expect them to filter behavior."
+    },
+    {
+      "title": "Drift-issue filter still matches the original",
+      "location": "packages/cli/src/commands/status.ts isDriftIssue()",
+      "rationale": "Code list (parent-mismatch, remote-base-mismatch, missing-local, missing-remote, remote-drift, remote-check-failed) is byte-identical to the old impl so MCP consumers see the same drift health signal."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "commands/status.test.ts (tracked, untracked, missing-gh-auth)",
+      "status": "done",
+      "evidence": "3 new tests; full suite reports 792 passed across 87 files."
+    },
+    {
+      "kind": "unit",
+      "label": "Existing commands/mcp.test.ts unchanged",
+      "status": "done",
+      "evidence": "Tool registration still lists dubstack.status; MCP tests pass without modification."
+    },
+    {
+      "kind": "build",
+      "label": "pnpm typecheck (turbo cli + docs)",
+      "status": "done",
+      "evidence": "tsc --noEmit succeeded for both packages."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Format + lint",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "biome check . — Checked 263 files, no errors."
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo typecheck — 2/2 packages successful."
+    },
+    {
+      "name": "Unit tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "vitest — 87 files, 792 tests, all passing."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files changed; refactor is a private TypeScript function with no browser/TUI/CLI surface. Only consumer is the dubstack.status MCP JSON-RPC tool whose contract is unchanged.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-80-qa.md",
+    "caption": "Deterministic proof: gates green, 792 tests green, MCP tool wiring unchanged.",
+    "scenarios": [
+      "Shape: tracked branch returns populated stack metadata and OPEN PR info.",
+      "Shape: untracked branch returns nulls/empties without throwing.",
+      "Error path: rejected gh PR fetch yields pr.state = 'UNKNOWN' with error preserved."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "commands/status.ts exists with typed StatusResult and status() export",
+      "status": "satisfied",
+      "evidence": "New file at packages/cli/src/commands/status.ts."
+    },
+    {
+      "criterion": "commands/mcp.ts imports and invokes from the new module",
+      "status": "satisfied",
+      "evidence": "import { status } from './status'; case 'dubstack.status' calls toJsonValue(await status(cwd))."
+    },
+    {
+      "criterion": "No behavior change for dubstack.status MCP tool",
+      "status": "satisfied",
+      "evidence": "Returned shape is identical aside from the spec-required additive schemaVersion: 1 field; tool registration and JSON envelope are unchanged."
+    },
+    {
+      "criterion": "Existing MCP tests pass unchanged",
+      "status": "satisfied",
+      "evidence": "commands/mcp.test.ts not modified; runs green in the 792-test suite."
+    },
+    {
+      "criterion": "New unit tests in commands/status.test.ts cover tracked, untracked, missing-gh-auth",
+      "status": "satisfied",
+      "evidence": "Three describe-block cases match exactly."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "MAJOR (resolved): StatusOptions.live/pr were silently ignored. Addressed by adding an inline comment marking them reserved for DUB-28 so future callers know they are not yet wired."
+    ]
+  },
+  "dependencies": [
+    { "name": "No external dependencies detected", "status": "ok" }
+  ],
+  "rollout": {
+    "summary": "Pure refactor — merge unlocks DUB-28; no runtime config or migration needed.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Land via squash merge",
+        "details": "No flags, no migrations. CI gates (lint, typecheck, tests) cover regression risk."
+      },
+      {
+        "when": "Follow-up",
+        "label": "DUB-28 picks up status() to build `dub status` CLI",
+        "details": "DUB-28 will wire StatusOptions.live and StatusOptions.pr into the CLI command and add CLI-facing tests; this issue is structural only."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "8ee43e2379b742f17d2f4b468283b3b6c2c24094",
+    "shortSha": "8ee43e2",
+    "message": "refactor(mcp): extract status() into shared commands/status.ts"
+  }
+}
