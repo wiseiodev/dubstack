@@ -1,8 +1,41 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { DubError } from '../errors';
-import { getDubDir } from '../state';
-import type { CleanupOperation } from './cleanup';
+import { DubError } from './errors';
+import { getDubDir } from './state';
+
+export type CleanupReason =
+  | 'merged-pr'
+  | 'merged-pr-with-trailing-commits'
+  | 'closed-pr-merged-into-trunk'
+  | 'merged-by-patch-id'
+  /** Branch has zero unique commits relative to its parent. */
+  | 'empty-branch';
+
+export interface CleanupDeleteOp {
+  type: 'delete';
+  branch: string;
+  reason: CleanupReason;
+}
+
+export interface CleanupReparentOp {
+  type: 'reparent';
+  branch: string;
+  oldParent: string | null;
+  newParent: string | null;
+}
+
+export interface CleanupRetargetOp {
+  type: 'retarget';
+  /** Branch whose open PR is being retargeted. */
+  branch: string;
+  /** Desired new PR base. */
+  newBase: string;
+}
+
+export type CleanupOperation =
+  | CleanupDeleteOp
+  | CleanupReparentOp
+  | CleanupRetargetOp;
 
 export const CLEANUP_JOURNAL_FILENAME = 'cleanup-journal.json';
 
@@ -40,7 +73,7 @@ export async function readCleanupJournal(
   } catch {
     throw new DubError(`Failed to read cleanup journal at '${journalPath}'.`, [
       `Check filesystem permissions on '${journalPath}'.`,
-      "Delete the journal manually and re-run 'dub sync' if it cannot be recovered.",
+      "Run 'dub continue' to retry, or delete the journal manually if it cannot be recovered.",
     ]);
   }
   let parsed: unknown;
@@ -50,7 +83,7 @@ export async function readCleanupJournal(
     throw new DubError(
       `Cleanup journal at '${journalPath}' is not valid JSON.`,
       [
-        "Inspect the file and remove it if it cannot be repaired, then re-run 'dub sync'.",
+        'Inspect the file and remove it if it cannot be repaired, then re-run the interrupted command.',
       ],
     );
   }
@@ -61,7 +94,7 @@ export async function readCleanupJournal(
     !Array.isArray((parsed as { operations?: unknown }).operations)
   ) {
     throw new DubError(`Cleanup journal at '${journalPath}' is malformed.`, [
-      'Delete the file and re-run `dub sync` to regenerate it.',
+      'Delete the file and re-run the interrupted command to regenerate it.',
     ]);
   }
   return parsed as CleanupJournal;
@@ -70,6 +103,19 @@ export async function readCleanupJournal(
 export async function startCleanupJournal(
   cwd: string,
 ): Promise<CleanupJournal> {
+  // Refuse to clobber an existing journal. A stale journal from a prior crash
+  // must be replayed (`dub continue`) or discarded (`dub abort`) before a new
+  // cleanup phase starts; otherwise we'd silently lose the prior run's pending
+  // ops.
+  if (await hasCleanupJournal(cwd)) {
+    throw new DubError(
+      'A cleanup journal already exists — another DubStack operation may be incomplete.',
+      [
+        "Run 'dub continue' to finish replaying the interrupted operation.",
+        "Run 'dub abort' to discard the pending operation and start fresh.",
+      ],
+    );
+  }
   const journal: CleanupJournal = {
     version: 1,
     started_at: new Date().toISOString(),

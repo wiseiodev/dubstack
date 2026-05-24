@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { hasCleanupJournal } from './cleanup-journal';
 import { getRepoRoot } from './git';
 import { getDubDir } from './state';
-import { hasCleanupJournal } from './sync/journal';
 
 export type ActiveOperation = 'none' | 'rebase' | 'restack' | 'cleanup';
 

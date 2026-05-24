@@ -1,0 +1,230 @@
+{
+  "meta": {
+    "workId": "DUB-22",
+    "title": "Tree-aware merge-next target selection",
+    "artifactId": "dub-22",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-22-tree-aware-merge-next-target-selection",
+    "baseBranch": "main",
+    "author": "Daniel Wise <io.dwise@gmail.com>",
+    "contextLabel": "Linear",
+    "contextId": "DUB-22",
+    "prUrl": "https://github.com/wiseiodev/dubstack/pull/58"
+  },
+  "stats": {
+    "fileCount": 3,
+    "additions": 618,
+    "deletions": 87,
+    "diffStat": "3 files changed, 618 insertions(+), 87 deletions(-)"
+  },
+  "prompt": "DUB-22 replaces merge-next's old 'first branch in the downstack path' target selection with a tree-aware BFS that actually consults GitHub's mergeability via the existing getPrMergeStatusByNumber helper. Reviewers should confirm the lowest-depth-with-a-MERGEABLE-candidate rule, the parent-is-trunk-or-merged eligibility predicate, current-path tie-breaking, the sibling hint exclusion of blocked peers, and that a blocked floor never silently descends to a deeper child or attempts a GitHub mutation.",
+  "tldr": "merge-next now walks the stack BFS from trunk, calls getPrMergeStatusByNumber on candidates, prefers the current branch's path on ties, prints other mergeable siblings as a hint, and surfaces a clean DubError when the lowest non-empty depth has only blocked PRs.",
+  "why": {
+    "motivation": [
+      "Tier 1 — Branching Stack Support: with DUB-20 unblocking tree-shaped submits, merge-next was the next link in the chain that still assumed a linear path.",
+      "The previous implementation never called getPrMergeStatusByNumber, so a BLOCKED PR would reach mergePr and fail with a noisy GitHub error instead of a clean DubError.",
+      "For trees, picking by 'first branch in the current downstack path' is ambiguous and easily picks the wrong sibling."
+    ],
+    "before": [
+      "merge-next.ts:32 called getSubmitPlan(cwd, { path: 'current', fix: true }) and took plan.branches[0] — the bottom of the current path.",
+      "getPrMergeStatusByNumber existed in lib/github.ts but was never consulted by merge-next.",
+      "A BLOCKED PR would propagate to mergePr and surface as a raw gh CLI error after at least one retargetPrBase mutation."
+    ],
+    "after": [
+      "merge-next walks getSubmitPlan(cwd, { path: 'stack' }) in BFS depth order and consults getAllPrSyncInfoBatch + getPrMergeStatusByNumber to evaluate each candidate.",
+      "Ties at the same depth prefer the current branch's ancestor path; the remaining MERGEABLE peers are returned as siblingCandidates and printed as an ℹ hint by the CLI.",
+      "A lowest depth with only blocked candidates throws DubError listing each PR number, mergeable, and mergeStateStatus — no retargetPrBase or mergePr call is attempted.",
+      "Result type gains siblingCandidates: string[] (always present, possibly empty) so the CLI and downstream tooling can render the hint deterministically."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/merge-next.ts",
+      "changeType": "mod",
+      "additions": 233,
+      "deletions": 18,
+      "explanation": "Rewrites mergeNext to call getSubmitPlan with path:'stack', batch-load PR lifecycle via getAllPrSyncInfoBatch (with getBranchPrSyncInfo fallback when truncated), compute depths via a local BFS, group plan branches by depth, evaluate each for parent eligibility + OPEN lifecycle + MERGEABLE status, tie-break on the current-branch ancestor path, and return siblingCandidates. A blocked lowest depth throws DubError immediately and never descends.",
+      "snippet": "if (mergeable.length === 0) {\n  // Lowest depth with candidates has none mergeable — surface the blocked\n  // status. Never descend past a blocked floor: even if a deeper child's\n  // parent eligibility somehow passed, merging it ahead of its blocked\n  // ancestor would corrupt stack ordering.\n  blockedAtFirstDepth.push(...evaluated);\n  break;\n}",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/merge-next.test.ts",
+      "changeType": "mod",
+      "additions": 370,
+      "deletions": 69,
+      "explanation": "Replaces the linear-only mocks with a shared makePlan + lifecycleBatch helper, adds mocks for getAllPrSyncInfoBatch / getBranchPrSyncInfo / getPrMergeStatusByNumber, and pins the new contract with six tree-selection cases (3-sibling current-path preference, 3-sibling off-path alphabetical pick, depth-1 wins over mergeable grandchild, mixed mergeable+blocked hint exclusion, blocked-only floor errors and skips mutation, blocked-floor with mergeable grandchild still errors, dry-run reflects target + hint).",
+      "snippet": "it('does not descend past a blocked floor: depth-1 BLOCKED with mergeable descendant still errors', async () => {\n  // ...\n  await expect(mergeNext('/repo')).rejects.toThrow(\n    /No mergeable PR at this stack level.*feat\\/blocked/,\n  );\n  expect(mockMergePr).not.toHaveBeenCalled();\n  expect(mockRetargetPrBase).not.toHaveBeenCalled();\n});",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 15,
+      "deletions": 0,
+      "explanation": "Adds a printSiblingHint helper in the merge-next action that emits an ℹ line listing siblingCandidates plus a one-line 'dub co <branch> then rerun' nudge. Fired for both dry-run and real runs after the existing pre-merge-retarget line.",
+      "snippet": "const printSiblingHint = () => {\n  if (result.siblingCandidates.length === 0) return;\n  console.log(\n    chalk.dim(\n      `ℹ Other candidates at this stack level: ${result.siblingCandidates.join(', ')}`,\n    ),\n  );\n  console.log(\n    chalk.dim(\n      \"   Switch with 'dub co <branch>' and rerun 'dub merge-next'.\",\n    ),\n  );\n};",
+      "snippetLanguage": "ts",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "BFS termination on a blocked floor",
+      "location": "packages/cli/src/commands/merge-next.ts:237-247",
+      "rationale": "When the lowest non-empty depth has no MERGEABLE candidate, the loop breaks and returns blockedAtFirstDepth so the caller throws — never descending to a deeper branch. A regression test pins this even in the corner case where a grandchild happens to be MERGEABLE."
+    },
+    {
+      "title": "Parent eligibility and the truncated-batch fallback",
+      "location": "packages/cli/src/commands/merge-next.ts:210-225, 262-274",
+      "rationale": "A non-trunk parent must report MERGED lifecycle to make its child eligible. Lifecycle reads come from getAllPrSyncInfoBatch (populated with --state all) and fall back to per-branch getBranchPrSyncInfo when the batch is truncated, matching the existing sync helpers."
+    },
+    {
+      "title": "Tie-break and sibling-hint exclusion of blocked peers",
+      "location": "packages/cli/src/commands/merge-next.ts:245-253",
+      "rationale": "siblings is computed from the already-MERGEABLE-only list, so blocked peers can never leak into the hint. The current-branch ancestor path drives the tie-break; off-path picks fall back to ascending branch-name order from the BFS pass."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "merge-next vitest suite (11 cases)",
+      "status": "done",
+      "evidence": "pnpm test -- merge-next → Test Files 1 passed (1), Tests 11 passed (11), Duration 119ms."
+    },
+    {
+      "kind": "unit",
+      "label": "full dubstack vitest suite",
+      "status": "done",
+      "evidence": "pnpm test → 84 files passed, 694 tests passed, Duration 6.61s."
+    },
+    {
+      "kind": "build",
+      "label": "tsc --noEmit (docs + dubstack)",
+      "status": "done",
+      "evidence": "pnpm typecheck → 2 successful, 2 total."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 246 files in 50ms. No fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "turbo run typecheck → 2 successful, 2 total."
+    },
+    {
+      "name": "Vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "84 test files, 694 tests, all green."
+    },
+    {
+      "name": "Evals",
+      "command": "pnpm evals",
+      "status": "skipped",
+      "evidence": "AI metadata / prompts untouched; per CLAUDE.md evals only run when those change. The local environment also lacks AI credentials."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No .tsx files in the diff and the change is pure CLI logic with no UI to record; reproducing end-to-end requires a real GitHub PR tree with mixed mergeability statuses.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-22-qa.md",
+    "caption": "Deterministic proof via gates + 11-case vitest suite covering each acceptance criterion.",
+    "scenarios": [
+      "3-sibling tree under trunk, current branch wins, other mergeable peers reported as siblingCandidates.",
+      "3-sibling tree from an off-stack branch picks the alphabetically first mergeable child of trunk.",
+      "Linear parent → grandchild stack picks depth 1 without probing the grandchild's mergeability.",
+      "Mixed MERGEABLE + BLOCKED siblings: hint excludes the BLOCKED branch.",
+      "BLOCKED-only depth-1 candidate throws DubError with PR#, mergeable, mergeStateStatus inlined; mergePr / retargetPrBase never called.",
+      "BLOCKED depth-1 with a MERGEABLE grandchild still errors (no silent descent).",
+      "Dry-run reports chosen target + sibling hint without mutating GitHub.",
+      "Existing linear-stack pre-merge child retarget + postMerge orchestration unchanged."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "BFS-based target selection in commands/merge-next.ts",
+      "status": "satisfied",
+      "evidence": "computeDepths + selectMergeTarget walk BFS from the root and group plan.branches by depth before choosing (merge-next.ts:133-199)."
+    },
+    {
+      "criterion": "getPrMergeStatusByNumber actually invoked; non-MERGEABLE statuses produce a clean DubError with recovery hints",
+      "status": "satisfied",
+      "evidence": "Each eligible candidate is fed to getPrMergeStatusByNumber (merge-next.ts:230); blockedCandidateError emits a DubError with mergeable + mergeStateStatus + 3 recovery steps (merge-next.ts:280-300)."
+    },
+    {
+      "criterion": "Tie-breaking by current-path membership",
+      "status": "satisfied",
+      "evidence": "currentPathBranchNames walks parent links from the current branch; selectMergeTarget prefers onCurrentPath candidates before falling back to the BFS-ordered first mergeable (merge-next.ts:165-179, 245-249)."
+    },
+    {
+      "criterion": "Hint printed when ties exist",
+      "status": "satisfied",
+      "evidence": "Result includes siblingCandidates; index.ts:837-877 prints 'ℹ Other candidates at this stack level: ...' plus a 'dub co <branch>' nudge in both dry-run and real-merge paths."
+    },
+    {
+      "criterion": "Tests: 3-sibling tree, base merges first; sibling tie, current path wins with hint",
+      "status": "satisfied",
+      "evidence": "merge-next.test.ts: '3-sibling tree from a non-stack branch: picks the alphabetically first mergeable child of trunk' and '3-sibling tree: prefers branch on the current path and reports the others'."
+    },
+    {
+      "criterion": "Tests: candidate is BLOCKED → clean error, no GitHub mutation attempted",
+      "status": "satisfied",
+      "evidence": "merge-next.test.ts: 'errors cleanly and does not merge when the only depth-1 candidate is BLOCKED' asserts the regex on the DubError message AND that mockMergePr / mockRetargetPrBase were never called."
+    },
+    {
+      "criterion": "Tests: dry-run output reflects the chosen target",
+      "status": "satisfied",
+      "evidence": "merge-next.test.ts: 'dry-run reflects the chosen target and sibling hint' asserts mergedBranch, prNumber, and siblingCandidates while confirming no mutation."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Critical (resolved): the loop previously used `continue` when the lowest non-empty depth had no MERGEABLE candidates, so a deeper depth whose parent eligibility happened to pass could be chosen ahead of a blocked floor. Replaced `continue` with `break`, populated blockedAtFirstDepth unconditionally on that path, and added the 'does not descend past a blocked floor' regression test.",
+      "Important (resolved): the sibling-hint list was not test-pinned against leakage of BLOCKED peers. Added 'sibling hint lists only MERGEABLE peers — blocked siblings are excluded' which mixes one BLOCKED sibling with two MERGEABLE ones and asserts siblingCandidates excludes it.",
+      "Important (considered, not changed): reviewer flagged that lifecycleForBranch returns 'NONE' for branches absent from a non-truncated batch. In practice getAllPrSyncInfoBatch queries `gh pr list --state all` (covering OPEN / CLOSED / MERGED) and only flags truncated when ≥ 100 PRs are returned, so an absent branch genuinely has no PR. The existing truncation fallback to getBranchPrSyncInfo covers the over-100 case. No code change needed."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-20 (Tree-walking submit, remove branching-blocker rejection)",
+      "status": "satisfied — merged on main (commit 86303e2). Stacks with trees now exist for merge-next to operate on."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure CLI logic change. No migrations, no feature flag, no AI prompt churn. Behaviour on linear stacks is unchanged (existing pre-merge child retarget + postMerge orchestration still fires).",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Ship as-is",
+        "details": "No further action needed; the new behaviour activates the moment users pick up the next dub release."
+      },
+      {
+        "when": "Post-merge",
+        "label": "Update DUB-22 to Done",
+        "details": "Linear was rate-limited during execution; move DUB-22 to Done once the PR lands and confirm DUB-19/DUB-12-style siblings are unblocked."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "73c5778cfb9fdc3c8704b4b967d4ddbeeeb06551",
+    "shortSha": "73c5778",
+    "message": "feat(merge-next): tree-aware target with mergeability check"
+  }
+}

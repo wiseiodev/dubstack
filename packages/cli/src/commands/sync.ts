@@ -1,6 +1,12 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
+import {
+  appendCleanupOperation,
+  type CleanupDeleteOp,
+  clearCleanupJournal,
+  startCleanupJournal,
+} from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -43,13 +49,8 @@ import {
   writeState,
 } from '../lib/state';
 import { classifyBranchSyncStatus } from '../lib/sync/branch-status';
-import { buildCleanupPlan, type CleanupDeleteOp } from '../lib/sync/cleanup';
+import { buildCleanupPlan } from '../lib/sync/cleanup';
 import { partitionFreshBranches } from '../lib/sync/fresh';
-import {
-  appendCleanupOperation,
-  clearCleanupJournal,
-  startCleanupJournal,
-} from '../lib/sync/journal';
 import { resolveReconcileDecision } from '../lib/sync/reconcile';
 import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
@@ -412,7 +413,7 @@ export async function sync(
         progress.resume();
         continue;
       }
-      // Delete operation.
+      if (op.type !== 'delete') continue;
       const branch = op.branch;
       cleanupIndex += 1;
       progress.update('🧹 Cleaning merged', cleanupIndex, branch);
