@@ -17,6 +17,7 @@
     "post-merge",
     "move",
     "absorb",
+    "unlink",
     "undo",
     "doctor",
     "track",

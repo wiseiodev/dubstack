@@ -1,3 +1,4 @@
+import { clearCleanupJournal } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
 import {
   branchExists,
@@ -18,12 +19,20 @@ import { writeState } from '../lib/state';
 import { clearUndoEntry, readUndoEntry } from '../lib/undo-log';
 
 interface UndoResult {
-  undone: 'create' | 'restack' | 'rename' | 'move' | 'pop' | 'absorb';
+  undone:
+    | 'create'
+    | 'restack'
+    | 'rename'
+    | 'move'
+    | 'pop'
+    | 'absorb'
+    | 'unlink';
   details: string;
 }
 
 /**
- * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, or `dub absorb` operation.
+ * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
+ * `dub pop`, `dub absorb`, or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -36,6 +45,9 @@ interface UndoResult {
  *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
  * - **pop**: Hard-resets the popped branch to its pre-pop tip, discarding the staged
  *   changes left behind by the pop and restoring the popped commits.
+ * - **unlink**: Restores the previous stack split via `writeState` (no branch tips
+ *   change). Additionally discards any pending cleanup journal so a subsequent
+ *   `dub continue` doesn't fire a stale retarget against the now-restored stack.
  *
  * Only one level of undo is supported. After undo, the undo entry is cleared.
  *
@@ -179,6 +191,12 @@ export async function undo(cwd: string): Promise<UndoResult> {
   }
 
   await writeState(entry.previousState, cwd);
+  if (entry.operation === 'unlink') {
+    // Undoing the split must also discard any pending journaled retarget from
+    // the original unlink — otherwise a subsequent `dub continue` would
+    // retarget the PR for a branch that's now back in its original stack.
+    await clearCleanupJournal(cwd);
+  }
   await clearUndoEntry(cwd);
 
   const branchCount = Object.keys(entry.branchTips).length;
@@ -187,7 +205,9 @@ export async function undo(cwd: string): Promise<UndoResult> {
       ? `Restored ${branchCount} branches to pre-move state`
       : entry.operation === 'absorb'
         ? `Reset ${branchCount} branches to pre-absorb state`
-        : `Reset ${branchCount} branches to pre-restack state`;
+        : entry.operation === 'unlink'
+          ? 'Restored stack metadata to pre-unlink state'
+          : `Reset ${branchCount} branches to pre-restack state`;
 
   return {
     undone: entry.operation,

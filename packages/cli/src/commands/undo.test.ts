@@ -85,4 +85,47 @@ describe('undo', () => {
     await expect(readUndoEntry(dir)).rejects.toThrow('Nothing to undo');
     await expect(undo(dir)).rejects.toThrow('Nothing to undo');
   });
+
+  it("undoing an 'unlink' also discards any pending cleanup journal", async () => {
+    // Simulate the on-disk shape that `dub unlink` leaves after a crash
+    // mid-retarget: an unlink undo entry plus a journal with a pending
+    // retarget op. The journal must NOT survive a `dub undo` — otherwise a
+    // later `dub continue` would retarget the PR even though we just rolled
+    // the split back.
+    const dubDir = path.join(dir, '.git', 'dubstack');
+    fs.mkdirSync(dubDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dubDir, 'undo.json'),
+      `${JSON.stringify(
+        {
+          operation: 'unlink',
+          timestamp: '2026-05-24T00:00:00Z',
+          previousBranch: 'main',
+          previousState: { stacks: [] },
+          branchTips: {},
+          createdBranches: [],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    fs.writeFileSync(
+      path.join(dubDir, 'cleanup-journal.json'),
+      `${JSON.stringify(
+        {
+          version: 1,
+          started_at: '2026-05-24T00:00:00Z',
+          operations: [{ type: 'retarget', branch: 'feat/x', newBase: 'main' }],
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const result = await undo(dir);
+    expect(result.undone).toBe('unlink');
+    expect(fs.existsSync(path.join(dubDir, 'cleanup-journal.json'))).toBe(
+      false,
+    );
+  });
 });
