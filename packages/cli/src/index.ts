@@ -36,6 +36,7 @@ import { deleteCommand } from './commands/delete';
 import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
+import { fold } from './commands/fold';
 import { init } from './commands/init';
 import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
@@ -631,6 +632,88 @@ Examples:
         console.log(
           chalk.dim(
             `  ↳ Re-parented '${entry.branch}' to '${entry.parent ?? '(none)'}'`,
+          ),
+        );
+      }
+    },
+  );
+
+program
+  .command('fold')
+  .description(
+    'Combine the current branch into its parent, re-parenting children',
+  )
+  .option('-f, --force', 'Skip the deletion confirmation prompt')
+  .option(
+    '--squash',
+    'Collapse the branch into one commit on the parent (default keeps commits)',
+  )
+  .option(
+    '--keep-commits',
+    'Preserve commits as separate commits on the parent (default)',
+  )
+  .option('--no-interactive', 'Disable prompts and require --force')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub fold                Fold current branch into parent (keeps commits)
+  $ dub fold --squash       Collapse current branch into a single commit on parent
+  $ dub fold --force        Skip the confirmation prompt`,
+  )
+  .action(
+    async (options: {
+      force?: boolean;
+      squash?: boolean;
+      keepCommits?: boolean;
+      interactive?: boolean;
+    }) => {
+      if (options.squash && options.keepCommits) {
+        throw new DubError(
+          "'--squash' cannot be combined with '--keep-commits'.",
+          [
+            "Pass '--squash' alone to collapse commits into one on the parent.",
+            "Pass '--keep-commits' (or omit both) to preserve individual commits.",
+          ],
+        );
+      }
+      const result = await fold(process.cwd(), {
+        force: options.force,
+        squash: options.squash,
+        interactive: options.interactive,
+      });
+      if (result.cancelled) {
+        console.log(chalk.yellow('⚠ Fold cancelled.'));
+        return;
+      }
+      const summary = options.squash
+        ? `squashed ${result.foldedCommits} commit(s)`
+        : `kept ${result.foldedCommits} commit(s)`;
+      console.log(
+        chalk.green(
+          `✔ Folded '${result.branch}' into '${result.parent}' (${summary})`,
+        ),
+      );
+      if (result.childrenReparented.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ Re-parented ${result.childrenReparented.length} child(ren): ${result.childrenReparented.join(', ')}`,
+          ),
+        );
+      }
+      if (result.restacked) {
+        console.log(chalk.dim('  ↳ Restacked descendants'));
+      }
+      if (result.prClosed) {
+        console.log(chalk.dim(`  ↳ Closed PR #${result.prNumber}`));
+      } else if (
+        result.prNumber != null &&
+        result.prPriorState &&
+        result.prPriorState !== 'OPEN'
+      ) {
+        console.log(
+          chalk.dim(
+            `  ↳ PR #${result.prNumber} already ${result.prPriorState.toLowerCase()}; left untouched`,
           ),
         );
       }
