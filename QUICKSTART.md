@@ -305,6 +305,27 @@ dub delete feat/auth-login
 dub delete feat/auth-login --upstack --force --quiet
 ```
 
+## 10.5) Branch-Aware Stash
+
+```bash
+# Stash on the current branch (records branch in .git/dubstack/stash-log.json)
+dub stash
+
+# Pop on the same branch — refuses if you switched branches
+dub stash pop
+
+# Or: checkout feat/other first, then pop the stash there
+dub stash pop --on feat/other
+
+# Force-pop onto the current branch regardless of where it was created
+dub stash pop --force
+
+# Show recorded stashes with branch context
+dub stash list
+```
+
+Useful when you start working on the wrong branch and want to move the changes elsewhere.
+
 ## 11) Undo Last Stack Mutation
 
 ```bash
@@ -338,6 +359,7 @@ dub undo
 | `dub delete` | Stack-aware branch deletion |
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
+| `dub stash` / `dub stash pop` / `dub stash list` | Branch-aware stash (refuses pop on wrong branch) |
 | `dub config ai-assistant on` | Enable repo-local AI assistant |
 | `dub config ai-provider bedrock` | Pin the repo-local AI provider |
 | `dub ai setup` | Guided provider/model/env setup |
