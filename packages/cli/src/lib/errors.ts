@@ -22,6 +22,18 @@ export class DubError extends Error {
     this.name = 'DubError';
     this.recovery = recovery;
   }
+
+  /**
+   * Sentinel factory for failures where there is genuinely nothing for the
+   * user to recover — typically because the user explicitly cancelled an
+   * interactive prompt. Produces a `DubError` with an empty `recovery` array
+   * and is the only sanctioned way to construct one (the `no-bare-duberror`
+   * lint rule blocks `new DubError(msg)` and `new DubError(msg, [])` for
+   * everything else).
+   */
+  static cancelled(message = 'Cancelled.'): DubError {
+    return new DubError(message, []);
+  }
 }
 
 /**
