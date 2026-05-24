@@ -12,6 +12,11 @@ on:
       - 'packages/cli/src/lib/pr-body.ts'
       - '.github/workflows/retarget-action-ci.yml'
 
+# Least-privilege GITHUB_TOKEN. This workflow only reads the repo to lint,
+# typecheck, test, and verify dist/ freshness — no write APIs needed.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
