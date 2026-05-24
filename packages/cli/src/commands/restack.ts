@@ -204,6 +204,8 @@ async function executeRestackSteps(
         step.status = 'skipped';
         updateParentRevision(state, step.branch, parentNewTip);
         await writeProgress(progress, cwd);
+        // Persist even on no-op skips so a later sibling conflict cannot
+        // discard the (defensive) parent_revision sync for this branch.
         await writeState(state, cwd);
         continue;
       }

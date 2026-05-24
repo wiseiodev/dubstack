@@ -5,7 +5,7 @@ import { create } from '../../src/commands/create';
 import { init } from '../../src/commands/init';
 import { restack, restackContinue } from '../../src/commands/restack';
 import { getBranchTip } from '../../src/lib/git';
-import { readState } from '../../src/lib/state';
+import { findStackForBranch, readState } from '../../src/lib/state';
 import { createTestRepo, gitInRepo } from '../helpers';
 
 let dir: string;
@@ -35,11 +35,7 @@ async function commitFile(
 }
 
 function getBranch(state: Awaited<ReturnType<typeof readState>>, name: string) {
-  for (const stack of state.stacks) {
-    const branch = stack.branches.find((b) => b.name === name);
-    if (branch) return branch;
-  }
-  return undefined;
+  return findStackForBranch(state, name)?.branches.find((b) => b.name === name);
 }
 
 describe('restack on tree-shaped stacks', () => {
@@ -121,7 +117,8 @@ describe('restack on tree-shaped stacks', () => {
     const result = await restack(dir);
 
     expect(result.status).toBe('success');
-    // All non-root descendants must be rebased, in BFS order.
+    // BFS with alphabetical sibling sort: main's children a,b,c before
+    // a's child a1.
     expect(result.rebased).toEqual(['feat/a', 'feat/b', 'feat/c', 'feat/a1']);
 
     const state = await readState(dir);
@@ -165,8 +162,9 @@ describe('restack on tree-shaped stacks', () => {
     const second = await restackContinue(dir);
 
     expect(second.status).toBe('success');
-    // executeRestackSteps re-walks all steps; previously-done a is replayed
-    // in the rebased list, then b (resumed) then c.
+    // executeRestackSteps re-walks every step; previously-done a is
+    // re-collected from progress (not re-rebased), then b finishes the
+    // resumed rebase, then c rebases fresh.
     expect(second.rebased).toEqual(['feat/a', 'feat/b', 'feat/c']);
 
     // Final state: all siblings point at the new main tip.
