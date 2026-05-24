@@ -22,6 +22,7 @@ import {
   getDiffBetween,
   getDiffFileNamesBetween,
   hasStagedChanges,
+  hasUnstagedChanges,
   InteractivePatchQuitError,
   interactiveResetPatch,
   isValidBranchName,
@@ -202,7 +203,21 @@ export async function split(
     if (!options.yes && options.interactive !== false) {
       await confirmAiProposal(aiProposal);
     }
+    // Reject duplicate branch names within the proposal upfront — otherwise
+    // the first one would apply, leaving partial state when the second
+    // createBranchFrom fails on the collision.
+    const seenProposalBranches = new Set<string>();
     for (const proposal of aiProposal) {
+      if (seenProposalBranches.has(proposal.branch)) {
+        throw new DubError(
+          `AI proposed the same branch name '${proposal.branch}' more than once.`,
+          [
+            "Rerun 'dub split --ai' to regenerate a unique proposal.",
+            "Run 'dub split --by-file <files...>' to drive the split manually.",
+          ],
+        );
+      }
+      seenProposalBranches.add(proposal.branch);
       await ensureUniqueAvailableBranchName(proposal.branch, cwd);
     }
     for (const proposal of aiProposal) {
@@ -662,7 +677,11 @@ async function extractByHunks(
     await interactiveResetPatch(cwd);
 
     const stagedRemaining = await hasStagedChanges(cwd);
-    const workingTreeDirty = !(await isWorkingTreeClean(cwd));
+    // After softResetTo(parentTip) the index is dirty by construction, so a
+    // generic "tree is dirty" check would always be true even when the user
+    // unstaged nothing. Check the unstaged diff specifically — that's exactly
+    // the content earmarked for the source branch.
+    const unstagedRemaining = await hasUnstagedChanges(cwd);
 
     if (!stagedRemaining) {
       // Everything was unstaged — nothing left for the new branch.
@@ -673,7 +692,7 @@ async function extractByHunks(
         ],
       );
     }
-    if (!workingTreeDirty) {
+    if (!unstagedRemaining) {
       // Nothing was unstaged — nothing left for the source branch.
       throw new DubError(
         `Hunk split aborted: no hunks were moved back to '${sourceBranch}'.`,

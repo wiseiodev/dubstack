@@ -191,6 +191,32 @@ describe('split --by-commit', () => {
       }),
     ).rejects.toThrow('Invalid commit pick');
   });
+
+  it('parses commit subjects that contain literal "<<<" markers', async () => {
+    await create('feat/source', dir);
+    // Subject with a marker that could confuse string-based separators.
+    await writeAndCommit('a.ts', 'a\n', 'feat: a <<<DUB-SPLIT-SEP>>> b');
+    await writeAndCommit('b.ts', 'b\n', 'feat: plain b');
+
+    const commits = await listCommitsBetween('main', 'feat/source', dir);
+    expect(commits).toHaveLength(2);
+    expect(commits[0].subject).toBe('feat: a <<<DUB-SPLIT-SEP>>> b');
+    expect(commits[1].subject).toBe('feat: plain b');
+
+    // Should still split cleanly.
+    const result = await split(dir, {
+      mode: 'by-commit',
+      name: 'feat/extracted-tricky',
+      commitPicks: [1],
+    });
+    expect(result.created).toHaveLength(1);
+    const newCommits = await listCommitsBetween(
+      'main',
+      'feat/extracted-tricky',
+      dir,
+    );
+    expect(newCommits[0].subject).toBe('feat: a <<<DUB-SPLIT-SEP>>> b');
+  });
 });
 
 describe('split --by-hunk', () => {
@@ -308,6 +334,42 @@ describe('split --ai', () => {
       .sort();
     expect(branchNames).toContain('feat/runtime');
     expect(branchNames).toContain('docs/notes');
+  });
+
+  it('rejects AI proposals that propose the same branch name twice', async () => {
+    await create('feat/source', dir);
+    await writeAndCommit('a.ts', 'a\n', 'feat: a');
+    await writeAndCommit('b.ts', 'b\n', 'feat: b');
+
+    const fakeProposal = JSON.stringify({
+      splits: [
+        { branch: 'feat/dupe', files: ['a.ts'], summary: 's1' },
+        { branch: 'feat/dupe', files: ['b.ts'], summary: 's2' },
+      ],
+    });
+    const deps = {
+      generateText: vi.fn().mockResolvedValueOnce({ text: fakeProposal }),
+      createGoogleGenerativeAI: vi.fn().mockReturnValue(() => 'model'),
+      createGateway: vi.fn(),
+      createAmazonBedrock: vi.fn(),
+      fromIni: vi.fn(),
+      fromNodeProviderChain: vi.fn(),
+    };
+    process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
+    await expect(
+      split(
+        dir,
+        { mode: 'ai', yes: true },
+        // biome-ignore lint/suspicious/noExplicitAny: test-only deps shape
+        deps as any,
+      ),
+    ).rejects.toThrow("same branch name 'feat/dupe' more than once");
+    delete process.env.DUBSTACK_GEMINI_API_KEY;
+
+    // Neither branch should have been created.
+    const state = await readState(dir);
+    const names = state.stacks.flatMap((s) => s.branches.map((b) => b.name));
+    expect(names).not.toContain('feat/dupe');
   });
 
   it('rejects AI proposals that omit files', async () => {

@@ -591,6 +591,27 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Checks whether there are unstaged changes in the working tree (modifications
+ * to tracked files that are not in the index). Untracked files don't count.
+ *
+ * Differs from {@link isWorkingTreeClean} which also flags staged changes — use
+ * this when you need to know whether the index and working tree diverge, not
+ * whether the tree differs from HEAD.
+ */
+export async function hasUnstagedChanges(cwd: string): Promise<boolean> {
+  try {
+    await execa('git', ['diff', '--quiet'], { cwd });
+    return false;
+  } catch (error: unknown) {
+    const exitCode = (error as { exitCode?: number }).exitCode;
+    if (exitCode === 1) return true;
+    throw new DubError('Failed to check unstaged changes.', [
+      "Run 'git diff' manually to inspect the underlying error.",
+    ]);
+  }
+}
+
+/**
  * Commits currently staged changes with the given message.
  * @throws {DubError} If the commit fails (e.g., nothing staged, hook rejection).
  */
@@ -1326,11 +1347,20 @@ export async function listCommitsBetween(
   headRef: string,
   cwd: string,
 ): Promise<CommitInfo[]> {
-  const SEP = '<<<DUB-SPLIT-SEP>>>';
+  // Use ASCII unit separator (0x1f) as the SHA/subject delimiter — git
+  // disallows control characters in commit subjects, so this byte cannot
+  // appear inside %s and parsing stays unambiguous even for commit messages
+  // that contain `<<<...>>>`-style markers, pipes, tabs, or other quoting.
+  const FIELD_SEP = '\x1f';
   try {
     const { stdout } = await execa(
       'git',
-      ['log', '--reverse', `--format=%H${SEP}%s`, `${baseRef}..${headRef}`],
+      [
+        'log',
+        '--reverse',
+        `--format=%H${FIELD_SEP}%s`,
+        `${baseRef}..${headRef}`,
+      ],
       { cwd },
     );
     return stdout
@@ -1338,11 +1368,11 @@ export async function listCommitsBetween(
       .map((line) => line.trim())
       .filter(Boolean)
       .map((line) => {
-        const sepIdx = line.indexOf(SEP);
+        const sepIdx = line.indexOf(FIELD_SEP);
         if (sepIdx === -1) return { sha: line.trim(), subject: '' };
         return {
           sha: line.slice(0, sepIdx).trim(),
-          subject: line.slice(sepIdx + SEP.length).trim(),
+          subject: line.slice(sepIdx + 1).trim(),
         };
       })
       .filter((c) => c.sha.length > 0);
