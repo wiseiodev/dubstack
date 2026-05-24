@@ -835,6 +835,31 @@ program
       submit?: boolean;
     }) => {
       const result = await mergeNext(process.cwd(), options);
+      const printSiblingHint = () => {
+        if (result.siblingCandidates.length > 0) {
+          console.log(
+            chalk.dim(
+              `ℹ Other mergeable candidates at this stack level: ${result.siblingCandidates.join(', ')}`,
+            ),
+          );
+          console.log(
+            chalk.dim(
+              "   Switch with 'dub co <branch>' and rerun 'dub merge-next'.",
+            ),
+          );
+        }
+        if (result.blockedSiblings.length > 0) {
+          const summary = result.blockedSiblings
+            .map(
+              (s) =>
+                `${s.branch} (PR #${s.prNumber}: ${s.mergeable}/${s.mergeStateStatus})`,
+            )
+            .join(', ');
+          console.log(
+            chalk.yellow(`⚠ Blocked siblings at this stack level: ${summary}`),
+          );
+        }
+      };
       if (result.dryRun) {
         console.log(
           chalk.green(
@@ -848,6 +873,7 @@ program
             ),
           );
         }
+        printSiblingHint();
         return;
       }
       console.log(
@@ -862,6 +888,7 @@ program
           ),
         );
       }
+      printSiblingHint();
     },
   );
 

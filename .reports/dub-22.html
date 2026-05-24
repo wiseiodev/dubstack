@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DUB-22 - Tree-aware merge-next target selection</title>
+    <style>
+      :root {
+        --paper: #fbfaf6;
+        --ink: #191917;
+        --muted: #706f68;
+        --line: #d8d2c5;
+        --panel: #ffffff;
+        --panel-soft: #f1ede5;
+        --accent: #c86445;
+        --accent-dark: #8a3e29;
+        --ok: #617648;
+        --warn: #a46a1f;
+        --bad: #a13d36;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --serif: ui-serif, Georgia, "Times New Roman", serif;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--muted);
+        font: 15px/1.6 var(--sans);
+        padding: 48px 28px 88px;
+      }
+      code, pre { font-family: var(--mono); }
+      a { color: var(--accent-dark); }
+      .page { max-width: 1080px; margin: 0 auto; }
+      .page-head { max-width: 840px; margin-bottom: 42px; }
+      .eyebrow {
+        color: var(--muted);
+        font: 700 12px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+      }
+      h1, h2, h3 { color: var(--ink); font-family: var(--serif); font-weight: 500; }
+      h1 { font-size: 40px; line-height: 1.12; margin: 0 0 14px; }
+      h2 { font-size: 27px; line-height: 1.2; margin: 0 0 14px; }
+      h3 { font-size: 18px; margin: 0 0 8px; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 20px;
+        color: var(--muted);
+        font: 13px/1.4 var(--mono);
+        margin-bottom: 18px;
+      }
+      .meta strong { color: var(--ink); font-weight: 700; }
+      .add { color: var(--ok); }
+      .del { color: var(--accent-dark); }
+      .prompt {
+        border: 1px solid var(--line);
+        background: var(--panel-soft);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .prompt .label {
+        display: block;
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 7px;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 235px;
+        gap: 46px;
+        align-items: start;
+      }
+      main { min-width: 0; }
+      section { margin-bottom: 54px; scroll-margin-top: 28px; }
+      .toc {
+        position: sticky;
+        top: 28px;
+        border-left: 1px solid var(--line);
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .toc .head {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .toc a {
+        display: block;
+        padding: 4px 0;
+        color: var(--muted);
+        text-decoration: none;
+      }
+      .toc a:hover { color: var(--accent-dark); }
+      .toc .sub { padding-left: 12px; font-size: 12px; color: #8d887e; }
+      .tldr {
+        max-width: 790px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-left: 5px solid var(--accent);
+        border-radius: 8px;
+        padding: 20px 22px;
+        margin-bottom: 48px;
+      }
+      .tldr .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .tldr p { color: var(--ink); margin: 0; }
+      .lede { max-width: 760px; margin: 0 0 12px; }
+      .ba {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        margin-top: 22px;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px 20px;
+      }
+      .panel.after { border-color: rgba(97, 118, 72, 0.55); }
+      .panel .k {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+      }
+      .panel.after .k { color: var(--ok); }
+      ul.clean { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+      ul.clean li::before { content: "- "; color: var(--muted); }
+      .file-tour { display: grid; gap: 18px; }
+      details.file {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      details.file summary {
+        list-style: none;
+        cursor: pointer;
+        background: var(--panel-soft);
+        border-bottom: 1px solid var(--line);
+        padding: 13px 16px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      details.file:not([open]) summary { border-bottom: 0; }
+      details.file summary::-webkit-details-marker { display: none; }
+      .chev {
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid var(--muted);
+        border-bottom: 2px solid var(--muted);
+        transform: rotate(-45deg);
+      }
+      details[open] .chev { transform: rotate(45deg); }
+      .path { flex: 1; min-width: 0; color: var(--ink); font: 13px/1.3 var(--mono); overflow-wrap: anywhere; }
+      .badge {
+        border-radius: 6px;
+        padding: 2px 7px;
+        font: 700 10px/1.4 var(--mono);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+      .badge.new { background: #e4eadb; color: #425a2e; }
+      .badge.mod, .badge.renamed { background: #e9dfd0; color: var(--ink); }
+      .badge.del { background: #f1d5ca; color: var(--accent-dark); }
+      .stat { font: 12px/1 var(--mono); white-space: nowrap; }
+      .file-body { padding: 18px 20px 20px; }
+      .file-body p { margin: 0 0 14px; max-width: 760px; }
+      .code {
+        background: var(--ink);
+        border-radius: 8px;
+        overflow-x: auto;
+        padding: 15px 17px;
+      }
+      .code pre {
+        margin: 0;
+        color: #ede9dd;
+        font-size: 12.5px;
+        line-height: 1.6;
+        white-space: pre;
+      }
+      .focus, .tests, .gates, .deps, .checks { display: grid; gap: 12px; max-width: 800px; }
+      .focus-item, .test, .gate, .dep, .check, .qa, .adversarial, .commit, .rollout-step {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 15px 18px;
+      }
+      .focus-item { display: flex; gap: 14px; }
+      .num {
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--accent);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+        font: 700 13px/1 var(--mono);
+      }
+      .item-title { color: var(--ink); font-weight: 700; margin-bottom: 3px; }
+      .note { color: var(--muted); font-size: 13px; }
+      .row-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .status {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 3px 9px;
+        font: 700 11px/1.3 var(--mono);
+        text-transform: uppercase;
+      }
+      .status.done, .status.passed, .status.satisfied { background: #e4eadb; color: var(--ok); }
+      .status.pending, .status.skipped, .status.not-available, .status.not-applicable { background: #eee7d8; color: var(--warn); }
+      .status.failed, .status.blocked { background: #f2d6d1; color: var(--bad); }
+      .qa video { display: block; max-width: 100%; border-radius: 8px; background: #000; margin-top: 12px; }
+      .rollout { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; max-width: 820px; }
+      .rollout-step { border-radius: 0; }
+      .rollout-step:first-child { border-radius: 8px 0 0 8px; }
+      .rollout-step:last-child { border-radius: 0 8px 8px 0; }
+      .rollout-step + .rollout-step { border-left: 0; }
+      .rollout-step .when {
+        color: var(--muted);
+        font: 700 11px/1 var(--mono);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+      .rollout-step .label { color: var(--accent-dark); font: 700 20px/1.1 var(--mono); margin-bottom: 6px; }
+      .adversarial-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .metric { background: var(--panel-soft); border-radius: 8px; padding: 12px; }
+      .metric .k { color: var(--muted); font: 700 10px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+      .metric .v { color: var(--ink); font: 700 24px/1.2 var(--mono); margin-top: 4px; }
+      .commit pre {
+        margin: 10px 0 0;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+      }
+      @media (max-width: 900px) {
+        body { padding: 32px 18px 64px; }
+        .layout { grid-template-columns: 1fr; }
+        .toc { display: none; }
+      }
+      @media (max-width: 720px) {
+        h1 { font-size: 32px; }
+        .ba, .rollout, .adversarial-grid { grid-template-columns: 1fr; }
+        .rollout-step, .rollout-step:first-child, .rollout-step:last-child { border-radius: 8px; }
+        .rollout-step + .rollout-step { border-left: 1px solid var(--line); margin-top: 10px; }
+      }
+      @media print {
+        body { padding: 24px; }
+        .toc { display: none; }
+        .layout { grid-template-columns: 1fr; }
+        details.file { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <div class="eyebrow">Linear - DUB-22</div>
+        <h1>DUB-22 - Tree-aware merge-next target selection</h1>
+        <div class="meta"><span><strong>3</strong> files</span>
+<span><span class="add">+618</span> / <span class="del">-87</span></span>
+<span>branch <strong>feature/dub-22-tree-aware-merge-next-target-selection</strong> &rarr; <strong>main</strong></span>
+<span>author <strong>Daniel Wise &lt;io.dwise@gmail.com&gt;</strong></span>
+<span><a href="https://github.com/wiseiodev/dubstack/pull/58">Pull request</a></span></div>
+        <div class="prompt"><span class="label">Prompt</span>DUB-22 replaces merge-next&#39;s old &#39;first branch in the downstack path&#39; target selection with a tree-aware BFS that actually consults GitHub&#39;s mergeability via the existing getPrMergeStatusByNumber helper. Reviewers should confirm the lowest-depth-with-a-MERGEABLE-candidate rule, the parent-is-trunk-or-merged eligibility predicate, current-path tie-breaking, the sibling hint exclusion of blocked peers, and that a blocked floor never silently descends to a deeper child or attempts a GitHub mutation.</div>
+      </header>
+
+      <div class="layout">
+        <main>
+          <div class="tldr">
+            <div class="k">TL;DR</div>
+            <p>merge-next now walks the stack BFS from trunk, calls getPrMergeStatusByNumber on candidates, prefers the current branch&#39;s path on ties, prints other mergeable siblings as a hint, and surfaces a clean DubError when the lowest non-empty depth has only blocked PRs.</p>
+          </div>
+
+          <section id="why">
+            <h2>Why</h2>
+            <p class="lede">Tier 1 — Branching Stack Support: with DUB-20 unblocking tree-shaped submits, merge-next was the next link in the chain that still assumed a linear path.</p>
+<p class="lede">The previous implementation never called getPrMergeStatusByNumber, so a BLOCKED PR would reach mergePr and fail with a noisy GitHub error instead of a clean DubError.</p>
+<p class="lede">For trees, picking by &#39;first branch in the current downstack path&#39; is ambiguous and easily picks the wrong sibling.</p>
+            <div class="ba">
+              <div class="panel">
+                <div class="k">Before</div>
+                <ul class="clean"><li>merge-next.ts:32 called getSubmitPlan(cwd, { path: &#39;current&#39;, fix: true }) and took plan.branches[0] — the bottom of the current path.</li>
+<li>getPrMergeStatusByNumber existed in lib/github.ts but was never consulted by merge-next.</li>
+<li>A BLOCKED PR would propagate to mergePr and surface as a raw gh CLI error after at least one retargetPrBase mutation.</li></ul>
+              </div>
+              <div class="panel after">
+                <div class="k">After</div>
+                <ul class="clean"><li>merge-next walks getSubmitPlan(cwd, { path: &#39;stack&#39; }) in BFS depth order and consults getAllPrSyncInfoBatch + getPrMergeStatusByNumber to evaluate each candidate.</li>
+<li>Ties at the same depth prefer the current branch&#39;s ancestor path; the remaining MERGEABLE peers are returned as siblingCandidates and printed as an ℹ hint by the CLI.</li>
+<li>A lowest depth with only blocked candidates throws DubError listing each PR number, mergeable, and mergeStateStatus — no retargetPrBase or mergePr call is attempted.</li>
+<li>Result type gains siblingCandidates: string[] (always present, possibly empty) so the CLI and downstream tooling can render the hint deterministically.</li></ul>
+              </div>
+            </div>
+          </section>
+
+          <section id="tour">
+            <h2>File-by-file</h2>
+            <p class="lede">Ordered for reviewer comprehension, not alphabetically. Each item explains why the file matters.</p>
+            <div class="file-tour"><details class="file" open>
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/merge-next.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+233</span> <span class="del">-18</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Rewrites mergeNext to call getSubmitPlan with path:&#39;stack&#39;, batch-load PR lifecycle via getAllPrSyncInfoBatch (with getBranchPrSyncInfo fallback when truncated), compute depths via a local BFS, group plan branches by depth, evaluate each for parent eligibility + OPEN lifecycle + MERGEABLE status, tie-break on the current-branch ancestor path, and return siblingCandidates. A blocked lowest depth throws DubError immediately and never descends.</p>
+    <div class="code"><pre>if (mergeable.length === 0) {
+  // Lowest depth with candidates has none mergeable — surface the blocked
+  // status. Never descend past a blocked floor: even if a deeper child&#39;s
+  // parent eligibility somehow passed, merging it ahead of its blocked
+  // ancestor would corrupt stack ordering.
+  blockedAtFirstDepth.push(...evaluated);
+  break;
+}</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/commands/merge-next.test.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+370</span> <span class="del">-69</span></span>
+  </summary>
+  <div class="file-body">
+    <p>Replaces the linear-only mocks with a shared makePlan + lifecycleBatch helper, adds mocks for getAllPrSyncInfoBatch / getBranchPrSyncInfo / getPrMergeStatusByNumber, and pins the new contract with six tree-selection cases (3-sibling current-path preference, 3-sibling off-path alphabetical pick, depth-1 wins over mergeable grandchild, mixed mergeable+blocked hint exclusion, blocked-only floor errors and skips mutation, blocked-floor with mergeable grandchild still errors, dry-run reflects target + hint).</p>
+    <div class="code"><pre>it(&#39;does not descend past a blocked floor: depth-1 BLOCKED with mergeable descendant still errors&#39;, async () =&gt; {
+  // ...
+  await expect(mergeNext(&#39;/repo&#39;)).rejects.toThrow(
+    /No mergeable PR at this stack level.*feat\/blocked/,
+  );
+  expect(mockMergePr).not.toHaveBeenCalled();
+  expect(mockRetargetPrBase).not.toHaveBeenCalled();
+});</pre></div>
+  </div>
+</details>
+<details class="file">
+  <summary>
+    <span class="chev"></span>
+    <span class="path">packages/cli/src/index.ts</span>
+    <span class="badge mod">mod</span>
+    <span class="stat"><span class="add">+15</span> </span>
+  </summary>
+  <div class="file-body">
+    <p>Adds a printSiblingHint helper in the merge-next action that emits an ℹ line listing siblingCandidates plus a one-line &#39;dub co &lt;branch&gt; then rerun&#39; nudge. Fired for both dry-run and real runs after the existing pre-merge-retarget line.</p>
+    <div class="code"><pre>const printSiblingHint = () =&gt; {
+  if (result.siblingCandidates.length === 0) return;
+  console.log(
+    chalk.dim(
+      `ℹ Other candidates at this stack level: ${result.siblingCandidates.join(&#39;, &#39;)}`,
+    ),
+  );
+  console.log(
+    chalk.dim(
+      &quot;   Switch with &#39;dub co &lt;branch&gt;&#39; and rerun &#39;dub merge-next&#39;.&quot;,
+    ),
+  );
+};</pre></div>
+  </div>
+</details></div>
+          </section>
+
+          <section id="focus">
+            <h2>Where to focus your review</h2>
+            <div class="focus"><div class="focus-item">
+  <div class="num">1</div>
+  <div>
+    <div class="item-title">BFS termination on a blocked floor</div>
+    <div class="note"><code>packages/cli/src/commands/merge-next.ts:237-247</code> When the lowest non-empty depth has no MERGEABLE candidate, the loop breaks and returns blockedAtFirstDepth so the caller throws — never descending to a deeper branch. A regression test pins this even in the corner case where a grandchild happens to be MERGEABLE.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">2</div>
+  <div>
+    <div class="item-title">Parent eligibility and the truncated-batch fallback</div>
+    <div class="note"><code>packages/cli/src/commands/merge-next.ts:210-225, 262-274</code> A non-trunk parent must report MERGED lifecycle to make its child eligible. Lifecycle reads come from getAllPrSyncInfoBatch (populated with --state all) and fall back to per-branch getBranchPrSyncInfo when the batch is truncated, matching the existing sync helpers.</div>
+  </div>
+</div>
+<div class="focus-item">
+  <div class="num">3</div>
+  <div>
+    <div class="item-title">Tie-break and sibling-hint exclusion of blocked peers</div>
+    <div class="note"><code>packages/cli/src/commands/merge-next.ts:245-253</code> siblings is computed from the already-MERGEABLE-only list, so blocked peers can never leak into the hint. The current-branch ancestor path drives the tie-break; off-path picks fall back to ascending branch-name order from the BFS pass.</div>
+  </div>
+</div></div>
+          </section>
+
+          <section id="tests">
+            <h2>Test plan</h2>
+            <div class="tests"><div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">merge-next vitest suite (11 cases)</div>
+      <div class="note">pnpm test -- merge-next → Test Files 1 passed (1), Tests 11 passed (11), Duration 119ms.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">full dubstack vitest suite</div>
+      <div class="note">pnpm test → 84 files passed, 694 tests passed, Duration 6.61s.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div>
+<div class="test">
+  <div class="row-head">
+    <div>
+      <div class="item-title">tsc --noEmit (docs + dubstack)</div>
+      <div class="note">pnpm typecheck → 2 successful, 2 total.</div>
+    </div>
+    <span class="status done">done</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="gates">
+            <h2>Quality gates</h2>
+            <div class="gates"><div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Biome lint + format</div>
+      <div class="note">Command: pnpm checks. Checked 246 files in 50ms. No fixes applied.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">TypeScript</div>
+      <div class="note">Command: pnpm typecheck. turbo run typecheck → 2 successful, 2 total.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Vitest</div>
+      <div class="note">Command: pnpm test. 84 test files, 694 tests, all green.</div>
+    </div>
+    <span class="status passed">passed</span>
+  </div>
+</div>
+<div class="gate">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Evals</div>
+      <div class="note">Command: pnpm evals. AI metadata / prompts untouched; per CLAUDE.md evals only run when those change. The local environment also lacks AI credentials.</div>
+    </div>
+    <span class="status skipped">skipped</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="qa">
+            <h2>Self-QA</h2>
+            <div class="qa">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Deterministic proof via gates + 11-case vitest suite covering each acceptance criterion.</div>
+      <div class="note">No .tsx files in the diff and the change is pure CLI logic with no UI to record; reproducing end-to-end requires a real GitHub PR tree with mixed mergeability statuses.</div>
+    </div>
+    <span class="status pending">fallback</span>
+  </div>
+  <p><a href=".reports/dub-22-qa.md">Open QA fallback evidence</a></p>
+  <h3>Scenarios covered</h3>
+  <ul class="clean"><li>3-sibling tree under trunk, current branch wins, other mergeable peers reported as siblingCandidates.</li>
+<li>3-sibling tree from an off-stack branch picks the alphabetically first mergeable child of trunk.</li>
+<li>Linear parent → grandchild stack picks depth 1 without probing the grandchild&#39;s mergeability.</li>
+<li>Mixed MERGEABLE + BLOCKED siblings: hint excludes the BLOCKED branch.</li>
+<li>BLOCKED-only depth-1 candidate throws DubError with PR#, mergeable, mergeStateStatus inlined; mergePr / retargetPrBase never called.</li>
+<li>BLOCKED depth-1 with a MERGEABLE grandchild still errors (no silent descent).</li>
+<li>Dry-run reports chosen target + sibling hint without mutating GitHub.</li>
+<li>Existing linear-stack pre-merge child retarget + postMerge orchestration unchanged.</li></ul>
+</div>
+          </section>
+
+          <section id="acceptance">
+            <h2>Acceptance criteria</h2>
+            <div class="checks"><div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">BFS-based target selection in commands/merge-next.ts</div>
+      <div class="note">computeDepths + selectMergeTarget walk BFS from the root and group plan.branches by depth before choosing (merge-next.ts:133-199).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">getPrMergeStatusByNumber actually invoked; non-MERGEABLE statuses produce a clean DubError with recovery hints</div>
+      <div class="note">Each eligible candidate is fed to getPrMergeStatusByNumber (merge-next.ts:230); blockedCandidateError emits a DubError with mergeable + mergeStateStatus + 3 recovery steps (merge-next.ts:280-300).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tie-breaking by current-path membership</div>
+      <div class="note">currentPathBranchNames walks parent links from the current branch; selectMergeTarget prefers onCurrentPath candidates before falling back to the BFS-ordered first mergeable (merge-next.ts:165-179, 245-249).</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Hint printed when ties exist</div>
+      <div class="note">Result includes siblingCandidates; index.ts:837-877 prints &#39;ℹ Other candidates at this stack level: ...&#39; plus a &#39;dub co &lt;branch&gt;&#39; nudge in both dry-run and real-merge paths.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: 3-sibling tree, base merges first; sibling tie, current path wins with hint</div>
+      <div class="note">merge-next.test.ts: &#39;3-sibling tree from a non-stack branch: picks the alphabetically first mergeable child of trunk&#39; and &#39;3-sibling tree: prefers branch on the current path and reports the others&#39;.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: candidate is BLOCKED → clean error, no GitHub mutation attempted</div>
+      <div class="note">merge-next.test.ts: &#39;errors cleanly and does not merge when the only depth-1 candidate is BLOCKED&#39; asserts the regex on the DubError message AND that mockMergePr / mockRetargetPrBase were never called.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div>
+<div class="check">
+  <div class="row-head">
+    <div>
+      <div class="item-title">Tests: dry-run output reflects the chosen target</div>
+      <div class="note">merge-next.test.ts: &#39;dry-run reflects the chosen target and sibling hint&#39; asserts mergedBranch, prNumber, and siblingCandidates while confirming no mutation.</div>
+    </div>
+    <span class="status satisfied">satisfied</span>
+  </div>
+</div></div>
+          </section>
+
+          <section id="review">
+            <h2>Adversarial review</h2>
+            <div class="adversarial">
+  <div class="item-title">Remaining critical and major findings are resolved.</div>
+  <div class="adversarial-grid">
+    <div class="metric"><div class="k">Iterations</div><div class="v">1</div></div>
+    <div class="metric"><div class="k">Critical / Major</div><div class="v">0 / 0</div></div>
+    <div class="metric"><div class="k">Minor</div><div class="v">0</div></div>
+    <div class="metric"><div class="k">Nitpick</div><div class="v">0</div></div>
+  </div>
+  <ul class="clean"><li>Critical (resolved): the loop previously used `continue` when the lowest non-empty depth had no MERGEABLE candidates, so a deeper depth whose parent eligibility happened to pass could be chosen ahead of a blocked floor. Replaced `continue` with `break`, populated blockedAtFirstDepth unconditionally on that path, and added the &#39;does not descend past a blocked floor&#39; regression test.</li>
+<li>Important (resolved): the sibling-hint list was not test-pinned against leakage of BLOCKED peers. Added &#39;sibling hint lists only MERGEABLE peers — blocked siblings are excluded&#39; which mixes one BLOCKED sibling with two MERGEABLE ones and asserts siblingCandidates excludes it.</li>
+<li>Important (considered, not changed): reviewer flagged that lifecycleForBranch returns &#39;NONE&#39; for branches absent from a non-truncated batch. In practice getAllPrSyncInfoBatch queries `gh pr list --state all` (covering OPEN / CLOSED / MERGED) and only flags truncated when ≥ 100 PRs are returned, so an absent branch genuinely has no PR. The existing truncation fallback to getBranchPrSyncInfo covers the over-100 case. No code change needed.</li></ul>
+</div>
+          </section>
+
+          <section id="dependencies">
+            <h2>Dependencies</h2>
+            <div class="deps"><div class="dep">
+  <div class="item-title">DUB-20 (Tree-walking submit, remove branching-blocker rejection)</div>
+  <div class="note">satisfied — merged on main (commit 86303e2). Stacks with trees now exist for merge-next to operate on.</div>
+</div></div>
+          </section>
+
+          <section id="rollout">
+            <h2>Rollout</h2>
+            <p class="lede">Pure CLI logic change. No migrations, no feature flag, no AI prompt churn. Behaviour on linear stacks is unchanged (existing pre-merge child retarget + postMerge orchestration still fires).</p><div class="rollout"><div class="rollout-step">
+  <div class="when">On merge</div>
+  <div class="label">Ship as-is</div>
+  <div class="note">No further action needed; the new behaviour activates the moment users pick up the next dub release.</div>
+</div>
+<div class="rollout-step">
+  <div class="when">Post-merge</div>
+  <div class="label">Update DUB-22 to Done</div>
+  <div class="note">Linear was rate-limited during execution; move DUB-22 to Done once the PR lands and confirm DUB-19/DUB-12-style siblings are unblocked.</div>
+</div></div>
+          </section>
+
+          <section id="commit">
+            <h2>Commit</h2>
+            <div class="commit">
+  <div><strong>73c5778</strong> <code>73c5778cfb9fdc3c8704b4b967d4ddbeeeb06551</code></div>
+  <pre>feat(merge-next): tree-aware target with mergeability check</pre>
+</div>
+          </section>
+        </main>
+
+        <nav class="toc">
+          <div class="head">In this PR</div>
+          <a href="#why">Why</a>
+          <a href="#tour">File-by-file</a>
+          <a href="#tour" class="sub">merge-next.ts</a>
+<a href="#tour" class="sub">merge-next.test.ts</a>
+<a href="#tour" class="sub">index.ts</a>
+          <a href="#focus">Where to focus</a>
+          <a href="#tests">Test plan</a>
+          <a href="#gates">Quality gates</a>
+          <a href="#qa">Self-QA</a>
+          <a href="#acceptance">Acceptance</a>
+          <a href="#review">Adversarial review</a>
+          <a href="#dependencies">Dependencies</a>
+          <a href="#rollout">Rollout</a>
+          <a href="#commit">Commit</a>
+        </nav>
+      </div>
+    </div>
+  </body>
+</html>
