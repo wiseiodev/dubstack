@@ -104,10 +104,56 @@ describe('revert', () => {
       expect(await branchExists('revert/custom', dir)).toBe(true);
     });
 
+    it('accepts an uppercase SHA and normalizes to the lowercase short form', async () => {
+      const sha = await commitFile('upper.txt', 'upper');
+      const result = await revert(dir, sha.toUpperCase().slice(0, 8));
+      expect(result.revertedSha).toBe(sha);
+      expect(result.revertedShortSha).toBe(sha.slice(0, 7));
+      expect(result.branch).toBe(`revert/commit-${sha.slice(0, 7)}`);
+    });
+
     it('throws when the SHA cannot be resolved', async () => {
       await expect(revert(dir, 'deadbeef')).rejects.toThrow(
         "Commit 'deadbeef' not found in this repository.",
       );
+    });
+
+    it('surfaces an ambiguous-short-SHA error when the prefix matches multiple commits', async () => {
+      // Hand-craft two commits whose short SHAs share a 4-char prefix is
+      // impractical with random commits, so simulate the git error directly
+      // via a stubbed execa. We mock at the module boundary so the failure
+      // is indistinguishable from a real ambiguous-argument response.
+      const exec = await import('../lib/exec');
+      const realExeca = exec.execa;
+      const spy = vi.spyOn(exec, 'execa').mockImplementation((async (
+        cmd: string,
+        args: readonly string[],
+        opts?: unknown,
+      ) => {
+        if (
+          cmd === 'git' &&
+          args[0] === 'rev-parse' &&
+          args[1] === '--verify' &&
+          typeof args[2] === 'string' &&
+          args[2].includes('^{commit}')
+        ) {
+          const err = Object.assign(new Error('git rev-parse exited 128'), {
+            stderr:
+              "fatal: ambiguous argument 'abc1234^{commit}': short SHA1 abc1234 is ambiguous",
+            exitCode: 128,
+          });
+          throw err;
+        }
+        return realExeca(cmd, args, opts);
+      }) as typeof exec.execa);
+
+      try {
+        await expect(revert(dir, 'abc1234')).rejects.toThrow(
+          /is an ambiguous short SHA/,
+        );
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('writes an undo entry that deletes the revert branch', async () => {
@@ -269,6 +315,32 @@ describe('revert', () => {
       expect(result.submitResult).not.toBeNull();
       expect(result.submitResult?.pushed).toContain(result.branch);
       expect(createPrSpy).toHaveBeenCalledOnce();
+    });
+
+    it('preserves the revert branch and surfaces a wrapped error when submit fails', async () => {
+      const remote = await attachBareRemote(dir);
+      remoteCleanup = remote.cleanup;
+      await gitInRepo(dir, ['push', 'origin', 'main']);
+
+      const sha = await commitFile('s2.txt', 's2');
+      await gitInRepo(dir, ['push', 'origin', 'main']);
+
+      // Fail the submit by making ensureGhInstalled throw.
+      vi.spyOn(github, 'ensureGhInstalled').mockRejectedValueOnce(
+        Object.assign(new Error('gh missing'), { name: 'DubError' }),
+      );
+
+      await expect(revert(dir, sha, { submit: true })).rejects.toThrow(
+        /was created but 'dub submit' failed/,
+      );
+      // The revert branch should still exist locally and in state.
+      expect(await branchExists(`revert/commit-${sha.slice(0, 7)}`, dir)).toBe(
+        true,
+      );
+      const state = await readState(dir);
+      expect(
+        findStackForBranch(state, `revert/commit-${sha.slice(0, 7)}`),
+      ).toBeDefined();
     });
   });
 });

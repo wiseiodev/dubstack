@@ -13,6 +13,7 @@ import {
   ensureGhInstalled,
   getPrMergeInfoByNumber,
 } from '../lib/github';
+import { createProgress, logVerboseCommand } from '../lib/progress';
 import { retry } from '../lib/retry';
 import {
   addBranchToStack,
@@ -134,67 +135,124 @@ export async function revert(
     cwd,
   );
 
-  try {
-    await execa('git', ['checkout', '-b', branchName, trunkStartPoint], {
-      cwd,
-    });
-  } catch (error) {
-    // Checkout never started — drop the speculative undo entry so a later
-    // `dub undo` doesn't try to delete a branch that was never created.
-    await clearUndoEntry(cwd).catch(() => {});
-    const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(
-      `Failed to create revert branch '${branchName}' from '${trunkStartPoint}'.\n${message}`,
-      [
-        `Run 'git checkout -b ${branchName} ${trunkStartPoint}' manually to see the underlying error.`,
-        `Run 'git fetch origin ${trunk}' to refresh the trunk ref, then retry.`,
-      ],
-    );
-  }
-
-  const revertArgs = ['revert', resolved.sha];
-  revertArgs.push(options.editMessage ? '--edit' : '--no-edit');
+  const progress = createProgress();
+  // Three core steps: branch off trunk → run git revert → persist tracking.
+  // Submit (when requested) is a fourth step driven inside the same bar.
+  const totalSteps = options.submit ? 4 : 3;
+  progress.start('Reverting', totalSteps);
+  let stepIndex = 0;
 
   try {
-    await execa('git', revertArgs, {
-      cwd,
-      stdio: options.editMessage ? 'inherit' : 'pipe',
-    });
-  } catch (error) {
-    // Roll back the branch creation so the user isn't left on a partial
-    // revert branch with conflict markers, then drop the now-stale undo
-    // entry — the branch it references no longer exists.
-    await safeAbortRevert(cwd);
-    await safeRollbackBranch(branchName, startBranch, cwd);
-    await clearUndoEntry(cwd).catch(() => {});
-    const message = error instanceof Error ? error.message : String(error);
-    throw new DubError(
-      `Failed to revert '${resolved.sha}' on '${branchName}'.\n${message}`,
-      [
+    stepIndex += 1;
+    progress.update('Reverting', stepIndex, `branch ${branchName}`);
+    logVerboseCommand('git', ['checkout', '-b', branchName, trunkStartPoint]);
+    try {
+      await execa('git', ['checkout', '-b', branchName, trunkStartPoint], {
+        cwd,
+      });
+    } catch (error) {
+      // Checkout never started — drop the speculative undo entry so a later
+      // `dub undo` doesn't try to delete a branch that was never created.
+      await clearUndoEntry(cwd).catch(() => {});
+      const message = error instanceof Error ? error.message : String(error);
+      throw new DubError(
+        `Failed to create revert branch '${branchName}' from '${trunkStartPoint}'.\n${message}`,
+        [
+          `Run 'git checkout -b ${branchName} ${trunkStartPoint}' manually to see the underlying error.`,
+          `Run 'git fetch origin ${trunk}' to refresh the trunk ref, then retry.`,
+        ],
+      );
+    }
+
+    const revertArgs = ['revert', resolved.sha];
+    revertArgs.push(options.editMessage ? '--edit' : '--no-edit');
+
+    stepIndex += 1;
+    progress.update('Reverting', stepIndex, `revert ${resolved.shortSha}`);
+    logVerboseCommand('git', revertArgs);
+    try {
+      if (options.editMessage) {
+        // `git revert --edit` opens an interactive editor; pausing the bar
+        // hands the TTY back so the editor renders without the bar redrawing
+        // over it. The bar resumes after the editor exits.
+        progress.pause();
+        try {
+          await execa('git', revertArgs, { cwd, stdio: 'inherit' });
+        } finally {
+          progress.resume();
+        }
+      } else {
+        await execa('git', revertArgs, { cwd, stdio: 'pipe' });
+      }
+    } catch (error) {
+      // Roll back the branch creation so the user isn't left on a partial
+      // revert branch with conflict markers. Only drop the undo entry when
+      // the leaked branch was actually deleted — otherwise keep it so
+      // `dub undo` remains a working recovery path for the user.
+      await safeAbortRevert(cwd);
+      const rollback = await safeRollbackBranch(branchName, startBranch, cwd);
+      if (rollback.deleted) {
+        await clearUndoEntry(cwd).catch(() => {});
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const recovery = [
         `Run 'git revert ${resolved.sha}' on a branch from '${trunk}' to inspect conflicts.`,
         `Confirm the commit exists by running 'git log ${resolved.sha}'.`,
-      ],
-    );
+      ];
+      if (!rollback.deleted) {
+        recovery.unshift(
+          `Run 'dub undo' to delete the leaked '${branchName}' branch.`,
+        );
+      }
+      throw new DubError(
+        `Failed to revert '${resolved.sha}' on '${branchName}'.\n${message}`,
+        recovery,
+      );
+    }
+
+    stepIndex += 1;
+    progress.update('Reverting', stepIndex, 'tracking branch');
+    const trunkTipSha = await getBranchTip(trunk, cwd).catch(() => null);
+    addBranchToStack(state, branchName, trunk, trunkTipSha ?? undefined);
+    await writeState(state, cwd);
+
+    let submitResult: SubmitResult | null = null;
+    if (options.submit) {
+      stepIndex += 1;
+      progress.update('Reverting', stepIndex, 'submitting PR');
+      try {
+        submitResult = await submit(cwd, false, { branch: branchName });
+      } catch (error) {
+        // The revert branch is on disk and tracked — surfacing the bare
+        // submit error would hide that fact. Re-raise with a hint pointing
+        // at the manual submit so the user knows what to do next.
+        progress.stop();
+        const message = error instanceof Error ? error.message : String(error);
+        throw new DubError(
+          `Revert branch '${branchName}' was created but 'dub submit' failed.\n${message}`,
+          [
+            `Run 'dub submit --branch ${branchName}' once the submit failure is resolved.`,
+            `Run 'dub log' to confirm '${branchName}' is tracked under '${trunk}'.`,
+            `Run 'dub delete ${branchName}' to discard the revert branch entirely.`,
+          ],
+        );
+      }
+    }
+
+    progress.complete('Revert complete');
+    return {
+      branch: branchName,
+      trunk,
+      revertedSha: resolved.sha,
+      revertedShortSha: resolved.shortSha,
+      sourceLabel: resolved.sourceLabel,
+      prNumber: resolved.prNumber,
+      submitResult,
+    };
+  } catch (error) {
+    progress.stop();
+    throw error;
   }
-
-  const trunkTipSha = await getBranchTip(trunk, cwd).catch(() => null);
-  addBranchToStack(state, branchName, trunk, trunkTipSha ?? undefined);
-  await writeState(state, cwd);
-
-  let submitResult: SubmitResult | null = null;
-  if (options.submit) {
-    submitResult = await submit(cwd, false, { branch: branchName });
-  }
-
-  return {
-    branch: branchName,
-    trunk,
-    revertedSha: resolved.sha,
-    revertedShortSha: resolved.shortSha,
-    sourceLabel: resolved.sourceLabel,
-    prNumber: resolved.prNumber,
-    submitResult,
-  };
 }
 
 interface ResolvedTarget {
@@ -300,7 +358,26 @@ async function verifyCommit(
       { cwd },
     );
     return stdout.trim();
-  } catch {
+  } catch (error) {
+    const stderr =
+      typeof (error as { stderr?: unknown }).stderr === 'string'
+        ? (error as { stderr: string }).stderr.toLowerCase()
+        : '';
+    // `git rev-parse --verify` distinguishes "missing" from "ambiguous short
+    // SHA". Surface the latter with a different hint so the user supplies a
+    // longer prefix instead of refetching.
+    if (
+      stderr.includes('ambiguous argument') ||
+      stderr.includes('short sha1')
+    ) {
+      throw new DubError(
+        `Commit '${ref}' is an ambiguous short SHA in this repository.`,
+        [
+          'Pass a longer prefix (or the full 40-char SHA) and retry.',
+          `Run 'git rev-parse --disambiguate=${ref}' to see the candidate commits.`,
+        ],
+      );
+    }
     throw new DubError(`Commit '${ref}' not found in this repository.`, [
       `Run '${hints.fetchHint}' to fetch missing history, then retry.`,
       `Run 'git log ${ref}' manually to confirm the commit exists.`,
@@ -364,10 +441,15 @@ async function fetchTrunkSafely(trunk: string, cwd: string): Promise<void> {
         );
       },
     });
-  } catch {
+  } catch (err) {
     // Best-effort. Offline runs or missing remotes should still be able to
-    // revert from local trunk; resolveTrunkStartPoint surfaces a clearer
-    // error if no usable trunk ref exists at all.
+    // revert from a local trunk ref; resolveTrunkStartPoint surfaces a clearer
+    // error if no usable trunk ref exists at all. Surface the failure under
+    // --verbose so users can spot a stale revert base when something looks off.
+    logVerboseCommand('fetch-trunk-failed', [
+      `trunk=${trunk}`,
+      String(err instanceof Error ? err.message : err),
+    ]);
   }
 }
 
@@ -407,22 +489,58 @@ async function safeRollbackBranch(
   branch: string,
   fallbackBranch: string,
   cwd: string,
-): Promise<void> {
-  try {
-    // Step off the partial branch before deleting it. Best-effort: if the
-    // fallback no longer exists (e.g. detached HEAD test setup), skip.
-    if (await branchExists(fallbackBranch, cwd)) {
+): Promise<{ deleted: boolean }> {
+  // Step off the partial branch before deleting it. A failed `git revert`
+  // may leave conflict markers in the working tree even after `--abort`, so
+  // try a normal checkout first (preserves any data the user has on disk),
+  // then fall back to `-f` so we can still drop the leaked branch.
+  let switched = false;
+  if (await branchExists(fallbackBranch, cwd)) {
+    try {
       await execa('git', ['checkout', fallbackBranch], { cwd });
+      switched = true;
+    } catch {
+      try {
+        await execa('git', ['checkout', '-f', fallbackBranch], { cwd });
+        switched = true;
+      } catch (err) {
+        logVerboseCommand('rollback-checkout-failed', [
+          `fallback=${fallbackBranch}`,
+          String(err instanceof Error ? err.message : err),
+        ]);
+      }
     }
-  } catch {
-    // ignore: deletion below still has value even if checkout failed.
+  }
+
+  if (!switched) {
+    // `git branch -D` refuses to delete the currently checked-out branch,
+    // so when we couldn't switch off we surface the leaked branch instead
+    // of silently failing to clean it up. The caller keeps the undo entry
+    // alive so `dub undo` can complete the cleanup once the user resolves
+    // whatever blocked the checkout.
+    if (await branchExists(branch, cwd)) {
+      console.warn(
+        `⚠ Revert branch '${branch}' is still checked out — run 'dub undo' after switching off (or 'git checkout -f ${fallbackBranch} && git branch -D ${branch}') to clean up.`,
+      );
+    }
+    return { deleted: false };
+  }
+
+  if (!(await branchExists(branch, cwd))) {
+    return { deleted: true };
   }
   try {
-    if (await branchExists(branch, cwd)) {
-      await execa('git', ['branch', '-D', branch], { cwd });
-    }
-  } catch {
-    // Best-effort cleanup; user can `git branch -D <branch>` manually.
+    await execa('git', ['branch', '-D', branch], { cwd });
+    return { deleted: true };
+  } catch (err) {
+    logVerboseCommand('rollback-delete-failed', [
+      `branch=${branch}`,
+      String(err instanceof Error ? err.message : err),
+    ]);
+    console.warn(
+      `⚠ Revert branch '${branch}' was left behind — run 'dub undo' to remove it.`,
+    );
+    return { deleted: false };
   }
 }
 

@@ -586,6 +586,25 @@ export interface PrMergeInfo {
 }
 
 /**
+ * Tightened "PR not found" check used by `getPrMergeInfoByNumber`. The shared
+ * `isPrNotFoundError` accepts a bare `not found` substring, which can mask
+ * unrelated failures (auth, missing repo, gh upgrade prompts) and surface
+ * them to the user as a misleading "PR was not found" message. This variant
+ * only matches the unambiguous PR-specific phrasings + the explicit HTTP
+ * `404 Not Found` form `gh` emits when the PR itself is missing.
+ */
+function isStrictPrNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('could not resolve to a pull request') ||
+    normalized.includes('could not resolve to a pullrequest') ||
+    normalized.includes('no pull requests found') ||
+    /\b404\s+not\s+found\b/i.test(message)
+  );
+}
+
+/**
  * Fetches the merge metadata for a PR by number. Returns `null` when the PR
  * does not exist. `mergeCommitSha` is populated only for merged PRs; the
  * caller is responsible for translating "not merged" / "no merge commit" into
@@ -612,7 +631,7 @@ export async function getPrMergeInfoByNumber(
     stdout = result.stdout;
   } catch (error) {
     const root = unwrapRetryError(error);
-    if (isPrNotFoundError(root)) return null;
+    if (isStrictPrNotFoundError(root)) return null;
     const message = root instanceof Error ? root.message : String(root);
     throw new DubError(`Failed to fetch PR #${prNumber}: ${message}`, [
       `Run 'gh pr view ${prNumber}' to confirm the PR exists.`,
