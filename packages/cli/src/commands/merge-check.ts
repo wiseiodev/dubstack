@@ -34,6 +34,18 @@ export interface MergeCheckResult {
 
 const SAFE_MERGE_STATE_STATUSES = new Set(['CLEAN', 'HAS_HOOKS']);
 
+interface CheckCaches {
+  prevState: Map<number, string>;
+  mergeStatus: Map<
+    number,
+    { mergeable?: string | null; mergeStateStatus?: string | null }
+  >;
+}
+
+function newCaches(): CheckCaches {
+  return { prevState: new Map(), mergeStatus: new Map() };
+}
+
 export async function mergeCheck(
   cwd: string,
   options: { pr?: number; branch?: string; scope?: ScopeMode } = {},
@@ -44,7 +56,12 @@ export async function mergeCheck(
   // Explicit --pr forces single-PR mode regardless of scope.
   if (options.pr != null) {
     const pr = await getPrByNumber(options.pr, cwd);
-    const finding = await checkPrFinding(`pr-${options.pr}`, pr, cwd);
+    const finding = await checkPrFinding(
+      `pr-${options.pr}`,
+      pr,
+      cwd,
+      newCaches(),
+    );
     throwIfAnyFailed([finding]);
     return {
       ok: true,
@@ -61,7 +78,7 @@ export async function mergeCheck(
   if (options.branch != null || scope === 'current') {
     const branchName = options.branch ?? (await getCurrentBranch(cwd));
     const pr = await getPr(branchName, cwd);
-    const finding = await checkPrFinding(branchName, pr, cwd);
+    const finding = await checkPrFinding(branchName, pr, cwd, newCaches());
     throwIfAnyFailed([finding]);
     return {
       ok: true,
@@ -94,10 +111,14 @@ export async function mergeCheck(
     );
   }
 
+  // Siblings in a tree typically share the same prev_pr, so memoizing GitHub
+  // state lookups within one invocation collapses N round-trips to one per
+  // distinct PR number.
+  const caches = newCaches();
   const findings: MergeCheckBranchFinding[] = [];
   for (const branch of scopedBranches) {
     const pr = await getPr(branch.name, cwd);
-    findings.push(await checkPrFinding(branch.name, pr, cwd));
+    findings.push(await checkPrFinding(branch.name, pr, cwd, caches));
   }
   throwIfAnyFailed(findings);
 
@@ -109,15 +130,31 @@ export async function mergeCheck(
     reason:
       findings.length === 1
         ? (first?.reason ?? '')
-        : `${findings.length} branch(es) checked; merge order satisfied.`,
+        : summarizeFindings(findings),
     branches: findings,
   };
+}
+
+function summarizeFindings(findings: MergeCheckBranchFinding[]): string {
+  const total = findings.length;
+  const skipped = findings.filter(
+    (f) =>
+      f.prNumber == null ||
+      f.reason.includes('No DubStack metadata') ||
+      f.reason.includes('Root stack PR'),
+  ).length;
+  const verified = total - skipped;
+  if (skipped === 0) {
+    return `${total} branch(es) inspected; merge order satisfied.`;
+  }
+  return `${total} branch(es) inspected (${verified} verified, ${skipped} skipped).`;
 }
 
 async function checkPrFinding(
   branchLabel: string,
   pr: PrInfo | null,
   cwd: string,
+  caches: CheckCaches,
 ): Promise<MergeCheckBranchFinding> {
   if (!pr) {
     return {
@@ -150,7 +187,10 @@ async function checkPrFinding(
     };
   }
 
-  const previousState = await getPrStateByNumber(metadata.prev_pr, cwd);
+  const cachedPrev = caches.prevState.get(metadata.prev_pr);
+  const previousState =
+    cachedPrev ?? (await getPrStateByNumber(metadata.prev_pr, cwd));
+  if (cachedPrev == null) caches.prevState.set(metadata.prev_pr, previousState);
   if (previousState !== 'MERGED') {
     return {
       branch: branchLabel,
@@ -164,7 +204,10 @@ async function checkPrFinding(
     };
   }
 
-  const mergeStatus = await getPrMergeStatusByNumber(pr.number, cwd);
+  const cachedStatus = caches.mergeStatus.get(pr.number);
+  const mergeStatus =
+    cachedStatus ?? (await getPrMergeStatusByNumber(pr.number, cwd));
+  if (cachedStatus == null) caches.mergeStatus.set(pr.number, mergeStatus);
   const mergeable = mergeStatus.mergeable ?? 'unknown';
   const mergeStateStatus = mergeStatus.mergeStateStatus ?? 'unknown';
   const safelyMergeable =

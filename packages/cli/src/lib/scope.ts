@@ -67,7 +67,18 @@ export function resolveScopeBranches(
     }
     seen.add(current.name);
     path.push(current);
-    current = current.parent ? branchMap.get(current.parent) : undefined;
+    if (current.parent == null) break;
+    const next = branchMap.get(current.parent);
+    if (!next) {
+      throw new DubError(
+        `Stack metadata is invalid: missing parent branch while tracing '${currentBranch}'.`,
+        [
+          "Run 'dub doctor' to identify the missing parent.",
+          "Run 'dub track <branch> --parent <branch>' to re-parent the affected branch onto a known parent.",
+        ],
+      );
+    }
+    current = next;
   }
   return path.reverse();
 }

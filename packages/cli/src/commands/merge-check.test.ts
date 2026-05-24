@@ -225,6 +225,38 @@ describe('mergeCheck (scoped, tree-shaped stack)', () => {
     ]);
   });
 
+  it('memoizes getPrStateByNumber across siblings sharing the same prev_pr', async () => {
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') return makePr(101, dubstackBody(null, 101));
+      if (branch === 'feat/b1') return makePr(201, dubstackBody(101, 201));
+      if (branch === 'feat/b2') return makePr(202, dubstackBody(101, 202));
+      if (branch === 'feat/b3') return makePr(203, dubstackBody(101, 203));
+      return null;
+    });
+
+    await mergeCheck('/repo', { scope: 'stack' });
+    // Three children all reference prev_pr=101; without memoization the call
+    // count would be 3. With caching it should be 1.
+    const callsFor101 = mockGetPrStateByNumber.mock.calls.filter(
+      (args) => args[0] === 101,
+    ).length;
+    expect(callsFor101).toBe(1);
+  });
+
+  it('summary reason reflects skipped branches when some have no PR', async () => {
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/a') return makePr(101, dubstackBody(null, 101));
+      if (branch === 'feat/b2') return makePr(202, dubstackBody(101, 202));
+      return null; // b1, b3 have no PR yet
+    });
+
+    const result = await mergeCheck('/repo', { scope: 'stack' });
+    expect(result.ok).toBe(true);
+    // 4 inspected: feat/a (root-PR skip), b1 (no PR), b2 (verified), b3 (no PR)
+    expect(result.reason).toMatch(/4 branch\(es\) inspected/);
+    expect(result.reason).toMatch(/skipped/);
+  });
+
   it('aggregates per-branch findings when multiple branches in scope fail', async () => {
     mockGetPr.mockImplementation(async (branch: string) => {
       if (branch === 'feat/a') return makePr(101, dubstackBody(null, 101));

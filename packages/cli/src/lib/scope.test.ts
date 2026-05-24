@@ -75,4 +75,33 @@ describe('resolveScopeBranches', () => {
       [],
     );
   });
+
+  it('throws DubError on a cycle in the downstack walk', () => {
+    const cyclic: Stack = {
+      id: 'cyclic',
+      branches: [
+        makeBranch('main', null),
+        // feat/a → feat/b → feat/a (cycle, no root parent for the children)
+        { ...makeBranch('feat/a', 'feat/b') },
+        { ...makeBranch('feat/b', 'feat/a') },
+      ],
+    };
+    expect(() => resolveScopeBranches(cyclic, 'feat/a', 'downstack')).toThrow(
+      /cycle detected/,
+    );
+  });
+
+  it('throws DubError when an ancestor parent is missing from the stack', () => {
+    const broken: Stack = {
+      id: 'broken',
+      branches: [
+        makeBranch('main', null),
+        // feat/orphan's parent 'feat/ghost' is not in the stack
+        { ...makeBranch('feat/orphan', 'feat/ghost') },
+      ],
+    };
+    expect(() =>
+      resolveScopeBranches(broken, 'feat/orphan', 'downstack'),
+    ).toThrow(/missing parent branch/);
+  });
 });
