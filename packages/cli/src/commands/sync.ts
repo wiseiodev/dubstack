@@ -386,7 +386,11 @@ export async function sync(
     let cleanupIndex = 0;
     for (const op of cleanupPlan.operations) {
       if (op.type === 'reparent') {
-        if (excludedFromSync.has(op.branch)) continue;
+        // Reparents are pure state maintenance — apply them even when the
+        // child is in `excludedFromSync` (the exclusion only suppresses the
+        // per-branch sync reconciliation step). Skipping here would leave
+        // `branch.parent` pointing at an ancestor that another op is about
+        // to delete, breaking stack connectivity.
         await appendCleanupOperation(cwd, cleanupJournal, op);
         const stateEntry = stateBranchMap.get(op.branch);
         if (stateEntry) stateEntry.parent = op.newParent;

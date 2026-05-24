@@ -64,7 +64,7 @@ async function replayJournal(
         // The state was already cleaned above; the user just needs to move
         // off this branch and re-run sync to drop the branch ref itself.
         console.log(
-          `⚠ Branch '${op.branch}' is currently checked out; left it in place. Switch off it and re-run \`dub sync\` to finish removing the ref.`,
+          `⚠ Branch '${op.branch}' is currently checked out; left it in place. Switch to another branch and re-run \`dub sync\` to finish removing the ref.`,
         );
         alreadyApplied.push(op);
         continue;
