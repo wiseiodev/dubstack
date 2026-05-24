@@ -532,10 +532,18 @@ dub submit --path current
 
 ### `dub ready`
 
-Run pre-submit checklist (`doctor` + submit preflight).
+Run pre-submit checklist (`doctor` + submit preflight). `--scope` controls how
+much of the stack the preflight covers (`current` | `downstack` | `stack`).
 
 ```bash
+# default: current branch + ancestors (downstack)
 dub ready
+
+# just the current branch
+dub ready --scope current
+
+# every branch in the stack (siblings included)
+dub ready --scope stack
 ```
 
 ### `dub prune`
@@ -555,13 +563,21 @@ dub prune --all --apply
 
 ### `dub merge-check`
 
-Validate merge order and GitHub mergeability for a stack PR.
+Validate merge order and GitHub mergeability for a stack PR. `--scope` walks
+a wider set of branches (`current` default | `downstack` | `stack`); `--pr`
+forces single-PR mode and ignores `--scope`.
 
 ```bash
-# check current branch PR
+# check current branch PR (scope: current, default)
 dub merge-check
 
-# check explicit PR number
+# check current branch + ancestors
+dub merge-check --scope downstack
+
+# check every branch in the stack (siblings included)
+dub merge-check --scope stack
+
+# check explicit PR number (scope ignored)
 dub merge-check --pr 123
 ```
 

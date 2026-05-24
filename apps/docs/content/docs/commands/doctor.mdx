@@ -51,7 +51,14 @@ dub submit --path current
 Run pre-submit checklist (doctor + submit preflight):
 
 ```bash
+# Default: current branch + ancestors (downstack)
 dub ready
+
+# Just the current branch
+dub ready --scope current
+
+# Every branch in the stack (siblings included)
+dub ready --scope stack
 ```
 
 ## dub prune
@@ -74,10 +81,16 @@ dub prune --all --apply
 Validate merge order and GitHub mergeability for a stack PR:
 
 ```bash
-# Check current branch PR
+# Check current branch PR (scope: current, default)
 dub merge-check
 
-# Check explicit PR number
+# Check current branch + ancestors
+dub merge-check --scope downstack
+
+# Check every branch in the stack (siblings included)
+dub merge-check --scope stack
+
+# Check an explicit PR number (scope ignored)
 dub merge-check --pr 123
 ```
 
