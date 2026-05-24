@@ -1,0 +1,267 @@
+{
+  "meta": {
+    "workId": "DUB-25",
+    "title": "Batched PR/CI data layer for log and checkout",
+    "artifactId": "dub-25",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-25-batched-prci-data-layer-for-log-and-checkout",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-25",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 6,
+    "additions": 873,
+    "deletions": 0,
+    "diffStat": " packages/cli/src/lib/git.test.ts            |  41 +++++\n packages/cli/src/lib/git.ts                 |  68 ++++++++\n packages/cli/src/lib/github.test.ts         | 192 +++++++++++++++++++++\n packages/cli/src/lib/github.ts              | 170 +++++++++++++++++++\n packages/cli/src/lib/stack-overview.test.ts | 252 ++++++++++++++++++++++++++++\n packages/cli/src/lib/stack-overview.ts      | 150 +++++++++++++++++\n 6 files changed, 873 insertions(+)"
+  },
+  "prompt": "Extend the batched gh pr list helper into a rich stack overview, persist it to a 30s on-disk cache, and surface a truncation flag — so dub log / dub co / dub status / dub watch can render the whole stack from one gh call + one git for-each-ref instead of N round-trips per branch.",
+  "tldr": "Adds `getStackOverviewBatch` in `lib/stack-overview.ts`: one `gh pr list` (rich fields) + one `git for-each-ref` (commit metadata), joined with Dubstack state, cached for 30 s at `.git/dubstack/overview-cache.json`. `--refresh` busts the cache; truncation flag flows through; cache writes are best-effort so a read-only `.git` cannot crash callers.",
+  "why": {
+    "motivation": [
+      "Tier 2 views (`dub log`, `dub co`, `dub status`, `dub watch`) need richer PR data (title, draft, reviewDecision, CI rollup, last-commit relative time) than the existing `getAllPrSyncInfoBatch` returns.",
+      "Without batching, each branch in a stack costs one `gh pr view` + one `git log` round-trip — O(N) latency that gets painful past a handful of branches.",
+      "Repeated invocations in a short window (e.g. `dub log` followed immediately by `dub co`) should not re-hit GitHub — hence the 30 s on-disk cache."
+    ],
+    "before": [
+      "`getAllPrSyncInfoBatch` returned only `{state, baseRefName}` — fine for sync, insufficient for richer UI views.",
+      "No batched git helper for commit metadata: callers were forced to loop `getLastCommitMessage` per branch.",
+      "No on-disk cache. Every TUI tick that wanted the overview paid the full fetch cost."
+    ],
+    "after": [
+      "`getStackOverviewBatch(cwd, { refresh? })` returns a materialized `StackOverview` joining PR + commit + Dubstack state for every tracked branch.",
+      "One `gh pr list` (richer `--json` field set) + one `git for-each-ref` regardless of stack size.",
+      "30 s TTL on-disk cache at `.git/dubstack/overview-cache.json`; `refresh: true` (or stale / future-dated `cachedAt`) busts it.",
+      "Truncation passthrough: when `gh pr list` hits the page limit, the consumer learns and can render an 'N of N+' notice.",
+      "Cache write is best-effort — a read-only or full `.git` directory can't crash the caller after the fetch already succeeded."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/stack-overview.ts",
+      "changeType": "new",
+      "additions": 150,
+      "deletions": 0,
+      "explanation": "New orchestrator. `getStackOverviewBatch` reads the on-disk cache (rejects negative ages from clock skew), and on a miss runs `getStackOverviewPrBatch` + `getBranchCommitMetaBatch` in parallel, joins each tracked branch with state fields (`pr_link`, `last_synced_at`, `sync_source`), and writes the result back to `.git/dubstack/overview-cache.json`. The write is wrapped in try/catch so disk failures don't propagate.",
+      "snippet": "export async function getStackOverviewBatch(\n  cwd: string,\n  options: GetStackOverviewOptions = {},\n): Promise<StackOverview> {\n  const now = options.now?.() ?? Date.now();\n\n  if (!options.refresh) {\n    const cached = await readCache(cwd);\n    if (cached) {\n      const age = now - Date.parse(cached.cachedAt);\n      if (Number.isFinite(age) && age >= 0 && age < OVERVIEW_CACHE_TTL_MS) {\n        return cached;\n      }\n    }\n  }\n\n  const state = await readState(cwd);\n  const allBranchNames = state.stacks.flatMap((s) => s.branches.map((b) => b.name));\n  const [prBatch, commitBatch] = await Promise.all([\n    getStackOverviewPrBatch(cwd),\n    getBranchCommitMetaBatch(cwd, allBranchNames),\n  ]);",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/lib/github.ts",
+      "changeType": "mod",
+      "additions": 170,
+      "deletions": 0,
+      "explanation": "Adds `getStackOverviewPrBatch` — richer cousin of `getAllPrSyncInfoBatch` that pulls `number,title,headRefName,baseRefName,state,mergedAt,reviewDecision,statusCheckRollup,isDraft` and rolls the mixed CheckRun + StatusContext array up to a single `CiStatusRollup` (FAILURE > PENDING > SUCCESS). Kept separate from the existing sync helper so its tight field set and parser tests stay untouched.",
+      "snippet": "export async function getStackOverviewPrBatch(\n  cwd: string,\n): Promise<StackOverviewPrBatch> {\n  // ... one `gh pr list --json ...` call ...\n}\n\nfunction computeCiRollup(checks: unknown): CiStatusRollup {\n  // FAILURE dominates PENDING dominates SUCCESS.\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 68,
+      "deletions": 0,
+      "explanation": "Adds `getBranchCommitMetaBatch(cwd, branchNames)` — one `git for-each-ref` call over `refs/heads/<branch>` for each requested branch. Fields are joined by ASCII unit-separator (`\\x1f`) so spaces inside `committerdate:relative` and angle brackets inside `authoremail` can't break parsing. Missing-locally branches are simply absent from the returned map.",
+      "snippet": "export async function getBranchCommitMetaBatch(\n  cwd: string,\n  branchNames: readonly string[],\n): Promise<Map<string, BranchCommitMeta>> {\n  const refs = branchNames.map((name) => `refs/heads/${name}`);\n  const format =\n    `%(refname:short)${SEP}%(committerdate:relative)${SEP}` +\n    `%(authoremail)${SEP}%(objectname:short=8)`;\n  // ...\n}",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/stack-overview.test.ts",
+      "changeType": "new",
+      "additions": 252,
+      "deletions": 0,
+      "explanation": "9 tests covering: fresh fetch (single gh + single for-each-ref, joined correctly), null pr/commit for unmatched branches, cache hit, cache stale, refresh override, on-disk persistence, future-dated cache rejection, truncation passthrough, and cache-write-failure resilience.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/github.test.ts",
+      "changeType": "mod",
+      "additions": 192,
+      "deletions": 0,
+      "explanation": "6 new tests for `getStackOverviewPrBatch`: rich field parsing, exact gh args, CI rollup precedence (PENDING/SUCCESS/NONE), truncation, duplicate-PR handling, and gh failure path.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.test.ts",
+      "changeType": "mod",
+      "additions": 41,
+      "deletions": 0,
+      "explanation": "3 new tests for `getBranchCommitMetaBatch`: empty input, two-branch parse against a real test repo, and missing-branch handling.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Cache TTL logic and clock-skew handling",
+      "location": "packages/cli/src/lib/stack-overview.ts:97-105",
+      "rationale": "The freshness check rejects negative ages so a future-dated `cachedAt` (e.g. NTP correction) can't pin us to stale data indefinitely. Worth a second look that the comparison is right and the test covers it."
+    },
+    {
+      "title": "CI rollup precedence",
+      "location": "packages/cli/src/lib/github.ts:531-577",
+      "rationale": "GitHub mixes CheckRun (`status`/`conclusion`) and StatusContext (`state`) shapes in the same `statusCheckRollup` array. The rollup handles both shapes and gives FAILURE > PENDING > SUCCESS precedence."
+    },
+    {
+      "title": "Cache write resilience",
+      "location": "packages/cli/src/lib/stack-overview.ts:131-138",
+      "rationale": "Added after adversarial review: a read-only or full `.git` directory must not crash callers after the fetch already succeeded. Covered by `stack-overview.test.ts > cache write failure`."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "stack-overview.test.ts — 9 tests",
+      "status": "done",
+      "evidence": "All 9 tests pass via `pnpm vitest run src/lib/stack-overview.test.ts`."
+    },
+    {
+      "kind": "unit",
+      "label": "github.test.ts — getStackOverviewPrBatch (6 new tests)",
+      "status": "done",
+      "evidence": "All 55 github.test.ts tests pass."
+    },
+    {
+      "kind": "unit",
+      "label": "git.test.ts — getBranchCommitMetaBatch (3 new tests, real git repo)",
+      "status": "done",
+      "evidence": "All 55 git.test.ts tests pass."
+    },
+    {
+      "kind": "manual",
+      "label": "End-to-end exercise via dub log / dub co",
+      "status": "pending",
+      "evidence": "Deferred to DUB-26 which wires this data layer into the renderers."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint + format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "`Checked 263 files in 52ms. No fixes applied.`"
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "tsc --noEmit succeeded for both `dubstack` and `docs` packages."
+    },
+    {
+      "name": "Vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "87 test files, 806 tests passed."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No `.tsx` files changed; the work is a pure data-layer library not yet wired to any rendered output.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-25-qa.md",
+    "caption": "Self-QA fallback documenting which automated test covers each acceptance criterion.",
+    "scenarios": [
+      "Fresh fetch — one gh + one for-each-ref, state joined.",
+      "Cache hit within TTL — no gh/git calls.",
+      "Cache stale past TTL — refetch.",
+      "Refresh override — refetch even when fresh.",
+      "Future-dated cache — rejected.",
+      "Truncation passthrough — flag flows through.",
+      "Cache write failure — overview still returned."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "`getStackOverviewBatch` exported from `lib/stack-overview.ts`",
+      "status": "satisfied",
+      "evidence": "stack-overview.ts:79 export."
+    },
+    {
+      "criterion": "One `gh pr list` + one `git for-each-ref` for the whole stack",
+      "status": "satisfied",
+      "evidence": "stack-overview.test.ts > 'issues one gh call + one for-each-ref' asserts call counts == 1."
+    },
+    {
+      "criterion": "30-second on-disk TTL cache at `.git/dubstack/overview-cache.json`",
+      "status": "satisfied",
+      "evidence": "`OVERVIEW_CACHE_TTL_MS = 30_000`; cache path constant `CACHE_FILENAME = 'overview-cache.json'` under `getDubDir(cwd)`."
+    },
+    {
+      "criterion": "`--refresh` flag (consumed by callers) busts the cache",
+      "status": "satisfied",
+      "evidence": "`options.refresh` short-circuits the cache read; tested in 'refetches when refresh: true even if the cache is fresh'."
+    },
+    {
+      "criterion": "Truncation flag surfaced to callers",
+      "status": "satisfied",
+      "evidence": "`StackOverview.truncated` mirrors `prBatch.truncated`; tested in 'surfaces truncated:true from getStackOverviewPrBatch'."
+    },
+    {
+      "criterion": "No regression for `getAllPrSyncInfoBatch` callers (sync still works)",
+      "status": "satisfied",
+      "evidence": "`getAllPrSyncInfoBatch` and its 5 tests are untouched; `getStackOverviewPrBatch` is added alongside."
+    },
+    {
+      "criterion": "Tests: fresh fetch, cache hit, cache stale, refresh override, truncation flag",
+      "status": "satisfied",
+      "evidence": "All 5 named scenarios covered in stack-overview.test.ts (plus future-date and write-failure)."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Critical: cache write error propagated to caller. Resolved by wrapping `writeCache` in try/catch (stack-overview.ts:135-138) and adding the `cache write failure` test."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "DUB-7 (batched gh pr list)",
+      "status": "Merged — provides `getAllPrSyncInfoBatch` and `BATCH_PR_LIST_LIMIT`."
+    },
+    {
+      "name": "DUB-37 (freeze/unfreeze)",
+      "status": "Backlog — `frozen` field join deferred per issue description; not blocking."
+    }
+  ],
+  "rollout": {
+    "summary": "Pure library addition — no command wired to it yet. Zero user-visible behavior change. The follow-up issue (DUB-26) lights it up in `dub log`.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Land library",
+        "details": "Squash-merge to main; no migration, no flag, no config change."
+      },
+      {
+        "when": "After merge",
+        "label": "Wire renderers (DUB-26)",
+        "details": "Update `dub log`, `dub co`, `dub status`, `dub watch` to call `getStackOverviewBatch` instead of per-branch helpers."
+      },
+      {
+        "when": "Future",
+        "label": "Add `frozen` join (after DUB-37)",
+        "details": "Once `Branch.frozen` exists in state, include it in the `BranchOverview` shape."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "6e5a21f6d431adf0670e119be8b974e653798228",
+    "shortSha": "6e5a21f",
+    "message": "feat(stack-overview): batched PR/CI data layer with 30s on-disk cache [DUB-25]"
+  }
+}
