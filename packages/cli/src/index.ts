@@ -48,6 +48,8 @@ import { prune } from './commands/prune';
 import { ready } from './commands/ready';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import type { SplitMode } from './commands/split';
+import { split } from './commands/split';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
@@ -1507,6 +1509,65 @@ program
   });
 
 program
+  .command('split')
+  .description(
+    'Split the current branch into smaller sibling branches (by-commit, by-file, by-hunk, or AI)',
+  )
+  .option(
+    '--by-commit',
+    'Interactively pick commits to extract to a new branch',
+  )
+  .option(
+    '--commit-picks <indices>',
+    "For '--by-commit': skip the prompt and use these 1-indexed positions (e.g. '1,3-4')",
+  )
+  .option(
+    '--by-file <files...>',
+    'Non-interactive: move specific files to a new branch (requires --name)',
+  )
+  .option(
+    '--by-hunk',
+    'Interactively pick hunks to extract via `git checkout -p`',
+  )
+  .option('--ai', 'Ask the AI assistant to propose a semantic split')
+  .option('--name <branch>', 'New branch name for the extracted slice')
+  .option(
+    '--close-old-pr',
+    "Close the source branch's existing PR (Graphite-style); by default it's left for `dub submit` to force-push",
+  )
+  .option(
+    '--no-restack',
+    'Skip the automatic restack of descendants after the split',
+  )
+  .option(
+    '--dry-run',
+    'AI mode only: show the proposal and exit without applying',
+  )
+  .option('-y, --yes', 'AI mode only: skip the approval prompt')
+  .option('--no-interactive', 'Disable interactive prompts and require flags')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub split --by-file packages/cli/src/lib/foo.ts --name feat/foo
+  $ dub split --by-commit                          Interactive numbered checklist
+  $ dub split --by-hunk                            Interactive 'git checkout -p' style
+  $ dub split --ai                                 AI-propose a semantic split
+
+PR handling:
+  • By default the source branch's existing PR is left intact; the next 'dub submit'
+    force-pushes the new (smaller) shape and the new branches get their own PRs.
+  • Pass --close-old-pr for Graphite-style "close old + create new on submit".
+  • If the split leaves the source branch empty vs its parent, the old PR is
+    closed automatically (GitHub rejects PRs with no diff) with a comment
+    linking to the new branches.
+
+After the split, 'dub restack' runs automatically so any descendants follow
+the source branch's new tip. Pass '--no-restack' to skip that step.`,
+  )
+  .action(runSplit);
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
@@ -1561,6 +1622,116 @@ async function runSubmit(options: {
   console.log(
     chalk.yellow(
       `⚠ Nothing to push for ${scopeLabel}. The selected scope contains no submittable branches.`,
+    ),
+  );
+}
+
+async function runSplit(options: {
+  byCommit?: boolean;
+  byFile?: string[];
+  byHunk?: boolean;
+  ai?: boolean;
+  name?: string;
+  commitPicks?: string;
+  closeOldPr?: boolean;
+  restack?: boolean;
+  dryRun?: boolean;
+  yes?: boolean;
+  interactive?: boolean;
+}) {
+  const selectedModes: SplitMode[] = [];
+  if (options.byCommit) selectedModes.push('by-commit');
+  if (options.byFile && options.byFile.length > 0)
+    selectedModes.push('by-file');
+  if (options.byHunk) selectedModes.push('by-hunk');
+  if (options.ai) selectedModes.push('ai');
+
+  if (selectedModes.length === 0) {
+    throw new DubError(
+      "Pick a split mode: '--by-commit', '--by-file <files...>', '--by-hunk', or '--ai'.",
+      [
+        "Run 'dub split --by-file <files...> --name <new-branch>' to extract files.",
+        "Run 'dub split --by-commit' for an interactive commit picker.",
+      ],
+    );
+  }
+  if (selectedModes.length > 1) {
+    throw new DubError(
+      "Split modes are mutually exclusive; pick one of '--by-commit', '--by-file', '--by-hunk', or '--ai'.",
+      ["Rerun 'dub split <mode>' with exactly one mode flag."],
+    );
+  }
+
+  const mode = selectedModes[0];
+  let commitPicks: number[] | undefined;
+  if (options.commitPicks) {
+    const { parseIndexSelection } = await import('./lib/split');
+    // parseIndexSelection returns 0-indexed positions; convert to 1-indexed
+    // because the split() API takes 1-indexed picks.
+    commitPicks = parseIndexSelection(options.commitPicks, 1_000_000).map(
+      (i) => i + 1,
+    );
+  }
+
+  const result = await split(process.cwd(), {
+    mode,
+    files: options.byFile,
+    name: options.name,
+    commitPicks,
+    closeOldPr: options.closeOldPr,
+    noRestack: options.restack === false,
+    dryRun: options.dryRun,
+    yes: options.yes,
+    interactive: options.interactive,
+  });
+
+  if (mode === 'ai' && options.dryRun) {
+    console.log(chalk.green('✔ Dry-run: AI proposed the following split:'));
+    for (const [i, p] of (result.aiProposal ?? []).entries()) {
+      console.log(chalk.dim(`  ${i + 1}. ${p.branch}`));
+      if (p.summary) console.log(chalk.dim(`     ${p.summary}`));
+      for (const f of p.files) console.log(chalk.dim(`       • ${f}`));
+    }
+    return;
+  }
+
+  const sliceLabel = result.created.length === 1 ? 'slice' : 'slices';
+  console.log(
+    chalk.green(
+      `✔ Split '${result.sourceBranch}' into ${result.created.length} new ${sliceLabel}:`,
+    ),
+  );
+  for (const c of result.created) {
+    console.log(chalk.dim(`  ↳ ${c.branch} (on '${c.parent}')`));
+  }
+  if (result.sourceEmpty) {
+    console.log(
+      chalk.yellow(
+        `⚠ '${result.sourceBranch}' has no unique commits left vs '${result.parentBranch}'.`,
+      ),
+    );
+  }
+  if (result.existingPrNumber != null) {
+    if (result.prClosed) {
+      console.log(
+        chalk.dim(
+          `  ↳ Closed existing PR #${result.existingPrNumber} on '${result.sourceBranch}'.`,
+        ),
+      );
+    } else {
+      console.log(
+        chalk.dim(
+          `  ↳ PR #${result.existingPrNumber} on '${result.sourceBranch}' left intact; next 'dub submit' will force-push the new shape.`,
+        ),
+      );
+    }
+  }
+  if (result.restacked) {
+    console.log(chalk.dim('  ↳ Restacked descendants.'));
+  }
+  console.log(
+    chalk.dim(
+      "  Run 'dub submit' to push the new branches and create their PRs.",
     ),
   );
 }
