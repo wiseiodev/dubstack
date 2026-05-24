@@ -296,6 +296,60 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
 }
 
 /**
+ * Counts the number of commits reachable from `tip` that are not reachable from `base`.
+ *
+ * Used to validate that a soft-reset stays within branch boundaries.
+ *
+ * @throws {DubError} If git rev-list fails (e.g. ref not found).
+ */
+export async function countCommitsAhead(
+  tip: string,
+  base: string,
+  cwd: string,
+): Promise<number> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-list', '--count', `${base}..${tip}`],
+      { cwd },
+    );
+    return Number.parseInt(stdout.trim(), 10);
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Could not count commits between '${base}' and '${tip}'.`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git log --oneline ${base}..${tip}' to inspect the range manually.`,
+      ],
+    );
+  }
+}
+
+/**
+ * Performs `git reset --soft HEAD~N`, leaving the popped commits' changes staged.
+ *
+ * @throws {DubError} If the reset fails (e.g. ambiguous ref).
+ */
+export async function softResetHead(steps: number, cwd: string): Promise<void> {
+  try {
+    await execa('git', ['reset', '--soft', `HEAD~${steps}`], { cwd });
+  } catch (error) {
+    throw new DubError(
+      formatGitFailure(
+        `Failed to soft-reset HEAD by ${steps} commit(s).`,
+        readGitCommandOutput(error),
+      ),
+      [
+        `Run 'git status' to confirm the branch is in a state where 'git reset --soft HEAD~${steps}' is valid.`,
+        `Run 'git log --oneline -n ${steps + 1}' to verify there are at least ${steps} commit(s) above the reset target.`,
+      ],
+    );
+  }
+}
+
+/**
  * Performs `git rebase --onto` to move a branch from one base to another.
  *
  * @param newBase - The commit/branch to rebase onto
@@ -682,6 +736,25 @@ export async function hasStagedChanges(cwd: string): Promise<boolean> {
       "Run 'git diff --cached' manually to inspect the underlying error.",
     ]);
   }
+}
+
+/**
+ * Returns true when there are unstaged modifications to tracked files
+ * (column 2 of `git status --porcelain` is not space). Runs with
+ * `--untracked-files=no` so untracked files are never reported; they are
+ * intentionally ignored because `git reset --hard` does not touch them.
+ */
+export async function hasUnstagedTrackedChanges(cwd: string): Promise<boolean> {
+  const { stdout } = await execa(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no'],
+    { cwd },
+  );
+  for (const line of stdout.split('\n')) {
+    if (line.length < 2) continue;
+    if (line[1] !== ' ') return true;
+  }
+  return false;
 }
 
 /**

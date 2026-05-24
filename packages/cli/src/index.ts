@@ -19,7 +19,7 @@
  */
 
 import { createRequire } from 'node:module';
-import chalk from 'chalk';
+import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { branchInfoOutput } from './commands/branch';
@@ -43,6 +43,7 @@ import { mergeNext } from './commands/merge-next';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
+import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
@@ -82,6 +83,7 @@ import {
 } from './lib/restack-conflict-prompt';
 import { rollbackRestack } from './lib/restack-rollback';
 import { parseScope, type ScopeMode } from './lib/scope';
+import { getStackOverviewBatch } from './lib/stack-overview';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -262,6 +264,9 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option('--no-prs', 'Hide PR-state annotations in the rich view')
+  .option('--no-ci', 'Hide CI-state annotations in the rich view')
+  .option('--refresh', 'Bust the 30-second overview cache before rendering')
   .option(
     '--no-color',
     'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
@@ -279,6 +284,9 @@ Examples:
       reverse?: boolean;
       json?: boolean;
       color?: boolean;
+      prs?: boolean;
+      ci?: boolean;
+      refresh?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -291,6 +299,9 @@ program
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
   .option('--json', 'Output the stack tree as JSON')
+  .option('--no-prs', 'Hide PR-state annotations in the rich view')
+  .option('--no-ci', 'Hide CI-state annotations in the rich view')
+  .option('--refresh', 'Bust the 30-second overview cache before rendering')
   .option(
     '--no-color',
     'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
@@ -302,6 +313,9 @@ program
       reverse?: boolean;
       json?: boolean;
       color?: boolean;
+      prs?: boolean;
+      ci?: boolean;
+      refresh?: boolean;
     }) => {
       await printLog(process.cwd(), options);
     },
@@ -790,7 +804,9 @@ program
 
 program
   .command('undo')
-  .description('Undo the last dub create, dub restack, or dub rename operation')
+  .description(
+    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+  )
   .addHelpText(
     'after',
     `
@@ -1187,6 +1203,11 @@ program
     '-a, --all',
     'Show branches across all tracked stacks in interactive selection',
   )
+  .option(
+    '--refresh',
+    'Bypass the 30s PR/CI overview cache and refetch from GitHub',
+  )
+  .option('--no-color', 'Disable ANSI colors in the picker')
   .description('Checkout a branch (interactive picker if no name given)')
   .action(
     async (
@@ -1196,6 +1217,8 @@ program
         showUntracked?: boolean;
         stack?: boolean;
         all?: boolean;
+        refresh?: boolean;
+        color?: boolean;
       },
     ) => {
       if (branch) {
@@ -1210,6 +1233,8 @@ program
           showUntracked: options.showUntracked,
           stack: options.stack,
           all: options.all,
+          refresh: options.refresh,
+          noColor: options.color === false,
         });
         if (result) {
           console.log(chalk.green(`✔ Switched to '${result.branch}'`));
@@ -1622,6 +1647,39 @@ program
   });
 
 program
+  .command('pop')
+  .description(
+    'Pop the last commit(s) off the current branch into the staging area',
+  )
+  .option(
+    '-n, --steps <count>',
+    'Number of commits to pop (default: 1)',
+    parsePositiveInt,
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub pop                Pop last commit into staged changes
+  $ dub pop --steps 3      Squash last 3 commits into staged changes
+  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)`,
+  )
+  .action(async (options: { steps?: number }) => {
+    const result = await pop(process.cwd(), { steps: options.steps });
+    const noun = result.steps === 1 ? 'commit' : 'commits';
+    console.log(
+      chalk.green(
+        `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
+      ),
+    );
+    console.log(
+      chalk.dim(
+        '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
+      ),
+    );
+  });
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
@@ -1778,15 +1836,49 @@ async function printLog(
     reverse?: boolean;
     json?: boolean;
     color?: boolean;
+    prs?: boolean;
+    ci?: boolean;
+    refresh?: boolean;
   } = {},
 ) {
+  const noColor = options.color === false || chalk.level === 0;
+  // Best-effort: fetch the rich overview, but degrade silently to the plain
+  // region-only tree when gh isn't authed, the network is down, or the
+  // batch returns nothing. Failure here must never break `dub log`.
+  let overview = null;
+  try {
+    overview = await getStackOverviewBatch(cwd, { refresh: options.refresh });
+  } catch {
+    overview = null;
+  }
+
+  const logOptions = {
+    stack: options.stack,
+    all: options.all,
+    reverse: options.reverse,
+    prs: options.prs,
+    ci: options.ci,
+    noColor,
+    overview,
+  };
+
   if (options.json) {
-    console.log(JSON.stringify(await logJson(cwd, options), null, 2));
+    console.log(JSON.stringify(await logJson(cwd, logOptions), null, 2));
     return;
   }
 
-  const output = await log(cwd, options);
-  const noColor = options.color === false || chalk.level === 0;
+  const output = await log(cwd, logOptions);
+  if (overview?.truncated && overview.branches.length > 0) {
+    // Use a scoped Chalk instance keyed off the same noColor decision the
+    // tree renderer honors — `chalk.yellow(...)` would otherwise still emit
+    // ANSI under `--no-color` since noColor only affects styleLogOutput.
+    const bannerChalk = noColor ? new Chalk({ level: 0 }) : chalk;
+    console.log(
+      bannerChalk.yellow(
+        `ℹ Showing ${overview.branches.length}+ branches — some PR data may be stale.`,
+      ),
+    );
+  }
   console.log(styleLogOutput(output, noColor));
 }
 
