@@ -120,7 +120,22 @@ export async function writeState(state: DubState, cwd: string): Promise<void> {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  // Write-temp-then-rename so a process kill mid-write can never leave a
+  // partially-truncated state.json. fs.renameSync is atomic on the same
+  // filesystem (.git/dubstack lives next to the temp file).
+  const payload = `${JSON.stringify(state, null, 2)}\n`;
+  const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpPath, payload);
+  try {
+    fs.renameSync(tmpPath, statePath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // best-effort cleanup; surface the original rename error
+    }
+    throw error;
+  }
 }
 
 /**

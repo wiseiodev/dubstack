@@ -632,9 +632,21 @@ dub restack
 dub restack --continue
 ```
 
+### `dub move`
+
+Insert a tracked branch between two existing branches in the same stack. Updates state, retargets open PRs, and restacks descendants in one step.
+
+```bash
+# Insert <branch> as <target>'s new parent
+dub move feat/inserted --before feat/auth-login
+
+# Insert <branch> as a child of <target> (absorbs <target>'s old children)
+dub move feat/inserted --after feat/auth-base
+```
+
 ### `dub undo`
 
-Undo last `dub create` or `dub restack` operation.
+Undo the last `dub create`, `dub restack`, or `dub move` operation.
 
 ```bash
 dub undo
@@ -900,7 +912,7 @@ dub restack --continue
 | Need metadata-only removal | Use `dub untrack` (or `--downstack`) |
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
-| Wrong operation during create/restack | Use `dub undo` (single-level) |
+| Wrong operation during create/restack/move | Use `dub undo` (single-level) |
 | PR merge blocked by order or GitHub conflict | Run `dub merge-check --pr <number>` to verify stack order and remote mergeability |
 | Manual merge left stack inconsistent | Run `dub post-merge` |
 
