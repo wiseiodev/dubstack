@@ -12,7 +12,7 @@ work fills out `qa-fallback.md` instead of producing a Playwright video.
 ## What was verified
 
 End-to-end smoke test against a freshly initialized DubStack repo at
-`/tmp/dub-squash-smoke`, plus 10 unit/integration tests in
+`/tmp/dub-squash-smoke`, plus 11 unit/integration tests in
 `packages/cli/src/commands/squash.test.ts`.
 
 Scenarios exercised live:
@@ -46,12 +46,13 @@ Automated coverage (`pnpm vitest run squash`):
 8. `refuses '--ai' when the AI assistant is disabled`
 9. `uses the AI-generated message when '--ai' is supplied` (mocked AI deps)
 10. `throws when the AI assistant returns an empty message under '--ai'`
+11. `reports restacked=false for a leaf branch with no descendants`
 
 ## Evidence
 
-- Unit suite: `packages/cli/src/commands/squash.test.ts` — 10/10 passing.
-- Full test suite: `pnpm test` — 924/924 passing.
-- Lint/format: `pnpm checks` — 0 errors across 301 files.
+- Unit suite: `packages/cli/src/commands/squash.test.ts` — 11/11 passing.
+- Full test suite: `pnpm test` — 968/968 passing (post merge with origin/main).
+- Lint/format: `pnpm checks` — 0 errors across 313 files.
 - Typecheck: `pnpm typecheck` — 2/2 packages clean.
 - Smoke test commands recorded in turn output above; temp repo cleaned up after.
 
