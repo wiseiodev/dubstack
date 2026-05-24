@@ -24,10 +24,20 @@ export interface MergeNextResult {
   preMergeRetargeted: string[];
   /** Other open + mergeable candidates at the same stack depth as the target. */
   siblingCandidates: string[];
+  /** Open siblings at the chosen depth whose PR is not MERGEABLE. */
+  blockedSiblings: BlockedSibling[];
   postMerge?: PostMergeResult;
 }
 
+export interface BlockedSibling {
+  branch: string;
+  prNumber: number;
+  mergeable: string;
+  mergeStateStatus: string;
+}
+
 const MERGEABLE = 'MERGEABLE';
+const UNKNOWN = 'UNKNOWN';
 
 interface EvaluatedCandidate {
   branch: Branch;
@@ -38,7 +48,8 @@ interface EvaluatedCandidate {
 interface TargetSelection {
   chosen?: { branch: Branch; pr: PrInfo };
   siblings: string[];
-  blockedAtFirstDepth: EvaluatedCandidate[];
+  blockedSiblings: BlockedSibling[];
+  unresolvedAtFirstDepth: EvaluatedCandidate[];
 }
 
 export async function mergeNext(
@@ -67,8 +78,8 @@ export async function mergeNext(
   });
 
   if (!selection.chosen) {
-    if (selection.blockedAtFirstDepth.length > 0) {
-      throw blockedCandidateError(selection.blockedAtFirstDepth);
+    if (selection.unresolvedAtFirstDepth.length > 0) {
+      throw unresolvedCandidateError(selection.unresolvedAtFirstDepth);
     }
     throw new DubError('No mergeable branch found in the stack.', [
       "Run 'dub ss' to push branches and create PRs for the stack.",
@@ -105,6 +116,7 @@ export async function mergeNext(
       prNumber: chosenPr.number,
       preMergeRetargeted: childBranchesWithOpenPr,
       siblingCandidates: selection.siblings,
+      blockedSiblings: selection.blockedSiblings,
     };
   }
 
@@ -126,6 +138,7 @@ export async function mergeNext(
     prNumber: chosenPr.number,
     preMergeRetargeted: childBranchesWithOpenPr,
     siblingCandidates: selection.siblings,
+    blockedSiblings: selection.blockedSiblings,
     postMerge: maintenance,
   };
 }
@@ -198,9 +211,6 @@ async function selectMergeTarget(args: {
   }
   const sortedDepths = [...branchesByDepth.keys()].sort((a, b) => a - b);
 
-  let firstNonEmptyDepth = -1;
-  const blockedAtFirstDepth: EvaluatedCandidate[] = [];
-
   for (const depth of sortedDepths) {
     const branches = (branchesByDepth.get(depth) ?? [])
       .slice()
@@ -232,16 +242,18 @@ async function selectMergeTarget(args: {
     }
 
     if (evaluated.length === 0) continue;
-    if (firstNonEmptyDepth === -1) firstNonEmptyDepth = depth;
 
     const mergeable = evaluated.filter((c) => c.status.mergeable === MERGEABLE);
     if (mergeable.length === 0) {
-      // Lowest depth with candidates has none mergeable — surface the blocked
-      // status. Never descend past a blocked floor: even if a deeper child's
-      // parent eligibility somehow passed, merging it ahead of its blocked
-      // ancestor would corrupt stack ordering.
-      blockedAtFirstDepth.push(...evaluated);
-      break;
+      // Lowest depth with candidates has none mergeable. Never descend past
+      // this floor: even if a deeper child's parent eligibility somehow
+      // passed, merging it ahead of its non-mergeable ancestor would corrupt
+      // stack ordering.
+      return {
+        siblings: [],
+        blockedSiblings: [],
+        unresolvedAtFirstDepth: evaluated,
+      };
     }
 
     const onCurrentPath = mergeable.filter((c) =>
@@ -251,14 +263,23 @@ async function selectMergeTarget(args: {
     const siblings = mergeable
       .filter((c) => c.branch.name !== chosen.branch.name)
       .map((c) => c.branch.name);
+    const blockedSiblings: BlockedSibling[] = evaluated
+      .filter((c) => c.status.mergeable !== MERGEABLE)
+      .map((c) => ({
+        branch: c.branch.name,
+        prNumber: c.pr.number,
+        mergeable: c.status.mergeable ?? UNKNOWN,
+        mergeStateStatus: c.status.mergeStateStatus ?? 'unknown',
+      }));
     return {
       chosen: { branch: chosen.branch, pr: chosen.pr },
       siblings,
-      blockedAtFirstDepth: [],
+      blockedSiblings,
+      unresolvedAtFirstDepth: [],
     };
   }
 
-  return { siblings: [], blockedAtFirstDepth };
+  return { siblings: [], blockedSiblings: [], unresolvedAtFirstDepth: [] };
 }
 
 async function lifecycleForBranch(
@@ -275,16 +296,29 @@ async function lifecycleForBranch(
   return 'NONE';
 }
 
-function blockedCandidateError(candidates: EvaluatedCandidate[]): DubError {
-  const summary = candidates
-    .map((c) => {
-      const mergeable = c.status.mergeable ?? 'UNKNOWN';
-      const state = c.status.mergeStateStatus ?? 'unknown';
-      return `'${c.branch.name}' (PR #${c.pr.number}: mergeable=${mergeable}, state=${state})`;
-    })
-    .join('; ');
+function unresolvedCandidateError(candidates: EvaluatedCandidate[]): DubError {
+  const blocked = candidates.filter(
+    (c) => c.status.mergeable !== MERGEABLE && c.status.mergeable !== UNKNOWN,
+  );
+  const unknown = candidates.filter((c) => c.status.mergeable === UNKNOWN);
+  const summarize = (entry: EvaluatedCandidate) => {
+    const mergeable = entry.status.mergeable ?? UNKNOWN;
+    const state = entry.status.mergeStateStatus ?? 'unknown';
+    return `'${entry.branch.name}' (PR #${entry.pr.number}: mergeable=${mergeable}, state=${state})`;
+  };
+  // Pure-UNKNOWN floor: GitHub hasn't finished computing mergeability yet.
+  // Direct users to retry, not to chase phantom check failures.
+  if (blocked.length === 0 && unknown.length > 0) {
+    return new DubError(
+      `GitHub has not yet computed mergeability for this stack level: ${unknown.map(summarize).join('; ')}.`,
+      [
+        'Retry in a few seconds — GitHub computes mergeability asynchronously after each push.',
+        "Run 'gh pr view <number> --json mergeable,mergeStateStatus' to confirm the live status.",
+      ],
+    );
+  }
   return new DubError(
-    `No mergeable PR at this stack level. Blocked: ${summary}.`,
+    `No mergeable PR at this stack level. Blocked: ${candidates.map(summarize).join('; ')}.`,
     [
       "Run 'gh pr view <number> --web' to inspect required checks and reviews.",
       "Run 'dub sync' to reconcile remote drift, then 'dub submit' to refresh.",

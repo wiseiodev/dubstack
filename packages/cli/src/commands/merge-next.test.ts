@@ -161,6 +161,7 @@ describe('mergeNext linear stack', () => {
     expect(result.prNumber).toBe(101);
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
     expect(result.siblingCandidates).toEqual([]);
+    expect(result.blockedSiblings).toEqual([]);
   });
 
   it('supports dry-run without merging', async () => {
@@ -173,6 +174,7 @@ describe('mergeNext linear stack', () => {
     expect(result.mergedBranch).toBe('feat/a');
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
     expect(result.siblingCandidates).toEqual([]);
+    expect(result.blockedSiblings).toEqual([]);
   });
 
   it('throws when no branch in the stack has an open PR', async () => {
@@ -230,21 +232,25 @@ describe('mergeNext tree selection', () => {
     expect(result.mergedBranch).toBe('feat/bravo');
     expect(result.prNumber).toBe(202);
     expect(result.siblingCandidates).toEqual(['feat/alpha', 'feat/charlie']);
+    expect(result.blockedSiblings).toEqual([]);
     expect(mockMergePr).toHaveBeenCalledWith(202, '/repo', {
       method: 'squash',
       deleteBranch: true,
     });
   });
 
-  it('3-sibling tree from a non-stack branch: picks the alphabetically first mergeable child of trunk', async () => {
+  it('falls back to alphabetical order when no MERGEABLE peer is on the current branch path', async () => {
+    // User is on feat/zulu (a depth-1 sibling), but its PR is BLOCKED. The
+    // on-current-path tie-break therefore finds no mergeable candidate and
+    // we fall back to the BFS-deterministic alphabetical first.
     mockGetSubmitPlan.mockResolvedValue(
       makePlan({
-        currentBranch: 'main',
+        currentBranch: 'feat/zulu',
         branches: [
           { name: 'main', parent: null, type: 'root' },
           { name: 'feat/alpha', parent: 'main' },
           { name: 'feat/bravo', parent: 'main' },
-          { name: 'feat/charlie', parent: 'main' },
+          { name: 'feat/zulu', parent: 'main' },
         ],
       }),
     );
@@ -252,7 +258,7 @@ describe('mergeNext tree selection', () => {
       lifecycleBatch({
         'feat/alpha': 'OPEN',
         'feat/bravo': 'OPEN',
-        'feat/charlie': 'OPEN',
+        'feat/zulu': 'OPEN',
       }),
     );
     mockGetPr.mockImplementation(async (branch: string) => {
@@ -260,19 +266,30 @@ describe('mergeNext tree selection', () => {
         return { number: 301, url: 'u/301', title: 'a', body: '' };
       if (branch === 'feat/bravo')
         return { number: 302, url: 'u/302', title: 'b', body: '' };
-      if (branch === 'feat/charlie')
-        return { number: 303, url: 'u/303', title: 'c', body: '' };
+      if (branch === 'feat/zulu')
+        return { number: 399, url: 'u/399', title: 'z', body: '' };
       return null;
     });
-    mockGetPrMergeStatusByNumber.mockResolvedValue({
-      mergeable: 'MERGEABLE',
-      mergeStateStatus: 'CLEAN',
-    });
+    mockGetPrMergeStatusByNumber.mockImplementation(
+      async (prNumber: number) => {
+        if (prNumber === 399)
+          return { mergeable: 'CONFLICTING', mergeStateStatus: 'BLOCKED' };
+        return { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+      },
+    );
 
     const result = await mergeNext('/repo');
 
     expect(result.mergedBranch).toBe('feat/alpha');
-    expect(result.siblingCandidates).toEqual(['feat/bravo', 'feat/charlie']);
+    expect(result.siblingCandidates).toEqual(['feat/bravo']);
+    expect(result.blockedSiblings).toEqual([
+      {
+        branch: 'feat/zulu',
+        prNumber: 399,
+        mergeable: 'CONFLICTING',
+        mergeStateStatus: 'BLOCKED',
+      },
+    ]);
   });
 
   it('does not descend to grandchildren when a depth-1 candidate exists', async () => {
@@ -382,6 +399,47 @@ describe('mergeNext tree selection', () => {
 
     expect(result.mergedBranch).toBe('feat/bravo');
     expect(result.siblingCandidates).toEqual(['feat/charlie']);
+    expect(result.blockedSiblings).toEqual([
+      {
+        branch: 'feat/alpha',
+        prNumber: 701,
+        mergeable: 'CONFLICTING',
+        mergeStateStatus: 'BLOCKED',
+      },
+    ]);
+  });
+
+  it('UNKNOWN mergeability at the lowest depth produces a distinct retry-oriented error', async () => {
+    // GitHub returns mergeable=UNKNOWN while it is still computing. Treating
+    // this as "blocked" would push users to chase non-existent CI/approval
+    // failures. The error should tell them to retry instead.
+    mockGetSubmitPlan.mockResolvedValue(
+      makePlan({
+        currentBranch: 'feat/only',
+        branches: [
+          { name: 'main', parent: null, type: 'root' },
+          { name: 'feat/only', parent: 'main' },
+        ],
+      }),
+    );
+    mockGetAllPrSyncInfoBatch.mockResolvedValue(
+      lifecycleBatch({ 'feat/only': 'OPEN' }),
+    );
+    mockGetPr.mockImplementation(async (branch: string) => {
+      if (branch === 'feat/only')
+        return { number: 901, url: 'u/901', title: 'o', body: '' };
+      return null;
+    });
+    mockGetPrMergeStatusByNumber.mockResolvedValue({
+      mergeable: 'UNKNOWN',
+      mergeStateStatus: null,
+    });
+
+    await expect(mergeNext('/repo')).rejects.toThrow(
+      /GitHub has not yet computed mergeability.*feat\/only.*PR #901.*mergeable=UNKNOWN/,
+    );
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
   });
 
   it('does not descend past a blocked floor: depth-1 BLOCKED with mergeable descendant still errors', async () => {
@@ -460,6 +518,7 @@ describe('mergeNext tree selection', () => {
     expect(result.mergedBranch).toBe('feat/bravo');
     expect(result.prNumber).toBe(602);
     expect(result.siblingCandidates).toEqual(['feat/alpha']);
+    expect(result.blockedSiblings).toEqual([]);
     expect(mockMergePr).not.toHaveBeenCalled();
     expect(mockRetargetPrBase).not.toHaveBeenCalled();
   });
