@@ -26,6 +26,7 @@ import {
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import {
   buildMetadataBlock,
+  buildMetadataTree,
   buildStackTable,
   composePrBody,
 } from '../lib/pr-body';
@@ -203,13 +204,20 @@ export async function submit(
     }
 
     if (!dryRun) {
-      await updateAllPrBodies(plan.branches, prMap, plan.stack.id, cwd, {
-        useAi,
-        deps,
-        summaryOverrides: options.summaryOverrides,
-        prTemplate: templates?.prTemplate ?? null,
-        providerConfig: config.ai.provider,
-      });
+      await updateAllPrBodies(
+        plan.branches,
+        plan.stack.branches,
+        prMap,
+        plan.stack.id,
+        cwd,
+        {
+          useAi,
+          deps,
+          summaryOverrides: options.summaryOverrides,
+          prTemplate: templates?.prTemplate ?? null,
+          providerConfig: config.ai.provider,
+        },
+      );
 
       for (const branch of plan.branches) {
         const pr = prMap.get(branch.name);
@@ -343,6 +351,7 @@ function getCurrentPathBranches(stack: Stack, currentBranch: string): Branch[] {
 
 async function updateAllPrBodies(
   branches: Branch[],
+  stackBranches: Branch[],
   prMap: Map<string, PrInfo>,
   stackId: string,
   cwd: string,
@@ -356,34 +365,77 @@ async function updateAllPrBodies(
     >['provider'];
   },
 ): Promise<void> {
+  // Build the PR table from both this run's prMap AND any PR numbers persisted
+  // in state for other branches in the stack — so siblings submitted in prior
+  // runs still appear with their PR numbers in the tree table.
+  //
+  // For prior-run branches we don't have the PR title cached locally, so the
+  // branch name is used as the table label. That matches the issue spec's
+  // target example (which labels rows like `feat/auth-base` rather than a
+  // free-form title) and keeps submit free of extra GitHub API calls.
   const tableEntries = new Map<string, { number: number; title: string }>();
-  for (const branch of branches) {
+  for (const branch of stackBranches) {
     const pr = prMap.get(branch.name);
     if (pr) {
       tableEntries.set(branch.name, { number: pr.number, title: pr.title });
+    } else if (branch.pr_number != null) {
+      tableEntries.set(branch.name, {
+        number: branch.pr_number,
+        title: branch.name,
+      });
     }
   }
 
-  for (let i = 0; i < branches.length; i++) {
-    const branch = branches[i];
+  const childrenByParent = new Map<string, Branch[]>();
+  for (const branch of stackBranches) {
+    if (branch.parent != null) {
+      const arr = childrenByParent.get(branch.parent) ?? [];
+      arr.push(branch);
+      childrenByParent.set(branch.parent, arr);
+    }
+  }
+  for (const branch of branches) {
     const pr = prMap.get(branch.name);
     if (!pr) continue;
 
-    const prevPr =
-      i > 0 ? (prMap.get(branches[i - 1].name)?.number ?? null) : null;
+    const parentName = branch.parent;
+    const parentEntry = parentName ? tableEntries.get(parentName) : null;
+    const prevPr = parentEntry?.number ?? null;
+
+    const childBranches = (childrenByParent.get(branch.name) ?? [])
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+    // next_pr only makes sense for a linear (single-child) continuation.
     const nextPr =
-      i < branches.length - 1
-        ? (prMap.get(branches[i + 1].name)?.number ?? null)
+      childBranches.length === 1
+        ? (tableEntries.get(childBranches[0].name)?.number ?? null)
         : null;
 
-    const stackTable = buildStackTable(branches, tableEntries, branch.name);
-    const metadataBlock = buildMetadataBlock(
-      stackId,
-      pr.number,
-      prevPr,
-      nextPr,
+    const directChildren = childBranches.map((c) => c.name);
+    const siblings = parentName
+      ? (childrenByParent.get(parentName) ?? [])
+          .filter((c) => c.name !== branch.name)
+          .map((c) => c.name)
+          .sort((a, b) => a.localeCompare(b))
+      : [];
+
+    const stackTable = buildStackTable(
+      stackBranches,
+      tableEntries,
       branch.name,
     );
+    const metadataBlock = buildMetadataBlock({
+      schema_version: 1,
+      stack_id: stackId,
+      pr_number: pr.number,
+      branch: branch.name,
+      parent: parentName ?? null,
+      children: directChildren,
+      siblings,
+      prev_pr: prevPr,
+      next_pr: nextPr,
+      tree: buildMetadataTree(stackBranches, tableEntries, branch.name),
+    });
 
     const existingBody = pr.body;
     const aiSummaryOverride = options.summaryOverrides?.get(branch.name);
