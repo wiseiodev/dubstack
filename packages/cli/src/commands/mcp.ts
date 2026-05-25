@@ -18,6 +18,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
+import { revert } from './revert';
 import { stashList, stashPop, stashPush } from './stash';
 import { status } from './status';
 import { submit } from './submit';
@@ -99,6 +100,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.revert': ['target', 'branch', 'submit'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
@@ -402,6 +404,33 @@ const TOOLS: ToolDefinition[] = [
           description: 'Also unfreeze descendants.',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.revert',
+    description:
+      'Create a branch on trunk that reverts a merged PR or commit and track it as a new stack root.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Merged PR number (e.g. "123") or commit SHA to revert.',
+        },
+        branch: {
+          type: 'string',
+          description:
+            'Override the auto-generated branch name (default: revert/<source>-<short-sha>).',
+        },
+        submit: {
+          type: 'boolean',
+          description:
+            'Push the revert branch and open a PR after creating it.',
+        },
+      },
+      required: ['target'],
       additionalProperties: false,
     },
   },
@@ -896,6 +925,31 @@ async function callTool(
         ]);
       }
       return mutatingToolResult(() => checkout(branch, cwd));
+    }
+    case 'dubstack.revert': {
+      const target = optionalString(args.target);
+      if (!target) {
+        throw new DubError("'target' is required for dubstack.revert.", [
+          "Pass {'target': '<pr-number-or-sha>'} in the tool arguments.",
+        ]);
+      }
+      if (optionalBoolean(args.editMessage)) {
+        // `git revert --edit` opens an interactive editor and would deadlock
+        // the MCP server — its stdio capture can't proxy a TTY.
+        throw new DubError(
+          "'editMessage' is not supported via the MCP tool — it requires a TTY.",
+          [
+            "Run 'dub revert --edit-message <target>' from a terminal instead.",
+            "Drop 'editMessage' from the MCP call to use --no-edit.",
+          ],
+        );
+      }
+      return mutatingToolResult(() =>
+        revert(cwd, target, {
+          branchName: optionalString(args.branch),
+          submit: optionalBoolean(args.submit),
+        }),
+      );
     }
     case 'dubstack.delete':
       return mutatingToolResult(() =>
