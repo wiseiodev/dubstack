@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aiSetup } from './ai-setup';
+
+let envSnapshot: NodeJS.ProcessEnv;
 
 function createDeps() {
   return {
@@ -33,7 +35,12 @@ function createDeps() {
 
 describe('aiSetup', () => {
   beforeEach(() => {
+    envSnapshot = { ...process.env };
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.env = envSnapshot;
   });
 
   it('writes Bedrock env defaults and selects the provider for the repo', async () => {
@@ -190,6 +197,26 @@ describe('aiSetup', () => {
     );
     expect(result.provider).toBe('ollama');
     expect(result.model).toBe('qwen2.5-coder');
+  });
+
+  it('falls back to the built-in Ollama base URL when the existing env value is invalid', async () => {
+    process.env.DUBSTACK_OLLAMA_BASE_URL = 'not-a-url';
+
+    const deps = createDeps();
+    deps.selectProvider.mockResolvedValue('ollama');
+    deps.selectModel.mockResolvedValue('qwen2.5-coder');
+    deps.selectModelScope.mockResolvedValue('global');
+    deps.inputOllamaBaseUrl.mockResolvedValue(undefined);
+
+    await aiSetup('/repo', deps);
+
+    expect(deps.checkOllamaEndpoint).toHaveBeenCalledWith(
+      'http://localhost:11434',
+    );
+    expect(deps.configureAiEnv).toHaveBeenCalledWith({
+      ollamaBaseUrl: 'http://localhost:11434',
+      ollamaModel: 'qwen2.5-coder',
+    });
   });
 
   it('clears an existing repo override when switching back to global scope', async () => {

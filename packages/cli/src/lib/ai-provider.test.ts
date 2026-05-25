@@ -250,6 +250,19 @@ describe('resolveAiProvider', () => {
     );
   });
 
+  it('surfaces a specific error when curl is unavailable', () => {
+    expect(() =>
+      checkOllamaEndpoint(
+        'http://localhost:11434',
+        vi.fn(() => {
+          throw Object.assign(new Error('spawn curl ENOENT'), {
+            code: 'ENOENT',
+          });
+        }),
+      ),
+    ).toThrow('Ollama reachability checks require curl');
+  });
+
   it('checks the Ollama tags endpoint for a root base URL', () => {
     const execFile = vi.fn();
 

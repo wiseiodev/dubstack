@@ -20,7 +20,7 @@ export type ResolvedAiProviderName =
   | 'openai'
   | 'ollama';
 
-const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
 const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder';
 
 export interface ResolveAiProviderDeps {
@@ -454,7 +454,17 @@ export function checkOllamaEndpoint(
         stdio: 'pipe',
       },
     );
-  } catch {
+  } catch (error) {
+    if (isMissingCurlError(error)) {
+      throw new DubError(
+        'Ollama reachability checks require curl, but curl was not found.',
+        [
+          'Install curl or make sure it is available on PATH.',
+          "Run 'dub config ai-provider <provider>' to switch providers.",
+        ],
+      );
+    }
+
     throw new DubError(
       'Ollama provider is selected but the local endpoint is not reachable.',
       [
@@ -472,4 +482,13 @@ function getOllamaHealthCheckUrl(baseUrl: string): string {
   return normalized.endsWith('/v1')
     ? `${normalized}/models`
     : getOllamaTagsUrl(normalized);
+}
+
+function isMissingCurlError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
 }

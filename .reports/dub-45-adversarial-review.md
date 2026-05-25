@@ -43,6 +43,20 @@ behavior.
 - Added focused tests for both URL shapes in
   `packages/cli/src/lib/ai-provider.test.ts`.
 
+## Copilot review follow-up
+
+Classified all three Copilot review threads as valid and fixed them:
+
+- Added a specific DubError when `curl` is unavailable, so users do not get a
+  misleading endpoint-unreachable message for a missing local dependency.
+- Made `dub ai setup` fall back to the built-in Ollama base URL when an existing
+  `DUBSTACK_OLLAMA_BASE_URL` value is invalid, so setup can recover instead of
+  crashing before the user can correct it.
+- Added `checkOllamaEndpoint` to `AiMetadataDependencies` so eval dependency
+  overrides match the resolver contract explicitly.
+
+Re-ran `pnpm checks`, `pnpm typecheck`, and `pnpm test`.
+
 ## Notes
 
 - `pnpm evals` was attempted after rebuilding `better-sqlite3`; it remains

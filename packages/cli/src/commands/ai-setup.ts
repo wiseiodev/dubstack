@@ -1,7 +1,11 @@
 import input from '@inquirer/input';
 import password from '@inquirer/password';
 import select from '@inquirer/select';
-import { checkOllamaEndpoint, getOllamaBaseUrl } from '../lib/ai-provider';
+import {
+  checkOllamaEndpoint,
+  DEFAULT_OLLAMA_BASE_URL,
+  getOllamaBaseUrl,
+} from '../lib/ai-provider';
 import {
   type ConfigureAiEnvOptions,
   type ConfigureAiEnvResult,
@@ -95,7 +99,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
   inputOpenAiKey: async () => optionalSecret('Enter DUBSTACK_OPENAI_API_KEY'),
   inputOllamaBaseUrl: async () => {
     const value = await input({
-      message: `Enter DUBSTACK_OLLAMA_BASE_URL (default ${getOllamaBaseUrl()})`,
+      message: `Enter DUBSTACK_OLLAMA_BASE_URL (default ${getOllamaSetupDefaultBaseUrl()})`,
     });
     const trimmed = value.trim();
     return trimmed.length > 0 ? trimmed : undefined;
@@ -200,7 +204,7 @@ async function buildEnvOptions(
 
   if (provider === 'ollama') {
     const baseUrl = await deps.inputOllamaBaseUrl();
-    const resolvedBaseUrl = baseUrl ?? getOllamaBaseUrl();
+    const resolvedBaseUrl = baseUrl ?? getOllamaSetupDefaultBaseUrl();
     deps.checkOllamaEndpoint(resolvedBaseUrl);
     return {
       ollamaBaseUrl: resolvedBaseUrl,
@@ -213,6 +217,14 @@ async function buildEnvOptions(
     bedrockRegion: await deps.inputBedrockRegion(),
     bedrockModel: modelScope === 'global' ? model : undefined,
   };
+}
+
+function getOllamaSetupDefaultBaseUrl(): string {
+  try {
+    return getOllamaBaseUrl();
+  } catch {
+    return DEFAULT_OLLAMA_BASE_URL;
+  }
 }
 
 async function optionalText(message: string): Promise<string | undefined> {

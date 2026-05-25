@@ -25,6 +25,7 @@ export interface AiMetadataDependencies {
   createAmazonBedrock?: typeof createAmazonBedrock;
   createOpenAI?: typeof createOpenAI;
   createOpenAICompatible?: typeof createOpenAICompatible;
+  checkOllamaEndpoint?: (baseUrl: string) => void;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
