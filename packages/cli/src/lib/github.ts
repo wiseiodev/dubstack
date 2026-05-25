@@ -53,6 +53,10 @@ export interface EnableAutoMergeResult {
   method: MergeMethod;
 }
 
+export interface BranchProtectionMergeQueueStatus {
+  mergeQueueEnabled: boolean;
+}
+
 let ghRetryOverrides: Partial<RetryOptions> = {};
 
 /**
@@ -1062,6 +1066,86 @@ export async function enablePrAutoMerge(
   );
 }
 
+/**
+ * Returns whether the target branch has GitHub native merge queue protection.
+ */
+export async function getBranchMergeQueueStatus(
+  branch: string,
+  cwd: string,
+): Promise<BranchProtectionMergeQueueStatus> {
+  let stdout: string;
+  const endpoint = branchProtectionEndpoint(branch);
+  try {
+    const result = await runGh(['api', endpoint], { cwd });
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    if (isBranchProtectionNotFoundError(root)) {
+      return { mergeQueueEnabled: false };
+    }
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to inspect branch protection for '${branch}': ${message}`,
+      [
+        `Run 'gh api ${endpoint}' to inspect the response.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') {
+    return { mergeQueueEnabled: false };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      required_merge_queue?: unknown;
+    };
+    return {
+      mergeQueueEnabled: parsed.required_merge_queue != null,
+    };
+  } catch {
+    throw new DubError(`Failed to parse branch protection for '${branch}'.`, [
+      `Run 'gh api ${endpoint}' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+}
+
+function branchProtectionEndpoint(branch: string): string {
+  return `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`;
+}
+
+/**
+ * Enqueues a PR using GitHub auto-merge. On merge-queue branches, GitHub adds
+ * the PR to the queue once requirements are satisfied.
+ */
+export async function enqueuePrToMergeQueue(
+  prNumber: number,
+  cwd: string,
+  options: { method?: MergeMethod } = {},
+): Promise<void> {
+  const method = options.method ?? 'squash';
+  try {
+    await runGh(
+      ['pr', 'merge', String(prNumber), '--auto', mergeMethodFlag(method)],
+      { cwd, stdio: 'inherit' },
+    );
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to enqueue PR #${prNumber} to the merge queue: ${message}`,
+      [
+        'Confirm GitHub merge queue and auto-merge are enabled for the target branch.',
+        `Run 'gh pr merge ${prNumber} --auto ${mergeMethodFlag(method)}' manually to see GitHub's raw error.`,
+        `Run 'dub merge-next --no-queue' to force the direct merge path.`,
+      ],
+    );
+  }
+}
+
 function methodFallbackOrder(preferred: MergeMethod): MergeMethod[] {
   const fallback: MergeMethod[] = ['squash', 'merge', 'rebase'];
   return [preferred, ...fallback.filter((method) => method !== preferred)];
@@ -1097,6 +1181,16 @@ function isAutoMergeSetupUnavailable(message: string): boolean {
     normalized.includes('not available') ||
     normalized.includes('not enabled') ||
     normalized.includes('disabled')
+  );
+}
+
+function isBranchProtectionNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    /\b404\s+not\s+found\b/i.test(message) ||
+    /\bHTTP\s*:?\s*404\b/i.test(message) ||
+    normalized.includes('branch not protected')
   );
 }
 

@@ -175,6 +175,10 @@ dub merge-next
 dub post-merge
 ```
 
+If trunk uses GitHub's native merge queue, `dub merge-next` enqueues the PR and
+waits for you to run `dub sync` after GitHub lands it. Use `--no-queue` to force
+the direct merge path.
+
 ## Fast Command List
 
 | Command | Purpose |
