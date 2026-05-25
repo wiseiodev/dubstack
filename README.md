@@ -640,8 +640,11 @@ dub merge-check --pr 123
 
 ### `dub merge-next` / `dub land`
 
-Merge the next safe PR in your current stack path, pre-retarget direct child PRs
-to the parent base, then run post-merge maintenance.
+Merge the next safe PR in your current stack path. On direct-merge branches,
+DubStack pre-retargets direct child PRs to the parent base, then runs
+post-merge maintenance. On GitHub merge-queue protected trunk branches,
+DubStack enqueues the PR instead and tells you to run `dub sync` after the
+queue processes.
 
 ```bash
 dub merge-next
@@ -650,6 +653,12 @@ dub land
 
 # preview only
 dub merge-next --dry-run
+
+# force GitHub native merge queue mode
+dub merge-next --queue
+
+# bypass queue auto-detection and direct-merge
+dub merge-next --no-queue
 ```
 
 ### `dub post-merge`
@@ -1057,6 +1066,13 @@ dub merge-next
 # run again for the next layer
 dub merge-next
 ```
+
+If the trunk branch uses GitHub's native merge queue, `dub merge-next` detects
+that branch protection and defaults to queue mode. Queue mode uses
+`gh pr merge --auto --squash`, skips local post-merge maintenance because the
+merge has not happened yet, and prints the follow-up `dub sync` command to run
+after GitHub processes the queue. Use `--queue` to require queue mode or
+`--no-queue` to force the direct merge path.
 
 If you merged manually, normalize state and retarget remaining PRs:
 

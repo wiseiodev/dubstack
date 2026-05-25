@@ -1407,6 +1407,8 @@ program
   .alias('land')
   .description('Merge the next safe PR in your current stack path')
   .option('--dry-run', 'Preview merge + post-merge actions')
+  .option('--queue', 'Use GitHub native merge queue when merging')
+  .option('--no-queue', 'Force direct merge even when merge queue is enabled')
   .option(
     '--method <method>',
     'Merge strategy: merge|squash|rebase',
@@ -1427,6 +1429,7 @@ program
     async (options: {
       dryRun?: boolean;
       method?: 'merge' | 'squash' | 'rebase';
+      queue?: boolean;
       restack?: boolean;
       submit?: boolean;
     }) => {
@@ -1457,6 +1460,15 @@ program
         }
       };
       if (result.dryRun) {
+        if (result.mode === 'queue') {
+          console.log(
+            chalk.green(
+              `✔ Dry-run: would enqueue '${result.mergedBranch}' (PR #${result.prNumber}) to the merge queue.`,
+            ),
+          );
+          printSiblingHint();
+          return;
+        }
         console.log(
           chalk.green(
             `✔ Dry-run: would merge '${result.mergedBranch}' (PR #${result.prNumber}).`,
@@ -1469,6 +1481,18 @@ program
             ),
           );
         }
+        printSiblingHint();
+        return;
+      }
+      if (result.mode === 'queue') {
+        console.log(
+          chalk.green(`✔ Enqueued PR #${result.prNumber} to merge queue.`),
+        );
+        console.log(
+          chalk.dim(
+            '  Run `dub sync` after the queue processes to update local state.',
+          ),
+        );
         printSiblingHint();
         return;
       }
