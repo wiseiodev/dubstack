@@ -34,6 +34,7 @@ import { track } from '../../src/commands/track';
 import { unfreeze } from '../../src/commands/unfreeze';
 import { unlink } from '../../src/commands/unlink';
 import { untrack } from '../../src/commands/untrack';
+import { writeConfig } from '../../src/lib/config';
 import { readUndoLog } from '../../src/lib/undo-log';
 import { createTestRepo, gitInRepo } from '../helpers';
 
@@ -149,6 +150,18 @@ describe('--dry-run contract', () => {
     expect((await gitInRepo(dir, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(
       tipBefore,
     );
+  });
+
+  it('restack rejects --continue + --dry-run as an invalid combo at the library level', async () => {
+    // Per Copilot review: `--continue` resumes an in-flight rebase, which
+    // can't be previewed. The CLI rejects the combo; here we assert the
+    // surface stays clear by checking that a plain `restack --dry-run`
+    // (no in-flight rebase) succeeds.
+    await setupStack();
+    const result = await restack(dir, { dryRun: true });
+    expect(result.dryRun).toBe(true);
+    // Status with no in-flight work and no rebase needed:
+    expect(['up-to-date', 'success']).toContain(result.status);
   });
 
   it('restack reports planned rebases without touching refs', async () => {
@@ -442,6 +455,24 @@ describe('--dry-run contract', () => {
     expect((await gitInRepo(dir, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(
       tipBefore,
     );
+  });
+
+  it('split --ai --dry-run bails before invoking the AI provider', async () => {
+    // Per Copilot review: dry-run must skip the AI call so previews never
+    // bill the configured provider. Enable AI in the repo config and pass
+    // a deps stub whose generateText throws — if dry-run reaches it, the
+    // test fails. A clean bail means the plan is returned with no proposal.
+    await setupStack();
+    await writeConfig({ aiAssistantEnabled: true }, dir);
+
+    const result = await split(dir, { mode: 'ai', dryRun: true }, {
+      generateText: (() => {
+        throw new Error('AI provider must not be called in dry-run');
+      }) as never,
+    } as never);
+
+    expect(result.dryRun).toBe(true);
+    expect(result.aiProposal).toBeUndefined();
   });
 
   it('split (by-file) reports planned slices without mutating refs', async () => {

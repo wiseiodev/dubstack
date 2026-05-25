@@ -263,15 +263,10 @@ export async function split(
         "Rerun 'dub split --by-file <files...>' or '--by-commit' to drive the split manually.",
       ]);
     }
-    aiProposal = await proposeAiSplit({
-      cwd,
-      sourceBranch,
-      parentBranch,
-      parentTip,
-      sourceTip: sourceTipBefore,
-      deps: depsArg ?? (await loadAiDeps()),
-      providerConfig: config.ai.provider,
-    });
+    // Bail BEFORE calling the AI so `--ai --dry-run` never bills the provider.
+    // Matches the contract documented for absorb --ai --dry-run. The plan is
+    // intentionally proposal-less; users who want the model's proposed shape
+    // re-run without --dry-run.
     if (options.dryRun) {
       return {
         sourceBranch,
@@ -281,10 +276,18 @@ export async function split(
         existingPrNumber,
         prClosed: false,
         restacked: false,
-        aiProposal,
         dryRun: true,
       };
     }
+    aiProposal = await proposeAiSplit({
+      cwd,
+      sourceBranch,
+      parentBranch,
+      parentTip,
+      sourceTip: sourceTipBefore,
+      deps: depsArg ?? (await loadAiDeps()),
+      providerConfig: config.ai.provider,
+    });
     if (!options.yes && options.interactive !== false) {
       await confirmAiProposal(aiProposal);
     }

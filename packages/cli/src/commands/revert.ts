@@ -20,7 +20,7 @@ import {
   type DubState,
   ensureState,
   findStackForBranch,
-  readState,
+  readStateForDryRun,
   writeState,
 } from '../lib/state';
 import { clearUndoEntry, saveUndoEntry } from '../lib/undo-log';
@@ -90,8 +90,11 @@ export async function revert(
   }
 
   const dryRun = options.dryRun ?? false;
+  // Dry-run uses the read-only loader so corrupted state (or any error other
+  // than "not initialized") still surfaces — preserves the invariant that a
+  // successful dry-run plan corresponds to something a real run could do.
   const state: DubState = dryRun
-    ? await readState(cwd).catch(() => ({ trunks: [], stacks: [] }))
+    ? await readStateForDryRun(cwd)
     : await ensureState(cwd);
   const currentBranch = await getCurrentBranch(cwd);
   const trunk = await resolveRevertTrunk(state, currentBranch, cwd);

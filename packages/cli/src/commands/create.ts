@@ -33,7 +33,7 @@ import {
   findStackForBranch,
   getDefaultTrunk,
   getStackTrunk,
-  readState,
+  readStateForDryRun,
   writeState,
 } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
@@ -132,14 +132,13 @@ export async function create(
   }
 
   const dryRun = normalizedOptions.dryRun ?? false;
-  let state: DubState;
-  if (dryRun) {
-    state = await readState(cwd).catch(
-      (): DubState => ({ trunks: [], stacks: [] }),
-    );
-  } else {
-    state = await ensureState(cwd);
-  }
+  // Dry-run must not create state on disk; fall back to an empty in-memory
+  // state ONLY when the repo has never been initialized (matches `ensureState`
+  // semantics). Corruption and IO errors still propagate so dry-run can't
+  // promise a plan a real run won't execute.
+  const state: DubState = dryRun
+    ? await readStateForDryRun(cwd)
+    : await ensureState(cwd);
   const currentBranch = await getCurrentBranch(cwd);
   const currentStack = findStackForBranch(state, currentBranch);
   const stackTrunk = currentStack

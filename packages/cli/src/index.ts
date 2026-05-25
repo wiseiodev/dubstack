@@ -144,8 +144,28 @@ function emitJsonError(error: DubError): void {
  * envelope.
  */
 function emitDryRunPlan(plan: object): void {
+  // JSON mode should already be active (see `maybeActivateDryRunJsonMode`)
+  // so any pre-emit error has already been envelope-formatted. We still call
+  // it here for safety in case a caller bypassed the early-activation hook.
   activateJsonMode();
   console.log(JSON.stringify(withSchemaVersion(plan), null, 2));
+}
+
+/**
+ * Switch the top-level error handler to JSON-envelope output whenever an
+ * action sees `--dry-run --json`. Called at the head of each mutating
+ * command's action so a `DubError` thrown during validation (before
+ * `emitDryRunPlan` would otherwise fire) still emits the standard
+ * `jsonErrorEnvelope` shape for scripted callers, instead of the human
+ * red-error formatting that breaks JSON parsers.
+ */
+function maybeActivateDryRunJsonMode(options: {
+  dryRun?: boolean;
+  json?: boolean;
+}): void {
+  if (options.dryRun && options.json) {
+    activateJsonMode();
+  }
 }
 
 async function canShowAiPrompt(cwd: string): Promise<boolean> {
@@ -1669,6 +1689,18 @@ See also:
       dryRun?: boolean;
       json?: boolean;
     }) => {
+      if (options.continue && options.dryRun) {
+        // `--continue` resumes an in-flight rebase mid-conflict — there is
+        // no non-mutating preview for it. Refuse the combination instead of
+        // silently ignoring one flag.
+        throw new DubError(
+          "'--continue' cannot be combined with '--dry-run'.",
+          [
+            "Run 'dub restack --continue' to resume the in-flight restack after resolving conflicts.",
+            "Run 'dub restack --dry-run' to preview the planned rebases (no in-flight restack required).",
+          ],
+        );
+      }
       const result = options.continue
         ? await restackContinue(process.cwd())
         : await restack(process.cwd(), { dryRun: options.dryRun });
@@ -4480,12 +4512,16 @@ async function runSplit(options: {
       return;
     }
     if (mode === 'ai') {
-      console.log(chalk.green('✔ Dry-run: AI proposed the following split:'));
-      for (const [i, p] of (result.aiProposal ?? []).entries()) {
-        console.log(chalk.dim(`  ${i + 1}. ${p.branch}`));
-        if (p.summary) console.log(chalk.dim(`     ${p.summary}`));
-        for (const f of p.files) console.log(chalk.dim(`       • ${f}`));
-      }
+      console.log(
+        chalk.green(
+          `✔ Dry-run: would propose an AI split of '${result.sourceBranch}' against '${result.parentBranch}'.`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "  ↳ AI call skipped to avoid billing. Re-run without --dry-run to see the model's proposed slices.",
+        ),
+      );
       return;
     }
     console.log(
@@ -4830,6 +4866,16 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
       commandName: `dub ${(historyArgsForCapture ?? process.argv.slice(2)).join(' ')}`,
     });
   }
+
+  // For `--dry-run --json` we must flip the top-level error handler to JSON
+  // envelopes BEFORE the action runs — otherwise a DubError thrown during
+  // validation (before `emitDryRunPlan` would fire) leaks human-formatted
+  // red text and breaks scripted JSON parsers.
+  const actionOpts = actionCommand.opts();
+  maybeActivateDryRunJsonMode({
+    dryRun: Boolean(actionOpts.dryRun),
+    json: Boolean(actionOpts.json),
+  });
 
   const isRestoreFromRefs =
     actionCommand.name() === 'init' &&

@@ -355,6 +355,30 @@ export async function ensureState(cwd: string): Promise<DubState> {
 }
 
 /**
+ * Read-only state loader for `--dry-run` commands.
+ *
+ * Returns an empty in-memory state when DubStack has never been initialized
+ * in this repo (so `dub track --dry-run` etc. can still produce a plan), but
+ * propagates every other error — corrupted state, missing git repo, IO
+ * failures — so dry-run never lies about what a real run would do. Without
+ * this narrowing, a corrupted `state.json` would silently degrade to an
+ * empty-plan preview and the real run would explode.
+ */
+export async function readStateForDryRun(cwd: string): Promise<DubState> {
+  try {
+    return await readState(cwd);
+  } catch (error) {
+    if (
+      error instanceof DubError &&
+      error.message.includes('not initialized')
+    ) {
+      return { trunks: [], stacks: [] };
+    }
+    throw error;
+  }
+}
+
+/**
  * Finds the stack containing a given branch.
  * @returns The matching stack, or `undefined` if the branch isn't tracked.
  */

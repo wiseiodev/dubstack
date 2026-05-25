@@ -10,7 +10,7 @@ import {
   ensureState,
   findStackForBranch,
   getStackTrunk,
-  readState,
+  readStateForDryRun,
   writeState,
 } from './state';
 
@@ -62,11 +62,11 @@ export async function trackBranch(
   }
   await validateTrackParent(cwd, branch, parent);
 
-  // Dry-run must never create state on disk. Fall back to an empty in-memory
-  // state when `.git/dubstack/state.json` is missing so a fresh repo can still
-  // preview a plan (matches the `create` / `revert` dry-run pattern).
+  // Dry-run must never create state on disk but must surface corruption /
+  // IO errors that a real run would hit. `readStateForDryRun` narrows the
+  // fallback to the "not initialized" case only.
   const state: DubState = dryRun
-    ? await readState(cwd).catch(() => ({ trunks: [], stacks: [] }))
+    ? await readStateForDryRun(cwd)
     : await ensureState(cwd);
   const sourceStack = findStackForBranch(state, branch);
   const destinationStack = findStackForBranch(state, parent);
