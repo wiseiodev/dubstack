@@ -687,9 +687,31 @@ dub stash list
 
 See [`dub stash` docs](https://dubstack.dev/docs/commands/stash) for the full behavior, error matrix, and stash-log schema.
 
+### `dub freeze` / `dub unfreeze`
+
+Records a `frozen` flag on a tracked branch and surfaces it (🔒 in `dub log`, an informational notice in `dub doctor`). `dub unfreeze` clears the flag.
+
+> ⚠ This is the data-model + commands half of the feature. `dub restack` and `dub sync` do **not** yet skip frozen branches — that enforcement is tracked separately as DUB-82 and will land in a follow-up PR.
+
+```bash
+# freeze the current branch
+dub freeze
+
+# freeze a specific branch and its ancestors toward trunk
+dub freeze feat/auth-login --downstack
+
+# freeze a branch and all its descendants
+dub freeze feat/auth-base --upstack
+
+# clear the flag
+dub unfreeze feat/auth-login
+```
+
+`dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice.
+
 ### `dub undo`
 
-Undo the last `dub create`, `dub restack`, or `dub move` operation.
+Undo the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, `dub freeze`, or `dub unfreeze` operation.
 
 ```bash
 dub undo
