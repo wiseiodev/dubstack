@@ -103,6 +103,7 @@ describe('mcp command', () => {
       'dubstack.sync',
       'dubstack.checkout',
       'dubstack.back',
+      'dubstack.revert',
       'dubstack.absorb',
       'dubstack.unlink',
       'dubstack.delete',

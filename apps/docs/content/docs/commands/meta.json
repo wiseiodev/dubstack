@@ -5,6 +5,7 @@
     "repo",
     "create",
     "modify",
+    "squash",
     "pop",
     "checkout",
     "back",
@@ -24,6 +25,7 @@
     "doctor",
     "track",
     "rename",
+    "revert",
     "stash",
     "skills"
   ]

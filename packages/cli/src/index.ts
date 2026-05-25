@@ -55,8 +55,10 @@ import { ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { revert } from './commands/revert';
 import type { SplitMode } from './commands/split';
 import { split } from './commands/split';
+import { squash } from './commands/squash';
 import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
@@ -2019,6 +2021,57 @@ program
   });
 
 program
+  .command('squash')
+  .description(
+    'Collapse every commit on the current branch (since its parent) into one',
+  )
+  .option('-m, --message <message>', 'Use the given message for the new commit')
+  .option(
+    '--ai',
+    'Generate a Conventional Commit summary from the squashed commits',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub squash                          Squash and concatenate original messages
+  $ dub squash -m "feat: rewrite api"   Squash with a custom commit message
+  $ dub squash --ai                     Squash with an AI-generated summary`,
+  )
+  .action(async (options: { message?: string; ai?: boolean }) => {
+    const result = await squash(process.cwd(), {
+      message: options.message,
+      ai: options.ai,
+    });
+
+    if (result.noopReason === 'no-commits') {
+      console.log(
+        chalk.dim(
+          `Nothing to squash — '${result.branch}' has no commits above '${result.parent}'.`,
+        ),
+      );
+      return;
+    }
+    if (result.noopReason === 'single-commit') {
+      console.log(
+        chalk.dim(
+          `Nothing to squash — '${result.branch}' already has a single commit above '${result.parent}'.`,
+        ),
+      );
+      return;
+    }
+
+    console.log(
+      chalk.green(
+        `✔ Squashed ${result.squashedCommits} commit(s) on '${result.branch}' into one.`,
+      ),
+    );
+    if (result.restacked) {
+      console.log(chalk.dim('  ↳ Descendants restacked.'));
+    }
+  });
+
+program
   .command('split')
   .description(
     'Split the current branch into smaller sibling branches (by-commit, by-file, by-hunk, or AI)',
@@ -2164,6 +2217,62 @@ Examples:
         console.log(
           chalk.dim(
             `  ℹ Old remote branch '${result.oldName}' may still exist. Run 'git push origin --delete ${result.oldName}' to clean it up.`,
+          ),
+        );
+      }
+    },
+  );
+
+program
+  .command('revert')
+  .argument('<target>', 'Merged PR number (e.g. 123) or commit SHA to revert')
+  .option('-b, --branch <name>', 'Override the auto-generated branch name')
+  .option('--submit', 'Push the revert branch and open a PR after creating it')
+  .option(
+    '--edit-message',
+    "Open the editor for the revert commit message instead of '--no-edit'",
+  )
+  .description(
+    'Create a branch on trunk that reverts a merged PR or commit and track it',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub revert 123                       Revert merged PR #123 onto trunk
+  $ dub revert abc1234                   Revert commit abc1234 onto trunk
+  $ dub revert 123 --submit              Revert + push + open a PR
+  $ dub revert 123 -b revert/api-rollback  Use a custom branch name`,
+  )
+  .action(
+    async (
+      target: string,
+      options: { branch?: string; submit?: boolean; editMessage?: boolean },
+    ) => {
+      const result = await revert(process.cwd(), target, {
+        branchName: options.branch,
+        submit: options.submit,
+        editMessage: options.editMessage,
+      });
+      const origin =
+        result.prNumber != null
+          ? `PR #${result.prNumber}`
+          : `commit ${result.revertedShortSha}`;
+      console.log(
+        chalk.green(
+          `✔ Created revert branch '${result.branch}' on '${result.trunk}' (reverts ${origin})`,
+        ),
+      );
+      if (result.submitResult) {
+        console.log(
+          chalk.dim(
+            `  ↳ Submitted: pushed ${result.submitResult.pushed.length}, created ${result.submitResult.created.length}, updated ${result.submitResult.updated.length}`,
+          ),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            `  ↳ Run 'dub submit' to push the branch and open a PR, or rerun with '--submit'.`,
           ),
         );
       }
