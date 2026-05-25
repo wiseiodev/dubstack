@@ -448,6 +448,10 @@ dub submit --branch feat/api
 # queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
+
+# re-request existing reviewers after updating PRs
+dub submit --rerequest-review
+dub submit --rerequest-review-only monalisa,hubot
 ```
 
 Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exclusive. Passing more than one is a validation error.
@@ -461,6 +465,8 @@ Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exc
 Notes:
 - `--no-ai` disables AI PR description generation for one invocation.
 - AI submit only writes the PR description body; the PR title still comes from the last commit message.
+- `--rerequest-review` re-requests review on updated PRs only. New PRs are skipped because they have no existing reviewers.
+- `--rerequest-review-only <users>` limits re-requests to a comma-separated reviewer list.
 - `--merge-when-ready` queues GitHub auto-merge on every PR in the submit scope. The default strategy is `squash`; pass `--method merge`, `--method squash`, or `--method rebase` to choose another strategy. DubStack starts with the requested strategy and falls back across repository-allowed methods.
 - Enabling auto-merge on every submitted PR is safer than only enabling it on the bottom PR: GitHub still respects stacked-base ordering, and the queue survives later rebases of the stack.
 - If the repo has a PR template in a supported GitHub template location, DubStack preserves that structure when generating AI PR descriptions.

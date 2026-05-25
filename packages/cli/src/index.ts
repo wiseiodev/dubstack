@@ -1255,6 +1255,15 @@ program
     'Auto-merge strategy: merge|squash|rebase',
     parseMergeMethod,
   )
+  .option(
+    '--rerequest-review',
+    'Re-request review from existing reviewers on updated PRs',
+  )
+  .option(
+    '--rerequest-review-only <users>',
+    'Re-request review only from comma-separated reviewers on updated PRs',
+    parseReviewerList,
+  )
   .addHelpText(
     'after',
     `
@@ -1268,7 +1277,9 @@ Examples:
   $ dub submit --publish    Promote existing draft PRs to ready for review
   $ dub submit --ai         Generate a PR description before updating the PR body
   $ dub submit --merge-when-ready --method squash
-                            Queue GitHub auto-merge for submitted PRs`,
+                            Queue GitHub auto-merge for submitted PRs
+  $ dub submit --rerequest-review
+                            Re-request review on updated PRs`,
   )
   .action(runSubmit);
 
@@ -1304,6 +1315,15 @@ program
     '--method <method>',
     'Auto-merge strategy: merge|squash|rebase',
     parseMergeMethod,
+  )
+  .option(
+    '--rerequest-review',
+    'Re-request review from existing reviewers on updated PRs',
+  )
+  .option(
+    '--rerequest-review-only <users>',
+    'Re-request review only from comma-separated reviewers on updated PRs',
+    parseReviewerList,
   )
   .action(runSubmit);
 
@@ -2735,6 +2755,8 @@ async function runSubmit(options: {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: 'merge' | 'squash' | 'rebase';
+  rerequestReview?: boolean;
+  rerequestReviewOnly?: string[];
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
@@ -2749,6 +2771,8 @@ async function runSubmit(options: {
     fix: options.fix ?? false,
     mergeWhenReady: options.mergeWhenReady,
     method: options.method,
+    rerequestReview: options.rerequestReview,
+    rerequestReviewOnly: options.rerequestReviewOnly,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
@@ -2792,6 +2816,23 @@ async function runSubmit(options: {
           `  ↳ Auto-merge already queued for ${result.autoMergeSkipped.length} PR(s)`,
         ),
       );
+    }
+    const reviewRerequests = result.reviewRerequests.filter(
+      (entry) => entry.reviewers.length > 0,
+    );
+    if (reviewRerequests.length > 0) {
+      console.log(
+        chalk.green(
+          `✔ Re-requested review on ${reviewRerequests.length} PR(s)`,
+        ),
+      );
+      for (const entry of reviewRerequests) {
+        console.log(
+          chalk.dim(
+            `  ↳ ${entry.branch} (#${entry.prNumber}): ${entry.reviewers.join(', ')}`,
+          ),
+        );
+      }
     }
     return;
   }
@@ -3152,6 +3193,19 @@ function parseMergeMethod(value: string): 'merge' | 'squash' | 'rebase' {
   throw new DubError('Merge method must be one of: merge, squash, rebase.', [
     "Pass one of: '--method merge', '--method squash', or '--method rebase'.",
   ]);
+}
+
+function parseReviewerList(value: string): string[] {
+  const reviewers = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (reviewers.length === 0) {
+    throw new DubError('Reviewer list cannot be empty.', [
+      "Pass a comma-separated list, for example '--rerequest-review-only monalisa,hubot'.",
+    ]);
+  }
+  return reviewers;
 }
 
 interface HistoryCaptureState {

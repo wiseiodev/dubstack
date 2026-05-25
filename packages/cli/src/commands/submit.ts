@@ -26,10 +26,12 @@ import {
   enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  getPrReviewers,
   isPrAutoMergeEnabled,
   type MergeMethod,
   markPrReady,
   type PrInfo,
+  rerequestPrReviewers,
   updatePrBody,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
@@ -75,6 +77,8 @@ export interface SubmitOptions {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: MergeMethod;
+  rerequestReview?: boolean;
+  rerequestReviewOnly?: string[];
   summaryOverrides?: Map<string, string>;
 }
 
@@ -94,6 +98,11 @@ export interface SubmitResult {
   published: string[];
   autoMergeEnabled: string[];
   autoMergeSkipped: string[];
+  reviewRerequests: Array<{
+    branch: string;
+    prNumber: number;
+    reviewers: string[];
+  }>;
   scope: SubmitScope;
   dryRun: boolean;
 }
@@ -191,6 +200,7 @@ export async function submit(
     published: [],
     autoMergeEnabled: [],
     autoMergeSkipped: [],
+    reviewRerequests: [],
     scope: plan.scope,
     dryRun,
   };
@@ -308,6 +318,16 @@ export async function submit(
 
       if (lifecycle === 'publish') {
         await publishDraftPrs(plan.branches, prMap, cwd, result);
+      }
+
+      if (options.rerequestReview || options.rerequestReviewOnly != null) {
+        await rerequestUpdatedPrReviews(
+          plan.branches,
+          prMap,
+          cwd,
+          options,
+          result,
+        );
       }
 
       for (const branch of plan.branches) {
@@ -441,6 +461,53 @@ async function publishDraftPrs(
     await markPrReady(pr.number, cwd);
     result.published.push(branch.name);
   }
+}
+
+async function rerequestUpdatedPrReviews(
+  branches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+  options: Pick<SubmitOptions, 'rerequestReviewOnly'>,
+  result: SubmitResult,
+): Promise<void> {
+  const updatedBranches = new Set(result.updated);
+  const only = options.rerequestReviewOnly
+    ? new Set(options.rerequestReviewOnly)
+    : null;
+
+  for (const branch of branches) {
+    if (!updatedBranches.has(branch.name)) continue;
+    const pr = prMap.get(branch.name);
+    if (!pr) continue;
+
+    const reviewers = await getPrReviewers(pr.number, cwd);
+    const requested = filterReviewers(reviewers.requested, only);
+    const reviewed = filterReviewers(reviewers.reviewed, only);
+    const rerequested = await rerequestPrReviewers(
+      pr.number,
+      { requested, reviewed },
+      cwd,
+    );
+
+    result.reviewRerequests.push({
+      branch: branch.name,
+      prNumber: pr.number,
+      reviewers: rerequested,
+    });
+    console.log(
+      rerequested.length > 0
+        ? `Re-requested review for PR #${pr.number} (${branch.name}): ${rerequested.join(', ')}`
+        : `No reviewers to re-request for PR #${pr.number} (${branch.name}).`,
+    );
+  }
+}
+
+function filterReviewers(
+  reviewers: Array<{ login: string }>,
+  only: Set<string> | null,
+): Array<{ login: string }> {
+  if (!only) return reviewers;
+  return reviewers.filter((reviewer) => only.has(reviewer.login));
 }
 
 export async function getSubmitPlan(
