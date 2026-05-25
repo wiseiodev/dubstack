@@ -11,7 +11,7 @@ This guide gets you from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# 1) guided setup for Gemini, Anthropic, AI Gateway, or Amazon Bedrock
+# 1) guided setup for Gemini, Anthropic, AI Gateway, Amazon Bedrock, or OpenAI
 dub ai setup
 
 # 2) reload your shell using the command DubStack prints
@@ -28,6 +28,8 @@ dub config ai-provider anthropic
 dub config ai-provider gateway
 # or:
 dub config ai-provider bedrock
+# or:
+dub config ai-provider openai
 
 # 5) optional: enable AI defaults
 dub config ai-defaults create on
@@ -369,6 +371,7 @@ dub undo
 | `dub track` | Track/re-parent branch metadata |
 | `dub untrack` | Remove branch metadata only |
 | `dub delete` | Stack-aware branch deletion |
+| `dub freeze` / `dub unfreeze` | Set/clear the `frozen` flag (data-model only; restack/sync don't yet skip — DUB-82) |
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
 | `dub stash` / `dub stash pop` / `dub stash list` | Branch-aware stash (refuses pop on wrong branch) |

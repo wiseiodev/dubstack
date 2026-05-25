@@ -61,6 +61,7 @@ If you have `gt` muscle memory, use this as a fast map:
 | `gt submit` / `gt ss` | `dub submit` / `dub ss` |
 | `gt sync` | `dub sync` |
 | `gt checkout` / `gt co` | `dub checkout` / `dub co` |
+| `git checkout -` | `dub back` |
 | `gt log` / `gt ls` | `dub log` / `dub ls` |
 | `gt up` / `gt down` | `dub up` / `dub down` |
 | `gt top` / `gt bottom` | `dub top` / `dub bottom` |
@@ -320,6 +321,25 @@ dub trunk feat/auth-tests
 ```
 
 If branch metadata is missing, these commands print a remediation path using `dub track`.
+
+### `dub back`
+
+Return to a previously checked-out branch from DubStack checkout history.
+
+```bash
+# return to the previous branch
+dub back
+
+# go two available branch visits back
+dub back 2
+
+# inspect recent checkout history without switching
+dub back --list
+```
+
+Deleted local branches are skipped with a warning, and consumed history entries
+are removed so repeated `dub back` calls continue farther back instead of
+bouncing between the same two branches.
 
 ### `dub track [branch] [--parent <branch>]`
 
@@ -667,9 +687,31 @@ dub stash list
 
 See [`dub stash` docs](https://dubstack.dev/docs/commands/stash) for the full behavior, error matrix, and stash-log schema.
 
+### `dub freeze` / `dub unfreeze`
+
+Records a `frozen` flag on a tracked branch and surfaces it (🔒 in `dub log`, an informational notice in `dub doctor`). `dub unfreeze` clears the flag.
+
+> ⚠ This is the data-model + commands half of the feature. `dub restack` and `dub sync` do **not** yet skip frozen branches — that enforcement is tracked separately as DUB-82 and will land in a follow-up PR.
+
+```bash
+# freeze the current branch
+dub freeze
+
+# freeze a specific branch and its ancestors toward trunk
+dub freeze feat/auth-login --downstack
+
+# freeze a branch and all its descendants
+dub freeze feat/auth-base --upstack
+
+# clear the flag
+dub unfreeze feat/auth-login
+```
+
+`dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice.
+
 ### `dub undo`
 
-Undo the last `dub create`, `dub restack`, or `dub move` operation.
+Undo the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, `dub freeze`, or `dub unfreeze` operation.
 
 ```bash
 dub undo
@@ -723,7 +765,7 @@ dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
 
-### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock]`
+### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock|openai]`
 
 Manage the repo-local AI provider selection.
 
@@ -737,8 +779,41 @@ dub config ai-provider bedrock
 # pin this repository to Anthropic
 dub config ai-provider anthropic
 
+# pin this repository to OpenAI
+dub config ai-provider openai
+
 # return to backward-compatible auto selection
 dub config ai-provider auto
+```
+
+### `dub config ai-prompts [auto|on|off]`
+
+Manage AI choices inside interactive sync/restack/post-merge prompts.
+
+```bash
+# inspect current prompt mode
+dub config ai-prompts
+
+# show AI choices whenever the repo AI assistant is enabled
+dub config ai-prompts auto
+
+# hide AI choices in interactive prompts
+dub config ai-prompts off
+```
+
+### `dub config ai-prompts-auto-accept [off|high]`
+
+Manage whether prompt recommendations can skip the confirmation prompt.
+
+```bash
+# inspect current auto-accept behavior
+dub config ai-prompts-auto-accept
+
+# apply high-confidence prompt recommendations immediately
+dub config ai-prompts-auto-accept high
+
+# always confirm recommendations before applying
+dub config ai-prompts-auto-accept off
 ```
 
 ### `dub config ai-model [model] --provider <provider>`
@@ -746,17 +821,17 @@ dub config ai-provider auto
 Manage repo-local model overrides by provider.
 
 ```bash
-# inspect current Bedrock override
-dub config ai-model --provider bedrock
+# inspect current OpenAI override
+dub config ai-model --provider openai
 
 # set a repo-local override
-dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
+dub config ai-model "gpt-5.5" --provider openai
 
 # set a repo-local Anthropic override
 dub config ai-model "claude-sonnet-4-20250514" --provider anthropic
 
 # clear the repo-local override
-dub config ai-model --provider bedrock --clear
+dub config ai-model --provider openai --clear
 ```
 
 ### `dub ai ask <prompt...>`
@@ -774,13 +849,14 @@ To inspect your repository, `dub ai ask` can invoke a constrained shell tool lim
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
 
 Provider/model selection:
-- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `anthropic`, `gateway`, or `bedrock`.
+- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `anthropic`, `gateway`, `bedrock`, or `openai`.
 - Repo-local model overrides from `dub config ai-model ...` win for that provider when present.
-- In `auto` mode, DubStack uses Gemini, then Anthropic, then AI Gateway, then Bedrock.
+- In `auto` mode, DubStack uses Gemini, then Anthropic, then AI Gateway, then Bedrock, then OpenAI.
 - Gemini uses `DUBSTACK_GEMINI_API_KEY` with optional `DUBSTACK_GEMINI_MODEL` override.
 - Anthropic uses `DUBSTACK_ANTHROPIC_API_KEY` with optional `DUBSTACK_ANTHROPIC_MODEL` override.
 - AI Gateway uses `DUBSTACK_AI_GATEWAY_API_KEY` with optional `DUBSTACK_AI_GATEWAY_MODEL` override.
 - Bedrock uses `DUBSTACK_BEDROCK_AWS_REGION`, `DUBSTACK_BEDROCK_MODEL`, and optional `DUBSTACK_BEDROCK_AWS_PROFILE`.
+- OpenAI uses `DUBSTACK_OPENAI_API_KEY` with optional `DUBSTACK_OPENAI_MODEL` override.
 - Bedrock support uses AWS credential-chain auth only. DubStack does not manage AWS secret key environment variables.
 
 Thinking is enabled by default for Gemini 3 Flash.
@@ -811,7 +887,7 @@ It mixes deterministic contract checks with an AI judge scorer so prompt changes
 
 ### `dub ai setup`
 
-Run the guided setup flow for Gemini, Anthropic, AI Gateway, or Amazon Bedrock.
+Run the guided setup flow for Gemini, Anthropic, AI Gateway, Amazon Bedrock, or OpenAI.
 
 ```bash
 dub ai setup
@@ -839,6 +915,9 @@ dub ai env --gateway-key "<your-key>"
 # write Anthropic key
 dub ai env --anthropic-key "<your-key>"
 
+# write OpenAI key
+dub ai env --openai-key "<your-key>"
+
 # write Gemini model override
 dub ai env --gemini-model "gemini-2.5-pro-preview"
 
@@ -848,14 +927,17 @@ dub ai env --anthropic-model "claude-sonnet-4-20250514"
 # write Gateway model override
 dub ai env --gateway-model "google/gemini-2.5-pro"
 
+# write OpenAI model override
+dub ai env --openai-model "gpt-5.5"
+
 # write Bedrock profile + region + model
 dub ai env \
   --bedrock-profile "bw-sso" \
   --bedrock-region "us-west-2" \
   --bedrock-model "us.anthropic.claude-sonnet-4-6"
 
-# write both
-dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>"
+# write multiple keys
+dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>" --openai-key "<openai-key>"
 
 # write key + model together
 dub ai env --gemini-key "<gemini-key>" --gemini-model "gemini-3-flash-preview"

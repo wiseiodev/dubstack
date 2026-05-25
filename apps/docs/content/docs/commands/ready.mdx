@@ -1,0 +1,58 @@
+---
+title: Ready
+description: Run pre-submit health, submit, and AI review-readiness checks.
+---
+
+## dub ready
+
+Run the local pre-submit checklist:
+
+```bash
+# Default: current branch + ancestors (downstack)
+dub ready
+
+# Just the current branch
+dub ready --scope current
+
+# Every branch in the stack (siblings included)
+dub ready --scope stack
+```
+
+`dub ready` combines `dub doctor` with the submit preflight so you can check
+whether the selected branch scope is ready before running `dub submit`.
+
+## AI Review-Readiness
+
+Add `--ai` to run a pre-submit AI judge over every branch selected by the same
+`--scope` flag:
+
+```bash
+dub ready --ai
+dub ready --ai --scope stack
+```
+
+The AI review looks at each branch's diff versus its parent, commit messages,
+and open PR description when one exists. It checks for conventional commit
+quality, placeholder PR descriptions, heuristic test coverage gaps, and obvious
+style or accessibility smells.
+
+The CLI prints the top three findings per branch. Use `--verbose` to show the
+full issue list:
+
+```bash
+dub ready --ai --verbose
+```
+
+Critical findings block readiness with a non-zero exit code. Major and minor
+findings are warnings. If you disagree with the judge and need to continue, use
+`--ai-skip-review`:
+
+```bash
+dub ready --ai --ai-skip-review
+```
+
+For automation, use JSON output:
+
+```bash
+dub ready --ai --json
+```

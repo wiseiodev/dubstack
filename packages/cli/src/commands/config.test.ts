@@ -5,6 +5,8 @@ import {
   configAiAssistant,
   configAiDefaults,
   configAiModel,
+  configAiPrompts,
+  configAiPromptsAutoAccept,
   configAiProvider,
   configMcpMode,
 } from './config';
@@ -89,6 +91,50 @@ describe('config ai-defaults', () => {
   });
 });
 
+describe('config ai-prompts', () => {
+  it('returns current prompt mode when mode is omitted', async () => {
+    const result = await configAiPrompts(dir);
+
+    expect(result).toEqual({ mode: 'auto', changed: false });
+  });
+
+  it('writes prompt mode when set', async () => {
+    const result = await configAiPrompts(dir, 'on');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'on', changed: true });
+    expect(config.ai.prompts.mode).toBe('on');
+  });
+
+  it('throws for invalid prompt mode values', async () => {
+    await expect(configAiPrompts(dir, 'maybe')).rejects.toThrow(
+      "AI prompts must be one of 'auto', 'on', or 'off'.",
+    );
+  });
+});
+
+describe('config ai-prompts-auto-accept', () => {
+  it('returns current auto-accept level when level is omitted', async () => {
+    const result = await configAiPromptsAutoAccept(dir);
+
+    expect(result).toEqual({ autoAccept: 'off', changed: false });
+  });
+
+  it('writes high auto-accept level when set', async () => {
+    const result = await configAiPromptsAutoAccept(dir, 'high');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ autoAccept: 'high', changed: true });
+    expect(config.ai.prompts.autoAccept).toBe('high');
+  });
+
+  it('throws for invalid auto-accept values', async () => {
+    await expect(configAiPromptsAutoAccept(dir, 'medium')).rejects.toThrow(
+      "AI prompt auto-accept must be either 'off' or 'high'.",
+    );
+  });
+});
+
 describe('config ai-provider', () => {
   it('returns current provider when selection is omitted', async () => {
     const result = await configAiProvider(dir);
@@ -104,9 +150,17 @@ describe('config ai-provider', () => {
     expect(config.ai.provider.selected).toBe('anthropic');
   });
 
+  it('writes OpenAI as a selected provider', async () => {
+    const result = await configAiProvider(dir, 'openai');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ provider: 'openai', changed: true });
+    expect(config.ai.provider.selected).toBe('openai');
+  });
+
   it('throws for invalid provider names', async () => {
     await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
-      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', or 'bedrock'.",
+      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
     );
   });
 });
@@ -133,6 +187,17 @@ describe('config ai-model', () => {
     expect(config.ai.provider.models.anthropic).toBe(
       'claude-sonnet-4-20250514',
     );
+  });
+
+  it('writes an OpenAI model override', async () => {
+    const result = await configAiModel(dir, 'openai', 'gpt-5.5');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      model: 'gpt-5.5',
+      changed: true,
+    });
+    expect(config.ai.provider.models.openai).toBe('gpt-5.5');
   });
 
   it('clears a provider-specific model override', async () => {

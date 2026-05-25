@@ -261,6 +261,7 @@ describe('askAi', () => {
               anthropic: null,
               gateway: null,
               bedrock: 'repo-bedrock-model',
+              openai: null,
             },
           },
         },

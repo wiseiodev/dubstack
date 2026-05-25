@@ -33,14 +33,16 @@ jobs:
       - name: Test affected
         run: pnpm turbo run test:coverage --affected
 
-      - name: AI evals (Anthropic)
+      - name: AI evals
         env:
           DUBSTACK_ANTHROPIC_API_KEY: ${{ secrets.DUBSTACK_ANTHROPIC_API_KEY }}
           DUBSTACK_ANTHROPIC_MODEL: claude-sonnet-4-20250514
+          DUBSTACK_OPENAI_API_KEY: ${{ secrets.DUBSTACK_OPENAI_API_KEY }}
+          DUBSTACK_OPENAI_MODEL: ${{ vars.DUBSTACK_OPENAI_MODEL || 'gpt-5.5' }}
         shell: bash
         run: |
-          if [ -z "$DUBSTACK_ANTHROPIC_API_KEY" ]; then
-            echo "Skipping Anthropic evals because DUBSTACK_ANTHROPIC_API_KEY is not configured."
+          if [ -z "$DUBSTACK_ANTHROPIC_API_KEY" ] && [ -z "$DUBSTACK_OPENAI_API_KEY" ]; then
+            echo "::notice::Skipping AI evals because no Anthropic or OpenAI eval key is configured."
             exit 0
           fi
           pnpm evals

@@ -33,6 +33,7 @@ interface AiSetupDeps {
   inputGeminiKey: () => Promise<string | undefined>;
   inputAnthropicKey: () => Promise<string | undefined>;
   inputGatewayKey: () => Promise<string | undefined>;
+  inputOpenAiKey: () => Promise<string | undefined>;
   inputBedrockProfile: () => Promise<string | undefined>;
   inputBedrockRegion: () => Promise<string | undefined>;
   configureAiEnv: (
@@ -51,6 +52,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
         { name: 'Anthropic Claude', value: 'anthropic' },
         { name: 'AI Gateway', value: 'gateway' },
         { name: 'Amazon Bedrock', value: 'bedrock' },
+        { name: 'OpenAI', value: 'openai' },
       ],
     }),
   selectModel: async (provider) =>
@@ -86,6 +88,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
     optionalSecret('Enter DUBSTACK_ANTHROPIC_API_KEY'),
   inputGatewayKey: async () =>
     optionalSecret('Enter DUBSTACK_AI_GATEWAY_API_KEY'),
+  inputOpenAiKey: async () => optionalSecret('Enter DUBSTACK_OPENAI_API_KEY'),
   inputBedrockProfile: async () =>
     optionalText('Enter DUBSTACK_BEDROCK_AWS_PROFILE'),
   inputBedrockRegion: async () =>
@@ -175,6 +178,14 @@ async function buildEnvOptions(
     };
   }
 
+  if (provider === 'openai') {
+    const openaiKey = await deps.inputOpenAiKey();
+    return {
+      openaiKey,
+      openaiModel: modelScope === 'global' ? model : undefined,
+    };
+  }
+
   return {
     bedrockProfile: await deps.inputBedrockProfile(),
     bedrockRegion: await deps.inputBedrockRegion(),
@@ -229,6 +240,14 @@ function getModelChoices(provider: AiModelProvider): Array<{
         label: 'Claude Opus 4',
         value: 'claude-opus-4-20250514',
       },
+      { label: 'Custom model', value: CUSTOM_MODEL },
+    ];
+  }
+
+  if (provider === 'openai') {
+    return [
+      { label: 'GPT-5.5', value: 'gpt-5.5' },
+      { label: 'GPT-5.4 Mini', value: 'gpt-5.4-mini' },
       { label: 'Custom model', value: CUSTOM_MODEL },
     ];
   }

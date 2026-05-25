@@ -1,3 +1,9 @@
+import select from '@inquirer/select';
+import {
+  type AiPromptChoice,
+  isAiPromptOptionEnabled,
+  resolveAiPromptDecision,
+} from '../lib/ai-prompt-decision';
 import { appendCheckoutHistory } from '../lib/checkout-history';
 import {
   appendCleanupOperation,
@@ -5,6 +11,7 @@ import {
   startCleanupJournal,
 } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
+import { execa } from '../lib/exec';
 import {
   checkoutBranch,
   fastForwardBranchToRef,
@@ -18,6 +25,7 @@ import {
   checkGhAuth,
   ensureGhInstalled,
   getBranchPrLifecycleState,
+  getBranchPrSyncInfo,
 } from '../lib/github';
 import {
   findStackForBranch,
@@ -49,6 +57,7 @@ export async function postMerge(
   options: {
     all?: boolean;
     dryRun?: boolean;
+    interactive?: boolean;
     restack?: boolean;
     submit?: boolean;
   } = {},
@@ -57,6 +66,8 @@ export async function postMerge(
   await checkGhAuth();
 
   const dryRun = options.dryRun ?? false;
+  const interactive =
+    options.interactive ?? Boolean(process.stdout.isTTY && process.stdin.isTTY);
   const shouldRestack = options.restack ?? true;
   const shouldSubmit = options.submit ?? true;
 
@@ -198,11 +209,13 @@ export async function postMerge(
   }
 
   if (!dryRun) {
-    preferredBranch = resolvePreferredBranch(
+    preferredBranch = await resolvePostMergePreferredBranch({
+      cwd,
       workingStacks,
       originalBranch,
       scopeStacks,
-    );
+      interactive,
+    });
     if (preferredBranch) {
       // History is recorded once at the final landing after submit-refresh
       // (see the trailing `if (!dryRun && preferredBranch)` block) so we
@@ -236,6 +249,126 @@ export async function postMerge(
   result.skipped.sort();
   result.retargeted.sort();
   return result;
+}
+
+async function resolvePostMergePreferredBranch(input: {
+  cwd: string;
+  workingStacks: Stack[];
+  originalBranch: string;
+  scopeStacks: Stack[];
+  interactive: boolean;
+}): Promise<string | null> {
+  const fallback = () =>
+    resolvePreferredBranch(
+      input.workingStacks,
+      input.originalBranch,
+      input.scopeStacks,
+    );
+  const candidates = preferredBranchCandidates(
+    input.workingStacks,
+    input.originalBranch,
+    input.scopeStacks,
+  );
+  if (candidates.length <= 1 || !input.interactive) return fallback();
+
+  let showAiOption = false;
+  try {
+    showAiOption = await isAiPromptOptionEnabled(input.cwd);
+  } catch {
+    showAiOption = false;
+  }
+  if (!showAiOption) return fallback();
+
+  const manualPrompt = () =>
+    select<string>({
+      message: 'Which branch should post-merge leave checked out?',
+      choices: candidates.map((candidate) => ({
+        name: candidate,
+        value: candidate,
+      })),
+    });
+
+  const firstChoice = await select<string>({
+    message: 'Which branch should post-merge leave checked out?',
+    choices: [
+      ...candidates.map((candidate) => ({
+        name: candidate,
+        value: candidate,
+      })),
+      {
+        name: 'Let AI pick (shows reasoning before applying)',
+        value: '__ai__',
+      },
+    ],
+  });
+  if (firstChoice !== '__ai__') return firstChoice;
+
+  const choices: Array<AiPromptChoice<string>> = candidates.map(
+    (candidate) => ({
+      label: candidate,
+      value: candidate,
+    }),
+  );
+
+  return resolveAiPromptDecision<string>({
+    cwd: input.cwd,
+    scenario: 'post-merge preferred checkout branch',
+    subject: input.originalBranch,
+    choices,
+    context: await buildPostMergePreferredBranchContext(input.cwd, candidates),
+    fallbackPrompt: manualPrompt,
+  });
+}
+
+function preferredBranchCandidates(
+  workingStacks: Stack[],
+  originalBranch: string,
+  scopeStacks: Stack[],
+): string[] {
+  const originalEntry = workingStacks
+    .flatMap((stack) => stack.branches)
+    .find((branch) => branch.name === originalBranch);
+  if (originalEntry && originalEntry.type !== 'root') return [originalBranch];
+
+  const scopedIds = new Set(scopeStacks.map((stack) => stack.id));
+  const preferredStack =
+    workingStacks.find((stack) => scopedIds.has(stack.id)) ?? workingStacks[0];
+  if (!preferredStack) return [];
+
+  return preferredStack.branches
+    .filter((branch) => branch.type !== 'root')
+    .map((branch) => branch.name);
+}
+
+async function buildPostMergePreferredBranchContext(
+  cwd: string,
+  candidates: string[],
+): Promise<string> {
+  const sections: string[] = [];
+  for (const candidate of candidates) {
+    const prInfo = await getBranchPrSyncInfo(candidate, cwd).catch(() => ({
+      state: 'NONE' as const,
+      baseRefName: null,
+    }));
+    sections.push(
+      `Branch: ${candidate}`,
+      `Open PR: ${prInfo.state === 'OPEN' ? 'yes' : 'no'}`,
+      `PR base: ${prInfo.baseRefName ?? '(none)'}`,
+      'Recent commits:',
+      await safeGitOutput(cwd, ['log', '--oneline', '-3', candidate]),
+      '',
+    );
+  }
+  return sections.join('\n');
+}
+
+async function safeGitOutput(cwd: string, args: string[]): Promise<string> {
+  try {
+    const { stdout } = await execa('git', args, { cwd });
+    return stdout.trim() || '(none)';
+  } catch {
+    return '(unavailable)';
+  }
 }
 
 async function getMergedBottomBranches(

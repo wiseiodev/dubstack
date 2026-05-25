@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildReconcilePromptChoices,
   reconcilePromptHeader,
   reconcilePromptMessage,
 } from './reconcile-prompt';
@@ -19,5 +20,19 @@ describe('reconcile prompt wording (DUB-15 verbatim)', () => {
     expect(reconcilePromptMessage('feat/auth-ui')).toBe(
       'How would you like to handle feat/auth-ui?',
     );
+  });
+
+  it('hides the AI choice by default', () => {
+    expect(
+      buildReconcilePromptChoices({}).map((choice) => choice.value),
+    ).toEqual(['rebase-onto-remote', 'take-remote', 'abort']);
+  });
+
+  it('can include the AI choice when enabled', () => {
+    expect(
+      buildReconcilePromptChoices({ showAiOption: true }).map(
+        (choice) => choice.value,
+      ),
+    ).toEqual(['rebase-onto-remote', 'take-remote', 'abort', 'ai']);
   });
 });

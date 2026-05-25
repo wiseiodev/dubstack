@@ -26,6 +26,8 @@ export type DoctorIssueCode =
   | 'remote-drift'
   | 'remote-check-failed';
 
+export type DoctorNoticeCode = 'frozen-branches';
+
 export interface DoctorIssue {
   code: DoctorIssueCode;
   summary: string;
@@ -33,10 +35,18 @@ export interface DoctorIssue {
   fixes: string[];
 }
 
+export interface DoctorNotice {
+  code: DoctorNoticeCode;
+  summary: string;
+  details: string;
+  branches: string[];
+}
+
 export interface DoctorResult {
   healthy: boolean;
   checkedBranch: string;
   issues: DoctorIssue[];
+  notices: DoctorNotice[];
 }
 
 export async function doctor(
@@ -47,6 +57,7 @@ export async function doctor(
     healthy: true,
     checkedBranch: await getCurrentBranch(cwd),
     issues: [],
+    notices: [],
   };
   const state = await readState(cwd);
   const scopedStacks = resolveScopedStacks(state.stacks, result.checkedBranch, {
@@ -100,6 +111,19 @@ export async function doctor(
     if (branch.type === 'root') continue;
     await appendBranchHealthIssues(branch, cwd, result.issues, {
       skipGithub: options.skipGithub ?? false,
+    });
+  }
+
+  const frozenBranches = allBranches
+    .filter((branch) => branch.type !== 'root' && branch.frozen === true)
+    .map((branch) => branch.name);
+  if (frozenBranches.length > 0) {
+    result.notices.push({
+      code: 'frozen-branches',
+      summary: `${frozenBranches.length} branch(es) are marked frozen.`,
+      details:
+        "Frozen branches are intentionally pinned and surfaced here so a stale flag doesn't go unnoticed. Run 'dub unfreeze <branch>' to clear the flag.",
+      branches: frozenBranches,
     });
   }
 

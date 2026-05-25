@@ -431,6 +431,7 @@ function makeFakeAiDeps(input: {
             anthropic: null,
             gateway: null,
             bedrock: null,
+            openai: null,
           },
         },
         shortcutFallback: {

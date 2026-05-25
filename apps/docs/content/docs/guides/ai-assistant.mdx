@@ -25,6 +25,8 @@ dub config ai-provider anthropic
 dub config ai-provider gateway
 # or:
 dub config ai-provider bedrock
+# or:
+dub config ai-provider openai
 ```
 
 Optional repo-local AI defaults:
@@ -64,6 +66,12 @@ dub config ai-defaults flow on
 
 Bedrock support in DubStack is intentionally secure-auth only. DubStack does not introduce its own secret-key environment variable flow for AWS credentials.
 
+### OpenAI
+
+- Auth: `DUBSTACK_OPENAI_API_KEY`
+- Optional global model default: `DUBSTACK_OPENAI_MODEL`
+- Good fit when your team wants direct GPT/o-series access from DubStack
+
 ## Provider Selection and Precedence
 
 DubStack resolves AI providers in this order:
@@ -71,7 +79,7 @@ DubStack resolves AI providers in this order:
 1. Repo-local provider selection from `dub config ai-provider ...`
 2. Repo-local provider-specific model override from `dub config ai-model ...`
 3. Global provider defaults from shell profile exports
-4. Auto fallback order: Gemini, then Anthropic, then AI Gateway, then Bedrock
+4. Auto fallback order: Gemini, then Anthropic, then AI Gateway, then Bedrock, then OpenAI
 
 Examples:
 
@@ -91,8 +99,11 @@ dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
 # Set a repo-local Anthropic model override
 dub config ai-model "claude-opus-4-20250514" --provider anthropic
 
+# Set a repo-local OpenAI model override
+dub config ai-model "gpt-5.5" --provider openai
+
 # Clear the repo-local override and fall back to env defaults
-dub config ai-model --provider bedrock --clear
+dub config ai-model --provider openai --clear
 ```
 
 ## `dub ai setup`
@@ -125,6 +136,10 @@ dub ai env --gateway-model "google/gemini-3-flash"
 # Anthropic
 dub ai env --anthropic-key "<your-key>"
 dub ai env --anthropic-model "claude-sonnet-4-20250514"
+
+# OpenAI
+dub ai env --openai-key "<your-key>"
+dub ai env --openai-model "gpt-5.5"
 
 # Bedrock
 dub ai env \

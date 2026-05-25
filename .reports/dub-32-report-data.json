@@ -1,0 +1,267 @@
+{
+  "meta": {
+    "workId": "DUB-32",
+    "title": "dub squash — collapse a branch into a single commit",
+    "artifactId": "dub-32",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-32-dub-squash-collapse-a-branch-into-a-single-commit",
+    "baseBranch": "main",
+    "author": "Daniel Wise",
+    "contextLabel": "Linear",
+    "contextId": "DUB-32",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 7,
+    "additions": 730,
+    "deletions": 0,
+    "diffStat": ".reports/dub-32-qa.md (+62)\napps/docs/content/docs/commands/meta.json (+1)\napps/docs/content/docs/commands/squash.mdx (+54)\npackages/cli/src/commands/squash.test.ts (+243)\npackages/cli/src/commands/squash.ts (+239)\npackages/cli/src/index.ts (+52)\npackages/cli/src/lib/git.ts (+79)"
+  },
+  "prompt": "Implement `dub squash` (Tier 3 power command): collapse all commits on the current branch since its tracked parent into one commit, with optional `-m` override and `--ai` summary, and auto-restack descendants. Matches the `gt squash` ergonomic from Graphite.",
+  "tldr": "New `dub squash` command. Soft-resets the branch to its tracked parent, commits with either `-m <msg>`, an AI-generated Conventional Commit summary (`--ai`), or the original commit messages concatenated most-recent-first. Auto-restacks descendants via the same path `dub modify` uses. No-ops for 0/1 commits.",
+  "why": {
+    "motivation": [
+      "Tier 3 parity with `gt squash` — stacked workflows accumulate small commits per iteration; squashing before submitting keeps the eventual PR/landing history clean.",
+      "Without a first-class `dub squash`, users either run a manual `git reset --soft` (no descendant restack, no protective dirty-tree check) or rebase interactively (slow and conflict-prone for trivial squashes).",
+      "Re-uses the `dub modify` auto-restack pattern, so the conflict-recovery surface (`dub restack --continue`, `dub abort`) is already documented and tested."
+    ],
+    "before": [
+      "No way to collapse a branch's commits without dropping to raw git and handling parent boundary, dirty-tree refusal, and descendant restack by hand.",
+      "Multi-commit branches submitted as-is produced noisy PRs and noisy `main` history after squash-merge.",
+      "AI-assisted commit-message generation existed for `dub create --ai` and `dub flow --ai` but not for the squash flow."
+    ],
+    "after": [
+      "`dub squash` collapses N commits → 1 commit using the original messages concatenated (most recent first) by default.",
+      "`-m \"<msg>\"` overrides the auto-generated body. `--ai` generates a Conventional Commit summary via the configured AI provider (Gemini / Gateway / Bedrock).",
+      "0/1-commit branches no-op with an informational line — no destructive surprise.",
+      "Descendants restack automatically; the success line only appears when commits were actually rebased."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/commands/squash.ts",
+      "changeType": "new",
+      "additions": 239,
+      "deletions": 0,
+      "explanation": "Command implementation. Validates option combos (`--ai` vs `-m`), refuses on dirty tree or untracked branch, counts commits via `countCommitsAhead`, builds the squash message from one of three sources, soft-resets to the parent tip, commits via `commitStaged` (single-line) or `commitStagedFromFile` (multi-line), then runs `restack` and reports whether any descendant was actually rebased.",
+      "snippet": "const commitCount = await countCommitsAhead(branch, parent, cwd);\nif (commitCount <= 1) {\n  return {\n    branch,\n    parent,\n    squashedCommits: 0,\n    restacked: false,\n    noopReason: commitCount === 0 ? 'no-commits' : 'single-commit',\n  };\n}\n\nconst originalMessages = await getCommitMessagesBetween(parent, branch, cwd);\n\nlet message: string;\nif (options.message?.trim()) {\n  message = options.message.trim();\n} else if (options.ai) {\n  // ... AI generation\n} else {\n  message = originalMessages.join('\\n\\n');\n}\n\nconst parentTip = await getBranchTip(parent, cwd);\nawait softResetTo(parentTip, cwd);",
+      "snippetLanguage": "typescript",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/squash.test.ts",
+      "changeType": "new",
+      "additions": 243,
+      "deletions": 0,
+      "explanation": "11 vitest tests covering: 3→1 squash + descendant restack, 1-commit no-op, 0-commit no-op, `-m` override, dirty-tree refusal, untracked-branch refusal, `--ai`+`-m` mutex, `--ai` with assistant disabled, happy `--ai` path with mocked deps, empty AI response failure, leaf-branch `restacked=false`.",
+      "snippet": "it('reports restacked=false for a leaf branch with no descendants', async () => {\n  await create('feat/a', dir);\n  await writeAndCommit(dir, 'a.txt', '1', 'feat: c1');\n  await writeAndCommit(dir, 'b.txt', '2', 'feat: c2');\n\n  const result = await squash(dir, {});\n\n  expect(result.squashedCommits).toBe(2);\n  expect(result.restacked).toBe(false);\n});",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/git.ts",
+      "changeType": "mod",
+      "additions": 79,
+      "deletions": 0,
+      "explanation": "Three new helpers all colocated near the existing `getLastCommitMessage`: `countCommitsAhead` (rev-list --count), `getCommitMessagesBetween` (git log %B with ASCII record-separator splitting), and `softResetTo` (git reset --soft <ref>). Each wraps execa with a DubError that names the manual git command to debug with.",
+      "snippet": "export async function getCommitMessagesBetween(\n  base: string,\n  branch: string,\n  cwd: string,\n): Promise<string[]> {\n  const { stdout } = await execa(\n    'git',\n    ['log', '--format=%B%x1e', `${base}..${branch}`],\n    { cwd },\n  );\n  return stdout\n    .split('\\x1e')\n    .map((entry) => entry.replace(/^\\n+|\\n+$/g, ''))\n    .filter((entry) => entry.length > 0);\n}",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/index.ts",
+      "changeType": "mod",
+      "additions": 52,
+      "deletions": 0,
+      "explanation": "Wires the `dub squash` command next to `dub modify` (both branch-mutating operations that auto-restack). Output branches on `noopReason` so the user sees a quiet info line for 0/1-commit branches and a green check only when something was actually squashed.",
+      "snippet": "program\n  .command('squash')\n  .description(\n    'Collapse every commit on the current branch (since its parent) into one',\n  )\n  .option('-m, --message <message>', 'Use the given message for the new commit')\n  .option(\n    '--ai',\n    'Generate a Conventional Commit summary from the squashed commits',\n  )",
+      "snippetLanguage": "typescript",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/squash.mdx",
+      "changeType": "new",
+      "additions": 54,
+      "deletions": 0,
+      "explanation": "Command docs page. Documents the three message sources, the no-op semantics, the dirty-tree refusal, the conflict-recovery handoff to `dub restack --continue`, and the `--ai` provider requirement.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": "apps/docs/content/docs/commands/meta.json",
+      "changeType": "mod",
+      "additions": 1,
+      "deletions": 0,
+      "explanation": "Inserts `squash` after `modify` in the docs sidebar so the new command shows up in the right slot.",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    },
+    {
+      "path": ".reports/dub-32-qa.md",
+      "changeType": "new",
+      "additions": 62,
+      "deletions": 0,
+      "explanation": "QA fallback (no .tsx changed). Records the 5 live smoke-test scenarios on a temp repo plus the 11 automated tests, with full evidence (924/924 total tests, biome clean, typecheck clean).",
+      "snippet": "",
+      "snippetLanguage": "",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "Soft-reset + commit ordering",
+      "location": "packages/cli/src/commands/squash.ts:140-162",
+      "rationale": "If the soft-reset succeeds but `commitStaged`/`commitStagedFromFile` fails (e.g. pre-commit hook rejection), the branch is left at the parent tip with the squashed changes staged. The error message names `git reset --hard ORIG_HEAD` as the recovery — ORIG_HEAD is set by `git reset --soft` so this is correct, but worth re-confirming."
+    },
+    {
+      "title": "Auto-restack reporting (`restacked` semantics)",
+      "location": "packages/cli/src/commands/squash.ts:164-180",
+      "rationale": "`restack()` returns `{ status: 'up-to-date', rebased: [] }` for a leaf branch rather than throwing. `restacked` is now derived from `restackResult.rebased.length > 0` so the CLI only prints \"Descendants restacked.\" when work was actually done. Initial adversarial pass caught the misleading leaf-branch print; verify the fix matches the intended UX."
+    },
+    {
+      "title": "Default message ordering",
+      "location": "packages/cli/src/lib/git.ts:getCommitMessagesBetween",
+      "rationale": "`git log base..branch` returns most-recent first. The test at squash.test.ts:64-73 pins the c3 → c2 → c1 ordering and asserts the body via `indexOf` comparisons. Confirm reviewers are happy with the most-recent-first ordering before paragraph separators are introduced upstream."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "squash.test.ts — 11 scenarios on isolated temp git repos",
+      "status": "done",
+      "evidence": "pnpm vitest run squash → 11/11 passing in 2.1s."
+    },
+    {
+      "kind": "integration",
+      "label": "Full repo test suite",
+      "status": "done",
+      "evidence": "pnpm test → 925/925 passing across 98 files."
+    },
+    {
+      "kind": "manual",
+      "label": "End-to-end smoke test on a real git repo (3-commit squash, single-commit no-op, dirty refusal, --help, --ai+-m mutex)",
+      "status": "done",
+      "evidence": "Captured in .reports/dub-32-qa.md. CLI built via tsup, exercised against /tmp/dub-squash-smoke (temp repo cleaned up post-run)."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome lint+format",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Checked 301 files in 158ms. No fixes applied."
+    },
+    {
+      "name": "TypeScript",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "2 packages (dubstack + docs) clean."
+    },
+    {
+      "name": "Vitest",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "925/925 tests passing across 98 files."
+    },
+    {
+      "name": "Build",
+      "command": "pnpm build",
+      "status": "passed",
+      "evidence": "tsup ESM build clean (480 KB)."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "CLI-only change. No .tsx files modified; no browser surface to record.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-32-qa.md",
+    "caption": "Live smoke-test transcript on a temp repo + 11 automated vitest scenarios.",
+    "scenarios": [
+      "3-commit branch → 1 commit via default concatenation, descendant restacked.",
+      "Single-commit no-op with informational output.",
+      "Dirty working tree refusal with full recovery hint trio.",
+      "--help renders description, options, and 3 example lines.",
+      "--ai + -m mutual-exclusion error with recovery hint."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "New `packages/cli/src/commands/squash.ts`",
+      "status": "satisfied",
+      "evidence": "239-line command module landed at the canonical path."
+    },
+    {
+      "criterion": "No-op for 0/1 commits with clear message",
+      "status": "satisfied",
+      "evidence": "Both no-op paths print the per-case `Nothing to squash —` line; verified by `is a no-op for a single commit` and `is a no-op for zero commits` tests."
+    },
+    {
+      "criterion": "Default behavior squashes and concatenates messages",
+      "status": "satisfied",
+      "evidence": "`collapses N commits into one with concatenated messages and restacks descendants` asserts the 3 → 1 collapse, the most-recent-first body ordering, and the descendant restack."
+    },
+    {
+      "criterion": "`-m` and `--ai` work",
+      "status": "satisfied",
+      "evidence": "`-m overrides the auto-generated message` + `uses the AI-generated message when '--ai' is supplied` (with mocked AI deps) pin both paths."
+    },
+    {
+      "criterion": "Restack runs automatically",
+      "status": "satisfied",
+      "evidence": "Restack is invoked unconditionally on successful squash; `restacked` field reflects whether any descendant was actually rebased."
+    },
+    {
+      "criterion": "Tests for each path",
+      "status": "satisfied",
+      "evidence": "11 vitest scenarios covering happy path, both no-ops, every flag combination, every error class, and leaf-branch restack semantics."
+    },
+    {
+      "criterion": "Docs at `apps/docs/content/docs/commands/squash.mdx`",
+      "status": "satisfied",
+      "evidence": "MDX page added and inserted into `meta.json` sidebar after `modify`."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Major (fixed): `restacked` was set true even when restack returned `{ status: 'up-to-date', rebased: [] }`, causing the CLI to print \"Descendants restacked\" on leaf branches. Now derived from `restackResult.rebased.length > 0`.",
+      "Minor (fixed): AI-disabled test called squash() twice; consolidated to a single rejection variable.",
+      "Major (intentionally not addressed): no dedicated undo entry for squash. The reviewer flagged this but confirmed it is consistent with `dub modify`, which also relies on the auto-restack undo entry. Adding squash to the undo enum is out of scope for this issue and would require widening the `UndoEntry` operation enum."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "No external dependencies detected",
+      "status": "n/a"
+    }
+  ],
+  "rollout": {
+    "summary": "Pure additive change. No flag, no migration, no env var. Ships as part of the next dubstack CLI release once merged.",
+    "steps": [
+      {
+        "when": "On merge",
+        "label": "Available locally as `dub squash`",
+        "details": "Users on dev builds (`pnpm build`) get the command immediately. The `dub squash --ai` path requires `dub config ai-assistant on` and a configured provider (unchanged from `dub create --ai`)."
+      },
+      {
+        "when": "Next release",
+        "label": "Ships in the next semantic-release minor",
+        "details": "Conventional-commit `feat(squash):` triggers a minor bump per release.config.cjs. No release-note migration steps."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "876808116ffeb304d29ddccb5a3442bd8eb6791c",
+    "shortSha": "8768081",
+    "message": "feat(squash): collapse a branch into a single commit [DUB-32]"
+  }
+}

@@ -10,6 +10,7 @@ function createDeps() {
     inputGeminiKey: vi.fn(),
     inputAnthropicKey: vi.fn(),
     inputGatewayKey: vi.fn(),
+    inputOpenAiKey: vi.fn(),
     inputBedrockProfile: vi.fn(),
     inputBedrockRegion: vi.fn(),
     configureAiEnv: vi.fn().mockResolvedValue({
@@ -132,6 +133,32 @@ describe('aiSetup', () => {
     expect(result.updatedEnv).toEqual([]);
     expect(result.profilePath).toBeUndefined();
     expect(result.activationCommand).toBeUndefined();
+  });
+
+  it('writes OpenAI env defaults and selects the provider for the repo', async () => {
+    const deps = createDeps();
+    deps.selectProvider.mockResolvedValue('openai');
+    deps.selectModel.mockResolvedValue('gpt-5.5');
+    deps.selectModelScope.mockResolvedValue('global');
+    deps.inputOpenAiKey.mockResolvedValue('openai-key');
+
+    const result = await aiSetup('/repo', deps);
+
+    expect(deps.configureAiEnv).toHaveBeenCalledWith({
+      openaiKey: 'openai-key',
+      openaiModel: 'gpt-5.5',
+    });
+    expect(deps.configAiProvider).toHaveBeenCalledWith('/repo', 'openai');
+    expect(deps.configAiModel).toHaveBeenCalledWith(
+      '/repo',
+      'openai',
+      undefined,
+      {
+        clear: true,
+      },
+    );
+    expect(result.provider).toBe('openai');
+    expect(result.model).toBe('gpt-5.5');
   });
 
   it('clears an existing repo override when switching back to global scope', async () => {

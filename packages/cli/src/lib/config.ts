@@ -14,13 +14,24 @@ export interface DubConfig {
       submitDescription: boolean;
       flow: boolean;
     };
+    prompts: {
+      mode: 'auto' | 'on' | 'off';
+      autoAccept: 'off' | 'high';
+    };
     provider: {
-      selected: 'auto' | 'gemini' | 'anthropic' | 'gateway' | 'bedrock';
+      selected:
+        | 'auto'
+        | 'gemini'
+        | 'anthropic'
+        | 'gateway'
+        | 'bedrock'
+        | 'openai';
       models: {
         gemini: string | null;
         anthropic: string | null;
         gateway: string | null;
         bedrock: string | null;
+        openai: string | null;
       };
     };
     shortcutFallback: {
@@ -57,6 +68,10 @@ const DEFAULT_CONFIG: DubConfig = {
       submitDescription: false,
       flow: false,
     },
+    prompts: {
+      mode: 'auto',
+      autoAccept: 'off',
+    },
     provider: {
       selected: 'auto',
       models: {
@@ -64,6 +79,7 @@ const DEFAULT_CONFIG: DubConfig = {
         anthropic: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     },
     shortcutFallback: {
@@ -122,6 +138,7 @@ export async function writeConfig(
 
 function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
   const defaults = config.ai?.defaults;
+  const prompts = config.ai?.prompts;
   const provider = config.ai?.provider;
   const fallback = config.ai?.shortcutFallback;
   const shellHistory = config.ai?.context?.shellHistory;
@@ -148,6 +165,10 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
             ? defaults.flow
             : DEFAULT_CONFIG.ai.defaults.flow,
       },
+      prompts: {
+        mode: normalizeAiPromptMode(prompts?.mode),
+        autoAccept: normalizeAiPromptAutoAccept(prompts?.autoAccept),
+      },
       provider: {
         selected: normalizeAiProviderSelection(provider?.selected),
         models: {
@@ -155,6 +176,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           anthropic: normalizeAiProviderModel(provider?.models?.anthropic),
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
+          openai: normalizeAiProviderModel(provider?.models?.openai),
         },
       },
       shortcutFallback: {
@@ -198,6 +220,24 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
   };
 }
 
+function normalizeAiPromptMode(
+  value: unknown,
+): DubConfig['ai']['prompts']['mode'] {
+  if (value === 'auto' || value === 'on' || value === 'off') {
+    return value;
+  }
+  return DEFAULT_CONFIG.ai.prompts.mode;
+}
+
+function normalizeAiPromptAutoAccept(
+  value: unknown,
+): DubConfig['ai']['prompts']['autoAccept'] {
+  if (value === 'off' || value === 'high') {
+    return value;
+  }
+  return DEFAULT_CONFIG.ai.prompts.autoAccept;
+}
+
 function normalizeAiProviderSelection(
   value: unknown,
 ): DubConfig['ai']['provider']['selected'] {
@@ -206,7 +246,8 @@ function normalizeAiProviderSelection(
     value === 'gemini' ||
     value === 'anthropic' ||
     value === 'gateway' ||
-    value === 'bedrock'
+    value === 'bedrock' ||
+    value === 'openai'
   ) {
     return value;
   }

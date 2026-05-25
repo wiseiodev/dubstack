@@ -1,5 +1,6 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { createGateway, generateText, type LanguageModel } from 'ai';
 import { createScorer, evalite } from 'evalite';
 import { buildAiDiffContext } from '../src/lib/ai-diff-context';
@@ -43,6 +44,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
       anthropic: null,
       gateway: null,
       bedrock: null,
+      openai: null,
     },
   };
 }
@@ -579,6 +581,7 @@ function createEvalDependencies(): AiMetadataDependencies {
     createGoogleGenerativeAI,
     createAnthropic,
     createGateway,
+    createOpenAI,
   };
 }
 
@@ -608,8 +611,15 @@ function resolveEvalJudgeModel(): LanguageModel {
     return gateway(modelId);
   }
 
+  const openAiApiKey = process.env.DUBSTACK_OPENAI_API_KEY?.trim();
+  if (openAiApiKey) {
+    const modelId = process.env.DUBSTACK_OPENAI_MODEL?.trim() || 'gpt-5.5';
+    const openai = createOpenAI({ apiKey: openAiApiKey });
+    return openai(modelId);
+  }
+
   throw new Error(
-    'Evalite requires DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, or DUBSTACK_AI_GATEWAY_API_KEY.',
+    'Evalite requires DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, DUBSTACK_AI_GATEWAY_API_KEY, or DUBSTACK_OPENAI_API_KEY.',
   );
 }
 

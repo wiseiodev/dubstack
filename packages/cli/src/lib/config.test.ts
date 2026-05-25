@@ -30,6 +30,10 @@ describe('readConfig', () => {
           submitDescription: false,
           flow: false,
         },
+        prompts: {
+          mode: 'auto',
+          autoAccept: 'off',
+        },
         provider: {
           selected: 'auto',
           models: {
@@ -37,6 +41,7 @@ describe('readConfig', () => {
             anthropic: null,
             gateway: null,
             bedrock: null,
+            openai: null,
           },
         },
         shortcutFallback: {
@@ -78,6 +83,10 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
+    });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
       models: {
@@ -85,6 +94,7 @@ describe('writeConfig', () => {
         anthropic: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });
@@ -110,6 +120,10 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
+    });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
       models: {
@@ -117,6 +131,7 @@ describe('writeConfig', () => {
         anthropic: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });
@@ -145,7 +160,29 @@ describe('writeConfig', () => {
         anthropic: 'claude-sonnet-4-20250514',
         gateway: null,
         bedrock: null,
+        openai: null,
       },
+    });
+  });
+
+  it('persists ai prompt settings', async () => {
+    await writeConfig(
+      {
+        ai: {
+          prompts: {
+            mode: 'on',
+            autoAccept: 'high',
+          },
+        },
+      },
+      dir,
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.ai.prompts).toEqual({
+      mode: 'on',
+      autoAccept: 'high',
     });
   });
 
@@ -156,6 +193,10 @@ describe('writeConfig', () => {
       path.join(dubDir, 'config.json'),
       JSON.stringify({
         ai: {
+          prompts: {
+            mode: 'sometimes',
+            autoAccept: 'medium',
+          },
           provider: {
             selected: 'unknown',
             models: {
@@ -163,6 +204,7 @@ describe('writeConfig', () => {
               anthropic: 'claude-sonnet-4-20250514',
               gateway: '',
               bedrock: '   ',
+              openai: '   ',
             },
           },
         },
@@ -171,6 +213,10 @@ describe('writeConfig', () => {
 
     const config = await readConfig(dir);
 
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
+    });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
       models: {
@@ -178,6 +224,7 @@ describe('writeConfig', () => {
         anthropic: 'claude-sonnet-4-20250514',
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });

@@ -1,6 +1,7 @@
 import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import type { createAnthropic } from '@ai-sdk/anthropic';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
 import type {
   fromIni,
   fromNodeProviderChain,
@@ -13,13 +14,15 @@ export type ResolvedAiProviderName =
   | 'google'
   | 'anthropic'
   | 'gateway'
-  | 'bedrock';
+  | 'bedrock'
+  | 'openai';
 
 export interface ResolveAiProviderDeps {
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
+  createOpenAI?: typeof createOpenAI;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
@@ -53,6 +56,10 @@ export function resolveAiProvider(input: {
     return resolveBedrockProvider(input.deps, providerConfig);
   }
 
+  if (selected === 'openai') {
+    return resolveOpenAiProvider(input.deps, providerConfig);
+  }
+
   const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
   if (geminiApiKey) {
     return resolveGoogleProvider(input.deps, providerConfig);
@@ -74,12 +81,18 @@ export function resolveAiProvider(input: {
     return resolveBedrockProvider(input.deps, providerConfig);
   }
 
+  const openAiApiKey = process.env.DUBSTACK_OPENAI_API_KEY?.trim();
+  if (openAiApiKey) {
+    return resolveOpenAiProvider(input.deps, providerConfig);
+  }
+
   throw new DubError('AI assistant has no configured provider.', [
     "Run 'dub ai setup' for an interactive guided setup.",
     "Run 'dub ai env --gemini-key <key>' to configure Gemini.",
     "Run 'dub ai env --anthropic-key <key>' to configure Anthropic.",
     "Run 'dub ai env --gateway-key <key>' to configure the AI Gateway.",
     "Run 'dub ai env --bedrock-region <region> --bedrock-model <model>' to configure Bedrock.",
+    "Run 'dub ai env --openai-key <key>' to configure OpenAI.",
   ]);
 }
 
@@ -257,6 +270,38 @@ function resolveBedrockProvider(
   };
 }
 
+function resolveOpenAiProvider(
+  deps: ResolveAiProviderDeps,
+  providerConfig: DubConfig['ai']['provider'],
+): ResolvedAiProvider {
+  if (!deps.createOpenAI) {
+    throw new DubError('OpenAI support is unavailable in this build.', [
+      "Run 'dub config ai-provider gemini', 'gateway', or 'bedrock' to switch providers.",
+      'Reinstall DubStack from a build that includes OpenAI support if you need it.',
+    ]);
+  }
+
+  const openAiApiKey = process.env.DUBSTACK_OPENAI_API_KEY?.trim();
+  if (!openAiApiKey) {
+    throw new DubError(
+      'OpenAI is selected but DUBSTACK_OPENAI_API_KEY is not set.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --openai-key <key>' to write the key to your shell profile.",
+      ],
+    );
+  }
+
+  const modelId = getConfiguredModel('openai', providerConfig) || 'gpt-5.5';
+  const openai = deps.createOpenAI({ apiKey: openAiApiKey });
+
+  return {
+    provider: 'openai',
+    model: openai(modelId),
+    modelId,
+  };
+}
+
 function getConfiguredModel(
   provider: keyof DubConfig['ai']['provider']['models'],
   providerConfig: DubConfig['ai']['provider'],
@@ -278,7 +323,11 @@ function getConfiguredModel(
     return normalizeEnvModel(process.env.DUBSTACK_ANTHROPIC_MODEL);
   }
 
-  return normalizeEnvModel(process.env.DUBSTACK_BEDROCK_MODEL);
+  if (provider === 'bedrock') {
+    return normalizeEnvModel(process.env.DUBSTACK_BEDROCK_MODEL);
+  }
+
+  return normalizeEnvModel(process.env.DUBSTACK_OPENAI_MODEL);
 }
 
 function normalizeEnvModel(value: string | undefined): string | null {

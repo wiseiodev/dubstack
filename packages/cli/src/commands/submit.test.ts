@@ -95,6 +95,7 @@ function makeConfig(overrides?: {
           anthropic: null,
           gateway: null,
           bedrock: null,
+          openai: null,
         },
       },
       shortcutFallback: {
