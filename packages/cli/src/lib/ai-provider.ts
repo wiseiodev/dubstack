@@ -114,20 +114,6 @@ export function buildAiProviderOptions(
     };
   }
 
-  if (
-    provider.provider === 'anthropic' &&
-    supportsAnthropicReasoning(provider.modelId)
-  ) {
-    return {
-      anthropic: {
-        thinking: {
-          type: 'enabled',
-          budgetTokens: 4096,
-        },
-      },
-    };
-  }
-
   return {};
 }
 
@@ -302,8 +288,4 @@ function normalizeEnvModel(value: string | undefined): string | null {
 
 function supportsBedrockReasoning(modelId: string): boolean {
   return /claude-3-7|claude-(sonnet|opus|haiku)-4/.test(modelId);
-}
-
-function supportsAnthropicReasoning(modelId: string): boolean {
-  return /claude-3-7|claude-(sonnet|opus)-4/.test(modelId);
 }

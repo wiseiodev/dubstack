@@ -265,33 +265,23 @@ describe('buildAiProviderOptions', () => {
     });
   });
 
-  it('returns Anthropic thinking options for reasoning-capable Claude models', () => {
-    expect(
-      buildAiProviderOptions(
-        {
-          provider: 'anthropic',
-          modelId: 'claude-sonnet-4-20250514',
-        },
-        {
-          withWebBrowsing: true,
-        },
-      ),
-    ).toEqual({
-      anthropic: {
-        thinking: {
-          type: 'enabled',
-          budgetTokens: 4096,
-        },
-      },
-    });
-  });
-
-  it('returns no provider options for gateway or non-reasoning Bedrock models', () => {
+  it('returns no provider options for gateway, anthropic, or non-reasoning Bedrock models', () => {
     expect(
       buildAiProviderOptions(
         {
           provider: 'gateway',
           modelId: 'google/gemini-3-flash',
+        },
+        {
+          withWebBrowsing: true,
+        },
+      ),
+    ).toEqual({});
+    expect(
+      buildAiProviderOptions(
+        {
+          provider: 'anthropic',
+          modelId: 'claude-sonnet-4-20250514',
         },
         {
           withWebBrowsing: true,
