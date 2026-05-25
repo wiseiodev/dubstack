@@ -438,6 +438,10 @@ dub submit --stack
 
 # submit only a single named branch
 dub submit --branch feat/api
+
+# queue GitHub auto-merge for submitted PRs
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method rebase
 ```
 
 Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exclusive. Passing more than one is a validation error.
@@ -447,6 +451,8 @@ Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exc
 Notes:
 - `--no-ai` disables AI PR description generation for one invocation.
 - AI submit only writes the PR description body; the PR title still comes from the last commit message.
+- `--merge-when-ready` queues GitHub auto-merge on every PR in the submit scope. The default strategy is `squash`; pass `--method merge`, `--method squash`, or `--method rebase` to choose another strategy. DubStack starts with the requested strategy and falls back across repository-allowed methods.
+- Enabling auto-merge on every submitted PR is safer than only enabling it on the bottom PR: GitHub still respects stacked-base ordering, and the queue survives later rebases of the stack.
 - If the repo has a PR template in a supported GitHub template location, DubStack preserves that structure when generating AI PR descriptions.
 
 ### `dub flow` / `dub f`
@@ -531,6 +537,11 @@ If sync hits a real conflict, prefer:
 ```bash
 dub continue --ai
 ```
+
+When two AI providers are configured, `dub continue --ai` and
+`dub ai resolve` ask both providers and rank lower-confidence files first.
+Use `--no-adjudicate` for the single-provider path, or `--adjudicate` to
+require two providers.
 
 ### `dub doctor`
 
@@ -689,9 +700,7 @@ See [`dub stash` docs](https://dubstack.dev/docs/commands/stash) for the full be
 
 ### `dub freeze` / `dub unfreeze`
 
-Records a `frozen` flag on a tracked branch and surfaces it (🔒 in `dub log`, an informational notice in `dub doctor`). `dub unfreeze` clears the flag.
-
-> ⚠ This is the data-model + commands half of the feature. `dub restack` and `dub sync` do **not** yet skip frozen branches — that enforcement is tracked separately as DUB-82 and will land in a follow-up PR.
+Records a `frozen` flag on a tracked branch and surfaces it (🔒 in `dub log`, an informational notice in `dub doctor`). `dub restack`, `dub sync`, and `dub post-merge` skip frozen branches until `dub unfreeze` clears the flag.
 
 ```bash
 # freeze the current branch
@@ -707,7 +716,7 @@ dub freeze feat/auth-base --upstack
 dub unfreeze feat/auth-login
 ```
 
-`dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice.
+`dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice. Freeze wins over destructive maintenance flags: if a branch is frozen, unfreeze it explicitly before using `dub sync --force` or any other branch-mutating maintenance.
 
 ### `dub undo`
 

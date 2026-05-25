@@ -184,6 +184,10 @@ dub ss --branch feat/api
 
 # AI-generate PR description body
 dub submit --ai
+
+# queue GitHub auto-merge for submitted PRs
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method squash
 ```
 
 Open PR in browser:
@@ -272,8 +276,9 @@ dub restack --continue
 Unified recovery commands:
 
 ```bash
-dub continue   # continue active restack/rebase
-dub abort      # abort active restack/rebase
+dub continue      # continue active restack/rebase
+dub continue --ai # ask configured AI provider(s) to resolve conflicts first
+dub abort         # abort active restack/rebase
 ```
 
 ## 9) Merge In Safe Order
@@ -385,7 +390,7 @@ dub undo
 | `dub track` | Track/re-parent branch metadata |
 | `dub untrack` | Remove branch metadata only |
 | `dub delete` | Stack-aware branch deletion |
-| `dub freeze` / `dub unfreeze` | Set/clear the `frozen` flag (data-model only; restack/sync don't yet skip — DUB-82) |
+| `dub freeze` / `dub unfreeze` | Set/clear the `frozen` flag; restack/sync/post-merge skip frozen branches |
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
 | `dub undo` | Undo last create/restack |
 | `dub stash` / `dub stash pop` / `dub stash list` | Branch-aware stash (refuses pop on wrong branch) |

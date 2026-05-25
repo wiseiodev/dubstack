@@ -16,6 +16,8 @@ vi.mock('../lib/github.js', () => ({
   getPr: vi.fn(),
   createPr: vi.fn(),
   updatePrBody: vi.fn(),
+  isPrAutoMergeEnabled: vi.fn(),
+  enablePrAutoMerge: vi.fn(),
 }));
 
 vi.mock('../lib/state.js', async (importOriginal) => {
@@ -47,8 +49,10 @@ import {
 import {
   checkGhAuth,
   createPr,
+  enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  isPrAutoMergeEnabled,
   updatePrBody,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
@@ -69,6 +73,10 @@ const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
 const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
 const mockUpdatePrBody = updatePrBody as ReturnType<typeof vi.fn>;
+const mockIsPrAutoMergeEnabled = isPrAutoMergeEnabled as ReturnType<
+  typeof vi.fn
+>;
+const mockEnablePrAutoMerge = enablePrAutoMerge as ReturnType<typeof vi.fn>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockReadConfig = readConfig as ReturnType<typeof vi.fn>;
@@ -158,6 +166,8 @@ beforeEach(() => {
   mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
   mockUpdatePrBody.mockResolvedValue(undefined);
+  mockIsPrAutoMergeEnabled.mockResolvedValue(false);
+  mockEnablePrAutoMerge.mockResolvedValue({ method: 'squash' });
   mockReadMetadataTemplates.mockResolvedValue({
     prTemplate: null,
     commitTemplate: null,
@@ -427,6 +437,14 @@ describe('submit', () => {
     ).rejects.toThrow("'--ai' cannot be combined with '--no-ai'.");
   });
 
+  it('rejects --method without --merge-when-ready', async () => {
+    await expect(
+      submit('/repo', false, {
+        method: 'rebase',
+      }),
+    ).rejects.toThrow("'--method' requires '--merge-when-ready'.");
+  });
+
   it('throws when branch is not in any stack', async () => {
     mockGetCurrentBranch.mockResolvedValue('orphan');
     mockReadState.mockResolvedValue({ stacks: [] });
@@ -570,6 +588,68 @@ describe('submit', () => {
     expect(mockCreatePr).not.toHaveBeenCalled();
     expect(mockUpdatePrBody).toHaveBeenCalled();
     expect(mockGetLastCommitMessage).not.toHaveBeenCalled();
+  });
+
+  it('enables auto-merge on every PR in the submit scope', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/b');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetPr
+      .mockResolvedValueOnce({
+        number: 10,
+        url: 'https://github.com/o/r/pull/10',
+        title: 'feat: a',
+        body: '',
+      })
+      .mockResolvedValueOnce({
+        number: 11,
+        url: 'https://github.com/o/r/pull/11',
+        title: 'feat: b',
+        body: '',
+      });
+
+    const result = await submit('/repo', false, {
+      mergeWhenReady: true,
+      method: 'rebase',
+    });
+
+    expect(mockIsPrAutoMergeEnabled).toHaveBeenCalledWith(10, '/repo');
+    expect(mockIsPrAutoMergeEnabled).toHaveBeenCalledWith(11, '/repo');
+    expect(mockEnablePrAutoMerge).toHaveBeenNthCalledWith(1, 10, '/repo', {
+      method: 'rebase',
+    });
+    expect(mockEnablePrAutoMerge).toHaveBeenNthCalledWith(2, 11, '/repo', {
+      method: 'rebase',
+    });
+    expect(result.autoMergeEnabled).toEqual(['feat/a', 'feat/b']);
+  });
+
+  it('does not re-enable auto-merge when GitHub already has it queued', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 10,
+      url: 'https://github.com/o/r/pull/10',
+      title: 'feat: a',
+      body: '',
+    });
+    mockIsPrAutoMergeEnabled.mockResolvedValue(true);
+
+    const result = await submit('/repo', false, { mergeWhenReady: true });
+
+    expect(mockEnablePrAutoMerge).not.toHaveBeenCalled();
+    expect(result.autoMergeEnabled).toEqual([]);
+    expect(result.autoMergeSkipped).toEqual(['feat/a']);
   });
 
   it('saves pr_number and pr_link to state', async () => {

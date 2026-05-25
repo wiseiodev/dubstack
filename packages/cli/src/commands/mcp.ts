@@ -516,6 +516,17 @@ const TOOLS: ToolDefinition[] = [
           type: 'boolean',
           description: '[deprecated] No-op alias retained for compatibility.',
         },
+        mergeWhenReady: {
+          type: 'boolean',
+          description:
+            'Queue GitHub auto-merge for every submitted PR in the chosen scope.',
+        },
+        method: {
+          type: 'string',
+          enum: ['merge', 'squash', 'rebase'],
+          description:
+            "Auto-merge strategy for mergeWhenReady. Defaults to 'squash'.",
+        },
       },
       additionalProperties: false,
     },
@@ -612,7 +623,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.freeze',
     description:
-      'Set the `frozen` flag on a tracked branch (stack-aware). Note: this is a passive marker only — `dub restack` and `dub sync` do NOT yet honor the flag. The enforcement wiring is tracked as DUB-82.',
+      'Set the `frozen` flag on a tracked branch (stack-aware). Restack, sync, and post-merge skip frozen branches until they are explicitly unfrozen.',
     mutating: true,
     inputSchema: {
       type: 'object',
@@ -636,7 +647,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.unfreeze',
     description:
-      'Clear the `frozen` flag on a tracked branch (stack-aware). Note: the flag is a passive marker — `dub restack` and `dub sync` do NOT yet honor it, so clearing the flag has no effect on rebase behavior until DUB-82 lands.',
+      'Clear the `frozen` flag on a tracked branch (stack-aware) so restack, sync, and post-merge can mutate it again.',
     mutating: true,
     inputSchema: {
       type: 'object',
@@ -1385,6 +1396,8 @@ async function callTool(
           branch: optionalString(args.branch),
           path: optionalSubmitPath(args.path),
           fix: optionalBoolean(args.fix) ?? false,
+          mergeWhenReady: optionalBoolean(args.mergeWhenReady),
+          method: optionalMergeMethod(args.method),
         }),
       );
     case 'dubstack.sync':
@@ -1820,6 +1833,15 @@ async function mutatingToolResult<T>(
 
 function optionalSubmitPath(value: unknown): 'current' | 'stack' | undefined {
   if (value === 'current' || value === 'stack') return value;
+  return undefined;
+}
+
+function optionalMergeMethod(
+  value: unknown,
+): 'merge' | 'squash' | 'rebase' | undefined {
+  if (value === 'merge' || value === 'squash' || value === 'rebase') {
+    return value;
+  }
   return undefined;
 }
 

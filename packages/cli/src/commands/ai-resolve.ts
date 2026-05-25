@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
@@ -6,13 +8,25 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, streamText } from 'ai';
 import chalk from 'chalk';
-import { buildAiProviderOptions, resolveAiProvider } from '../lib/ai-provider';
+import {
+  buildAiProviderOptions,
+  type ResolvedAiProvider,
+  resolveAdjudicationAiProviders,
+  resolveAiProvider,
+} from '../lib/ai-provider';
 import { readConfig } from '../lib/config';
 import type { ConflictContext } from '../lib/conflict-context';
 import { gatherConflictContext } from '../lib/conflict-context';
+import {
+  type ConflictTestCache,
+  type ConflictTestResult,
+  createConflictTestCache,
+  runNearbyTestsForFile,
+} from '../lib/conflict-tests';
 import type { FileResolution } from '../lib/conflict-ui';
 import {
   applyResolution,
+  promptAdjudicationChoice,
   promptBatchAction,
   promptFileAction,
   renderBatchPreview,
@@ -20,6 +34,7 @@ import {
   validateResolutionPaths,
 } from '../lib/conflict-ui';
 import { DubError } from '../lib/errors';
+import { execa } from '../lib/exec';
 import { abortCommand } from './abort';
 import { continueCommand } from './continue';
 
@@ -43,6 +58,8 @@ export interface AiResolveDeps {
   validateResolutionPaths: typeof validateResolutionPaths;
   continueCommand: typeof continueCommand;
   abortCommand: typeof abortCommand;
+  promptAdjudicationChoice: typeof promptAdjudicationChoice;
+  runNearbyTestsForFile: typeof runNearbyTestsForFile;
 }
 
 const DEFAULT_DEPS: AiResolveDeps = {
@@ -65,11 +82,19 @@ const DEFAULT_DEPS: AiResolveDeps = {
   validateResolutionPaths,
   continueCommand,
   abortCommand,
+  promptAdjudicationChoice,
+  runNearbyTestsForFile,
 };
+
+interface AiResolveOptions {
+  dryRun?: boolean;
+  abort?: boolean;
+  adjudicate?: boolean;
+}
 
 export async function aiResolve(
   cwd: string,
-  options: { dryRun?: boolean; abort?: boolean },
+  options: AiResolveOptions,
   deps: AiResolveDeps = DEFAULT_DEPS,
 ): Promise<void> {
   const sigintHandler = () => {
@@ -105,21 +130,57 @@ export async function aiResolve(
       if (!proceed) return;
     }
 
-    const resolved = resolveAiProvider({
+    const adjudicationProviders = resolveAdjudicationAiProviders({
       deps,
       providerConfig: config.ai.provider,
     });
-    const resolutions = await streamResolutions(context, resolved, deps);
+    const shouldAdjudicate =
+      options.adjudicate === true ||
+      (options.adjudicate !== false && adjudicationProviders.length >= 2);
+    const resolved =
+      shouldAdjudicate && adjudicationProviders[0]
+        ? adjudicationProviders[0]
+        : resolveAiProvider({
+            deps,
+            providerConfig: config.ai.provider,
+          });
+
+    if (options.adjudicate === true && adjudicationProviders.length < 2) {
+      throw new DubError('AI adjudication requires two configured providers.', [
+        "Run 'dub ai setup' to configure another provider.",
+        "Run 'dub ai resolve --no-adjudicate' to use the configured provider only.",
+      ]);
+    }
+
+    const resolutions = shouldAdjudicate
+      ? await streamAdjudicatedResolutions(
+          cwd,
+          context,
+          adjudicationProviders as [ResolvedAiProvider, ResolvedAiProvider],
+          deps,
+          Boolean(options.dryRun),
+        )
+      : await streamResolutions(context, resolved, deps);
+
+    if (!resolutions) return;
 
     deps.validateResolutionPaths(resolutions, context.conflictedFiles, cwd);
 
     if (options.dryRun) {
-      deps.renderBatchPreview(resolutions);
+      deps.renderBatchPreview(sortByConfidence(resolutions));
       console.log(chalk.dim('\nDry run — no changes applied.'));
       return;
     }
 
-    await applyAndContinue(cwd, resolutions, resolved, deps, 0);
+    await applyAndContinue(
+      cwd,
+      context,
+      resolutions,
+      resolved,
+      deps,
+      0,
+      createConflictTestCache(),
+    );
   } finally {
     process.removeListener('SIGINT', sigintHandler);
   }
@@ -181,13 +242,13 @@ function buildConflictUserPrompt(
 
 async function streamResolutions(
   context: ConflictContext,
-  resolved: ReturnType<typeof resolveAiProvider>,
+  resolved: ResolvedAiProvider,
   deps: AiResolveDeps,
   errorFeedback?: string,
 ): Promise<FileResolution[]> {
   console.log(
     chalk.dim(
-      `Analyzing ${context.conflictedFiles.length} conflicted file(s)...`,
+      `Analyzing ${context.conflictedFiles.length} conflicted file(s) with ${providerLabel(resolved)}...`,
     ),
   );
 
@@ -221,6 +282,140 @@ async function streamResolutions(
   }
 
   return resolutions;
+}
+
+async function streamAdjudicatedResolutions(
+  cwd: string,
+  context: ConflictContext,
+  providers: [ResolvedAiProvider, ResolvedAiProvider],
+  deps: AiResolveDeps,
+  dryRun: boolean,
+): Promise<FileResolution[] | null> {
+  const [firstProvider, secondProvider] = providers;
+  console.log(
+    chalk.dim(
+      `Adjudicating conflicts with ${providerLabel(firstProvider)} and ${providerLabel(secondProvider)}...`,
+    ),
+  );
+
+  const [first, second] = await Promise.all([
+    streamResolutions(context, firstProvider, deps),
+    streamResolutions(context, secondProvider, deps),
+  ]);
+  const byPath = new Map<
+    string,
+    { first?: FileResolution; second?: FileResolution }
+  >();
+
+  for (const res of first) {
+    byPath.set(res.path, { ...byPath.get(res.path), first: res });
+  }
+  for (const res of second) {
+    byPath.set(res.path, { ...byPath.get(res.path), second: res });
+  }
+
+  const chosen: FileResolution[] = [];
+  const disagreements: AdjudicationDisagreement[] = [];
+  let skippedFile: string | null = null;
+
+  for (const file of context.conflictedFiles) {
+    const pair = byPath.get(file);
+    if (!pair?.first || !pair.second) {
+      throw new DubError(
+        `AI adjudication did not return two resolutions for ${file}.`,
+        [
+          "Rerun 'dub continue --ai' to retry.",
+          "Run 'dub ai resolve --no-adjudicate' to use single-provider mode.",
+        ],
+      );
+    }
+
+    if (pair.first.resolvedContent === pair.second.resolvedContent) {
+      chosen.push({
+        ...pair.first,
+        confidence: 'high',
+        explanation: `Both ${providerLabel(firstProvider)} and ${providerLabel(secondProvider)} agreed. ${pair.first.explanation}`,
+      });
+      continue;
+    }
+
+    disagreements.push({
+      path: file,
+      firstProvider: providerLabel(firstProvider),
+      secondProvider: providerLabel(secondProvider),
+      first: pair.first,
+      second: pair.second,
+    });
+
+    console.log(chalk.yellow(`\nAI providers disagreed on ${file}.`));
+    deps.renderBatchPreview([
+      {
+        ...pair.first,
+        confidence: 'low',
+        explanation: `${providerLabel(firstProvider)}: ${pair.first.explanation}`,
+      },
+      {
+        ...pair.second,
+        confidence: 'low',
+        explanation: `${providerLabel(secondProvider)}: ${pair.second.explanation}`,
+      },
+    ]);
+
+    if (dryRun) {
+      chosen.push({
+        ...pair.first,
+        confidence: 'low',
+        explanation: `${providerLabel(firstProvider)} shown first for dry-run adjudication disagreement. ${pair.first.explanation}`,
+      });
+      continue;
+    }
+
+    const choice = await deps.promptAdjudicationChoice({
+      file,
+      firstProvider: providerLabel(firstProvider),
+      secondProvider: providerLabel(secondProvider),
+    });
+
+    if (choice === 'abort') {
+      await deps.abortCommand(cwd);
+      console.log(chalk.yellow('Operation aborted.'));
+      return null;
+    }
+
+    if (choice === 'skip') {
+      skippedFile = file;
+      break;
+    }
+
+    if (choice === 'first') {
+      chosen.push({
+        ...pair.first,
+        confidence: 'low',
+        explanation: `${providerLabel(firstProvider)} selected after adjudication disagreement. ${pair.first.explanation}`,
+      });
+    } else if (choice === 'second') {
+      chosen.push({
+        ...pair.second,
+        confidence: 'low',
+        explanation: `${providerLabel(secondProvider)} selected after adjudication disagreement. ${pair.second.explanation}`,
+      });
+    }
+  }
+
+  if (!dryRun && disagreements.length > 0) {
+    await logAdjudicationDisagreements(cwd, disagreements);
+  }
+
+  if (skippedFile) {
+    console.log(
+      chalk.yellow(
+        `Skipped AI resolution for ${skippedFile}. Conflict state preserved; resolve it manually, then run \`dub continue\`.`,
+      ),
+    );
+    return null;
+  }
+
+  return chosen;
 }
 
 function parseResolutions(text: string): FileResolution[] {
@@ -281,12 +476,15 @@ function validateConfidence(value: unknown): 'high' | 'medium' | 'low' {
 
 async function applyAndContinue(
   cwd: string,
+  context: ConflictContext,
   resolutions: FileResolution[],
-  resolved: ReturnType<typeof resolveAiProvider>,
+  resolved: ResolvedAiProvider,
   deps: AiResolveDeps,
   retryCount: number,
+  testCache: ConflictTestCache,
 ): Promise<void> {
-  deps.renderBatchPreview(resolutions);
+  const ordered = sortByConfidence(resolutions);
+  deps.renderBatchPreview(ordered);
 
   const action = await deps.promptBatchAction();
 
@@ -297,11 +495,18 @@ async function applyAndContinue(
   }
 
   if (action === 'apply-all') {
-    for (const res of resolutions) {
-      await deps.applyResolution(res.path, res.resolvedContent, cwd);
+    for (const res of ordered) {
+      await applyResolutionWithTestRetry(
+        cwd,
+        context,
+        res,
+        resolved,
+        deps,
+        testCache,
+      );
     }
   } else {
-    for (const res of resolutions) {
+    for (const res of ordered) {
       deps.renderBatchPreview([res]);
       const fileAction = await deps.promptFileAction(res.path);
 
@@ -312,7 +517,14 @@ async function applyAndContinue(
       }
 
       if (fileAction === 'apply') {
-        await deps.applyResolution(res.path, res.resolvedContent, cwd);
+        await applyResolutionWithTestRetry(
+          cwd,
+          context,
+          res,
+          resolved,
+          deps,
+          testCache,
+        );
       }
     }
   }
@@ -358,10 +570,12 @@ async function applyAndContinue(
       );
       await applyAndContinue(
         cwd,
+        retryContext,
         retryResolutions,
         resolved,
         deps,
         retryCount + 1,
+        testCache,
       );
     } catch {
       console.log(
@@ -371,4 +585,165 @@ async function applyAndContinue(
       );
     }
   }
+}
+
+async function applyResolutionWithTestRetry(
+  cwd: string,
+  context: ConflictContext,
+  resolution: FileResolution,
+  resolved: ResolvedAiProvider,
+  deps: AiResolveDeps,
+  testCache: ConflictTestCache,
+): Promise<void> {
+  await deps.applyResolution(resolution.path, resolution.resolvedContent, cwd);
+
+  const testResult = await deps.runNearbyTestsForFile(
+    resolution.path,
+    cwd,
+    testCache,
+  );
+  if (testResult.status === 'none') return;
+
+  if (testResult.status === 'passed') {
+    resolution.confidence = 'high';
+    console.log(
+      chalk.green(
+        `✔ Nearby tests passed for ${resolution.path}: ${testResult.files.join(', ')}`,
+      ),
+    );
+    return;
+  }
+
+  resolution.confidence = 'low';
+  console.log(
+    chalk.yellow(
+      `Nearby tests failed for ${resolution.path}. Retrying with test feedback...`,
+    ),
+  );
+  const retryResolutions = await streamResolutions(
+    context,
+    resolved,
+    deps,
+    buildTestFailureFeedback(resolution.path, testResult),
+  );
+  deps.validateResolutionPaths(retryResolutions, context.conflictedFiles, cwd);
+  const retry = retryResolutions.find((res) => res.path === resolution.path);
+  if (!retry) return;
+
+  retry.confidence = 'low';
+  await deps.applyResolution(retry.path, retry.resolvedContent, cwd);
+  const retryTestResult = await deps.runNearbyTestsForFile(
+    retry.path,
+    cwd,
+    testCache,
+  );
+  if (retryTestResult.status === 'passed') {
+    retry.confidence = 'high';
+    console.log(
+      chalk.green(
+        `✔ Nearby tests passed for ${retry.path}: ${retryTestResult.files.join(', ')}`,
+      ),
+    );
+    return;
+  }
+
+  if (retryTestResult.status === 'failed') {
+    throw new DubError(`Nearby tests still fail for ${retry.path}.`, [
+      formatTestCommand(retryTestResult),
+      retryTestResult.output
+        ? `Output:\n${retryTestResult.output}`
+        : 'Inspect the failing test output, adjust the resolution, then run `dub continue`.',
+    ]);
+  }
+}
+
+function buildTestFailureFeedback(
+  file: string,
+  result: ConflictTestResult,
+): string {
+  return [
+    `Tests failed after applying the proposed resolution for ${file}.`,
+    formatTestCommand(result),
+    result.output ? `Output:\n${result.output}` : undefined,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function formatTestCommand(result: ConflictTestResult): string {
+  if (!result.target)
+    return `Command: pnpm vitest run ${result.files.join(' ')}`;
+  return [
+    `Working directory: ${result.target.cwd}`,
+    `Command: pnpm vitest run ${result.target.files.join(' ')}`,
+  ].join('\n');
+}
+
+function sortByConfidence(resolutions: FileResolution[]): FileResolution[] {
+  const rank: Record<FileResolution['confidence'], number> = {
+    low: 0,
+    medium: 1,
+    high: 2,
+  };
+  return [...resolutions].sort(
+    (a, b) => rank[a.confidence] - rank[b.confidence],
+  );
+}
+
+interface AdjudicationDisagreement {
+  path: string;
+  firstProvider: string;
+  secondProvider: string;
+  first: FileResolution;
+  second: FileResolution;
+}
+
+async function logAdjudicationDisagreements(
+  cwd: string,
+  disagreements: AdjudicationDisagreement[],
+): Promise<void> {
+  const gitDir = await resolveGitDir(cwd);
+  const bankDir = path.join(gitDir, 'dubstack', 'ai-eval-bank');
+  fs.mkdirSync(bankDir, { recursive: true });
+  const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  fs.writeFileSync(
+    path.join(bankDir, filename),
+    JSON.stringify(
+      {
+        createdAt: new Date().toISOString(),
+        disagreements: disagreements.map((disagreement) => ({
+          path: disagreement.path,
+          firstProvider: disagreement.firstProvider,
+          secondProvider: disagreement.secondProvider,
+          first: {
+            confidence: disagreement.first.confidence,
+            explanation: disagreement.first.explanation,
+            resolvedContent: disagreement.first.resolvedContent,
+          },
+          second: {
+            confidence: disagreement.second.confidence,
+            explanation: disagreement.second.explanation,
+            resolvedContent: disagreement.second.resolvedContent,
+          },
+        })),
+      },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
+}
+
+async function resolveGitDir(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execa('git', ['rev-parse', '--git-dir'], { cwd });
+    const gitDir = stdout.trim();
+    return path.isAbsolute(gitDir) ? gitDir : path.resolve(cwd, gitDir);
+  } catch {
+    return path.join(cwd, '.git');
+  }
+}
+
+function providerLabel(provider: ResolvedAiProvider): string {
+  return `${provider.provider}:${provider.modelId}`;
 }

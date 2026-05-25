@@ -53,11 +53,9 @@ export interface Branch {
   sync_source?: ReconcileSource | null;
   /**
    * Marker set/cleared by `dub freeze` / `dub unfreeze` and surfaced in
-   * `dub log` (🔒) and `dub doctor`.
-   *
-   * Note: this is currently a passive marker only. `dub restack` and
-   * `dub sync` do NOT yet read this field — the enforcement wiring is
-   * tracked separately as DUB-82.
+   * `dub log` (🔒) and `dub doctor`. Restack, sync, and post-merge treat
+   * frozen branches as planning-time skips; unfreeze explicitly before
+   * running branch-mutating maintenance.
    */
   frozen?: boolean;
 }

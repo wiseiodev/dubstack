@@ -26,6 +26,10 @@ dub submit --stack
 
 # Submit only a single named branch
 dub submit --branch feat/api
+
+# Queue GitHub auto-merge for submitted PRs
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method rebase
 ```
 
 ## Flags
@@ -40,6 +44,8 @@ dub submit --branch feat/api
 | `--upstack` | Current branch + all descendants |
 | `--stack` | Full tree from trunk |
 | `--branch <name>` | Only the specified branch |
+| `--merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
+| `--method <method>` | Auto-merge strategy: `squash` (default), `merge`, or `rebase` |
 | `--path <mode>` | _[deprecated]_ `current` maps to `--downstack`; `stack` maps to `--stack`. Removed in v2. |
 | `--fix` | _[deprecated]_ No-op alias retained for script compatibility |
 
@@ -68,6 +74,19 @@ When AI submit defaults are enabled for the repository, `--no-ai` lets you force
 Configure the provider with `dub ai setup` or `dub ai env`, then enable the assistant with `dub config ai-assistant on`.
 
 If your repository includes a GitHub pull request template, DubStack asks AI to preserve that template structure when generating the PR description body. Supported locations include `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, and `pull_request_template.md`.
+
+## Auto-Merge Queue
+
+`dub submit --merge-when-ready` enables GitHub auto-merge on every PR in the submit scope after branches are pushed and PRs are created or updated.
+
+```bash
+dub submit --merge-when-ready
+dub submit --stack --merge-when-ready --method merge
+```
+
+The default strategy is `squash`, matching DubStack's clean-history preference. Use `--method merge`, `--method squash`, or `--method rebase` to choose the first strategy DubStack tries. If the repository does not allow that method, DubStack falls back across the other GitHub-supported methods.
+
+GitHub still respects the stacked PR bases, so the bottom PR merges first and the next PRs become mergeable as their bases land. Queuing auto-merge on every submitted PR is safer than only queuing the bottom PR because it survives later stack rebases. If GitHub auto-merge or branch protection is not configured for the target base branch, DubStack surfaces GitHub's error with setup hints.
 
 ```bash
 mkdir -p .github
