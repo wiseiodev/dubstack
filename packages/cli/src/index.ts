@@ -1246,6 +1246,7 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option('--web', 'Open GitHub PR create forms in the browser for new PRs')
   .option(
     '--merge-when-ready',
     'Queue GitHub auto-merge for every submitted PR',
@@ -1260,6 +1261,15 @@ program
     'Comma-separated GitHub users or teams to request for review',
   )
   .option('--no-reviewers', 'Skip repo-default reviewers for this submit')
+  .option(
+    '--rerequest-review',
+    'Re-request review from existing reviewers on updated PRs',
+  )
+  .option(
+    '--rerequest-review-only <users>',
+    'Re-request review only from comma-separated reviewers on updated PRs',
+    parseReviewerList,
+  )
   .addHelpText(
     'after',
     `
@@ -1274,8 +1284,11 @@ Examples:
   $ dub submit --ai         Generate a PR description before updating the PR body
   $ dub submit --reviewers alice,bob,@org/team
                             Request reviewers for every submitted PR
+  $ dub submit --web        Open browser PR create forms for new PRs
   $ dub submit --merge-when-ready --method squash
-                            Queue GitHub auto-merge for submitted PRs`,
+                            Queue GitHub auto-merge for submitted PRs
+  $ dub submit --rerequest-review
+                            Re-request review on updated PRs`,
   )
   .action(runSubmit);
 
@@ -1303,6 +1316,7 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option('--web', 'Open GitHub PR create forms in the browser for new PRs')
   .option(
     '--merge-when-ready',
     'Queue GitHub auto-merge for every submitted PR',
@@ -1317,6 +1331,15 @@ program
     'Comma-separated GitHub users or teams to request for review',
   )
   .option('--no-reviewers', 'Skip repo-default reviewers for this submit')
+  .option(
+    '--rerequest-review',
+    'Re-request review from existing reviewers on updated PRs',
+  )
+  .option(
+    '--rerequest-review-only <users>',
+    'Re-request review only from comma-separated reviewers on updated PRs',
+    parseReviewerList,
+  )
   .action(runSubmit);
 
 program
@@ -1416,6 +1439,8 @@ program
   .alias('land')
   .description('Merge the next safe PR in your current stack path')
   .option('--dry-run', 'Preview merge + post-merge actions')
+  .option('--queue', 'Use GitHub native merge queue when merging')
+  .option('--no-queue', 'Force direct merge even when merge queue is enabled')
   .option(
     '--method <method>',
     'Merge strategy: merge|squash|rebase',
@@ -1436,6 +1461,7 @@ program
     async (options: {
       dryRun?: boolean;
       method?: 'merge' | 'squash' | 'rebase';
+      queue?: boolean;
       restack?: boolean;
       submit?: boolean;
     }) => {
@@ -1466,6 +1492,15 @@ program
         }
       };
       if (result.dryRun) {
+        if (result.mode === 'queue') {
+          console.log(
+            chalk.green(
+              `✔ Dry-run: would enqueue '${result.mergedBranch}' (PR #${result.prNumber}) to the merge queue.`,
+            ),
+          );
+          printSiblingHint();
+          return;
+        }
         console.log(
           chalk.green(
             `✔ Dry-run: would merge '${result.mergedBranch}' (PR #${result.prNumber}).`,
@@ -1478,6 +1513,18 @@ program
             ),
           );
         }
+        printSiblingHint();
+        return;
+      }
+      if (result.mode === 'queue') {
+        console.log(
+          chalk.green(`✔ Enqueued PR #${result.prNumber} to merge queue.`),
+        );
+        console.log(
+          chalk.dim(
+            '  Run `dub sync` after the queue processes to update local state.',
+          ),
+        );
         printSiblingHint();
         return;
       }
@@ -2792,6 +2839,9 @@ async function runSubmit(options: {
   mergeWhenReady?: boolean;
   method?: 'merge' | 'squash' | 'rebase';
   reviewers?: string | false;
+  web?: boolean;
+  rerequestReview?: boolean;
+  rerequestReviewOnly?: string[];
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
@@ -2809,12 +2859,16 @@ async function runSubmit(options: {
     reviewers:
       typeof options.reviewers === 'string' ? options.reviewers : undefined,
     noReviewers: options.reviewers === false,
+    web: options.web,
+    rerequestReview: options.rerequestReview,
+    rerequestReviewOnly: options.rerequestReviewOnly,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
+    const prAction = options.web ? 'check/open' : 'check/create';
     console.log(
       chalk.green(
-        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
+        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and ${prAction} ${result.pushed.length} PR(s).`,
       ),
     );
     return;
@@ -2823,7 +2877,7 @@ async function runSubmit(options: {
   if (result.pushed.length > 0) {
     console.log(
       chalk.green(
-        `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s)`,
+        `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s), opened ${result.webOpened.length} PR form(s)`,
       ),
     );
     if (result.published.length > 0) {
@@ -2833,7 +2887,11 @@ async function runSubmit(options: {
         ),
       );
     }
-    for (const branch of [...result.created, ...result.updated]) {
+    for (const branch of [
+      ...result.created,
+      ...result.updated,
+      ...result.webOpened,
+    ]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
     if (result.autoMergeEnabled.length > 0) {
@@ -2852,6 +2910,23 @@ async function runSubmit(options: {
           `  ↳ Auto-merge already queued for ${result.autoMergeSkipped.length} PR(s)`,
         ),
       );
+    }
+    const reviewRerequests = result.reviewRerequests.filter(
+      (entry) => entry.reviewers.length > 0,
+    );
+    if (reviewRerequests.length > 0) {
+      console.log(
+        chalk.green(
+          `✔ Re-requested review on ${reviewRerequests.length} PR(s)`,
+        ),
+      );
+      for (const entry of reviewRerequests) {
+        console.log(
+          chalk.dim(
+            `  ↳ ${entry.branch} (#${entry.prNumber}): ${entry.reviewers.join(', ')}`,
+          ),
+        );
+      }
     }
     return;
   }
@@ -3212,6 +3287,19 @@ function parseMergeMethod(value: string): 'merge' | 'squash' | 'rebase' {
   throw new DubError('Merge method must be one of: merge, squash, rebase.', [
     "Pass one of: '--method merge', '--method squash', or '--method rebase'.",
   ]);
+}
+
+function parseReviewerList(value: string): string[] {
+  const reviewers = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (reviewers.length === 0) {
+    throw new DubError('Reviewer list cannot be empty.', [
+      "Pass a comma-separated list, for example '--rerequest-review-only monalisa,hubot'.",
+    ]);
+  }
+  return reviewers;
 }
 
 interface HistoryCaptureState {

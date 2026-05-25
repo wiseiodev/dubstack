@@ -2,6 +2,7 @@ import { openUrl } from './browser';
 import { DubError } from './errors';
 import { execa, type Options } from './exec';
 import { type RetryOptions, retry } from './retry';
+import { writeTempMarkdownFile } from './temp-text-file';
 
 /** Details of a GitHub Pull Request. */
 export interface PrInfo {
@@ -10,6 +11,15 @@ export interface PrInfo {
   title: string;
   body: string;
   isDraft?: boolean;
+}
+
+export interface PrReviewer {
+  login: string;
+}
+
+export interface PrReviewers {
+  requested: PrReviewer[];
+  reviewed: PrReviewer[];
 }
 
 export type BranchPrLifecycleState = 'OPEN' | 'CLOSED' | 'MERGED' | 'NONE';
@@ -44,7 +54,27 @@ export interface EnableAutoMergeResult {
   method: MergeMethod;
 }
 
+export interface PrCreateWebInput {
+  branch: string;
+  base: string;
+  title: string;
+  body: string;
+}
+
+export interface PrCreateWebResult {
+  url: string;
+  bodyIncluded: boolean;
+  bodyFilePath: string | null;
+  bodyFileError: string | null;
+}
+
+export interface BranchProtectionMergeQueueStatus {
+  mergeQueueEnabled: boolean;
+}
+
 let ghRetryOverrides: Partial<RetryOptions> = {};
+
+const WEB_PR_BODY_URL_LIMIT = 4000;
 
 /**
  * Test-only seam: overrides retry options applied to every `gh` call wrapped
@@ -249,6 +279,188 @@ export async function getPrByNumber(
       `Run 'gh pr view ${prNumber} --json number,url,title,body' to inspect the response.`,
       'Retry once GitHub is healthy.',
     ]);
+  }
+}
+
+/**
+ * Fetches pending review requests plus users who have already submitted a
+ * review. Team review requests use `org/team-slug` so they can be passed back
+ * to `gh pr edit --add-reviewer`.
+ */
+export async function getPrReviewers(
+  prNumber: number,
+  cwd: string,
+): Promise<PrReviewers> {
+  let stdout: string;
+  try {
+    const result = await runGh(
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'reviewRequests,reviews',
+        '--jq',
+        '.',
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
+    throw new DubError(
+      `Failed to fetch reviewers for PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr view ${prNumber} --json reviewRequests,reviews' to inspect the response.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') {
+    return { requested: [], reviewed: [] };
+  }
+
+  try {
+    return parsePrReviewers(JSON.parse(trimmed));
+  } catch {
+    throw new DubError(`Failed to parse reviewers for PR #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json reviewRequests,reviews' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+}
+
+function parsePrReviewers(value: unknown): PrReviewers {
+  if (!value || typeof value !== 'object') {
+    return { requested: [], reviewed: [] };
+  }
+
+  const record = value as {
+    reviewRequests?: unknown;
+    reviews?: unknown;
+  };
+  return {
+    requested: extractReviewRequestLogins(record.reviewRequests).map(
+      loginToReviewer,
+    ),
+    reviewed: extractReviewLogins(record.reviews).map(loginToReviewer),
+  };
+}
+
+function extractReviewRequestLogins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const request = entry as {
+      login?: unknown;
+      slug?: unknown;
+      name?: unknown;
+      organization?: { login?: unknown };
+    };
+    if (typeof request.login === 'string' && request.login.length > 0) {
+      logins.push(request.login);
+      continue;
+    }
+    if (typeof request.slug === 'string' && request.slug.length > 0) {
+      const org =
+        request.organization &&
+        typeof request.organization.login === 'string' &&
+        request.organization.login.length > 0
+          ? request.organization.login
+          : null;
+      logins.push(org ? `${org}/${request.slug}` : request.slug);
+      continue;
+    }
+    if (typeof request.name === 'string' && request.name.length > 0) {
+      logins.push(request.name);
+    }
+  }
+  return uniqueLogins(logins);
+}
+
+function extractReviewLogins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const review = entry as {
+      author?: { login?: unknown };
+    };
+    const login = review.author?.login;
+    if (typeof login === 'string' && login.length > 0) {
+      logins.push(login);
+    }
+  }
+  return uniqueLogins(logins);
+}
+
+function uniqueLogins(logins: string[]): string[] {
+  return [...new Set(logins.map((login) => login.trim()).filter(Boolean))];
+}
+
+function loginToReviewer(login: string): PrReviewer {
+  return { login };
+}
+
+export async function rerequestPrReviewers(
+  prNumber: number,
+  reviewers: PrReviewers,
+  cwd: string,
+): Promise<string[]> {
+  const requested = new Set(
+    reviewers.requested.map((reviewer) => reviewer.login),
+  );
+  const targets = uniqueLogins([
+    ...reviewers.requested.map((reviewer) => reviewer.login),
+    ...reviewers.reviewed.map((reviewer) => reviewer.login),
+  ]);
+
+  for (const login of targets) {
+    if (requested.has(login)) {
+      await editPrReviewer(prNumber, '--remove-reviewer', login, cwd);
+    }
+    await editPrReviewer(prNumber, '--add-reviewer', login, cwd);
+  }
+
+  return targets;
+}
+
+async function editPrReviewer(
+  prNumber: number,
+  flag: '--add-reviewer' | '--remove-reviewer',
+  login: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await runGh(['pr', 'edit', String(prNumber), flag, login], { cwd });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    const action =
+      flag === '--add-reviewer' ? 'add reviewer' : 'remove reviewer';
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
+    throw new DubError(
+      `Failed to ${action} '${login}' on PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr edit ${prNumber} ${flag} ${login}' manually to inspect the failure.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
   }
 }
 
@@ -886,6 +1098,86 @@ export async function enablePrAutoMerge(
   );
 }
 
+/**
+ * Returns whether the target branch has GitHub native merge queue protection.
+ */
+export async function getBranchMergeQueueStatus(
+  branch: string,
+  cwd: string,
+): Promise<BranchProtectionMergeQueueStatus> {
+  let stdout: string;
+  const endpoint = branchProtectionEndpoint(branch);
+  try {
+    const result = await runGh(['api', endpoint], { cwd });
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    if (isBranchProtectionNotFoundError(root)) {
+      return { mergeQueueEnabled: false };
+    }
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to inspect branch protection for '${branch}': ${message}`,
+      [
+        `Run 'gh api ${endpoint}' to inspect the response.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') {
+    return { mergeQueueEnabled: false };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      required_merge_queue?: unknown;
+    };
+    return {
+      mergeQueueEnabled: parsed.required_merge_queue != null,
+    };
+  } catch {
+    throw new DubError(`Failed to parse branch protection for '${branch}'.`, [
+      `Run 'gh api ${endpoint}' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+}
+
+function branchProtectionEndpoint(branch: string): string {
+  return `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`;
+}
+
+/**
+ * Enqueues a PR using GitHub auto-merge. On merge-queue branches, GitHub adds
+ * the PR to the queue once requirements are satisfied.
+ */
+export async function enqueuePrToMergeQueue(
+  prNumber: number,
+  cwd: string,
+  options: { method?: MergeMethod } = {},
+): Promise<void> {
+  const method = options.method ?? 'squash';
+  try {
+    await runGh(
+      ['pr', 'merge', String(prNumber), '--auto', mergeMethodFlag(method)],
+      { cwd, stdio: 'inherit' },
+    );
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to enqueue PR #${prNumber} to the merge queue: ${message}`,
+      [
+        'Confirm GitHub merge queue and auto-merge are enabled for the target branch.',
+        `Run 'gh pr merge ${prNumber} --auto ${mergeMethodFlag(method)}' manually to see GitHub's raw error.`,
+        `Run 'dub merge-next --no-queue' to force the direct merge path.`,
+      ],
+    );
+  }
+}
+
 function methodFallbackOrder(preferred: MergeMethod): MergeMethod[] {
   const fallback: MergeMethod[] = ['squash', 'merge', 'rebase'];
   return [preferred, ...fallback.filter((method) => method !== preferred)];
@@ -921,6 +1213,16 @@ function isAutoMergeSetupUnavailable(message: string): boolean {
     normalized.includes('not available') ||
     normalized.includes('not enabled') ||
     normalized.includes('disabled')
+  );
+}
+
+function isBranchProtectionNotFoundError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    /\b404\s+not\s+found\b/i.test(message) ||
+    /\bHTTP\s*:?\s*404\b/i.test(message) ||
+    normalized.includes('branch not protected')
   );
 }
 
@@ -1164,6 +1466,55 @@ function normalizeReviewerArgs(reviewers: string[]): string[] {
   return reviewers.map((reviewer) =>
     reviewer.startsWith('@') ? reviewer.slice(1) : reviewer,
   );
+}
+
+export function buildPrCreateWebUrl(
+  repoUrl: string,
+  input: PrCreateWebInput,
+  options: { includeBody?: boolean } = {},
+): string {
+  const normalizedRepoUrl = repoUrl.replace(/\/+$/, '');
+  const url = new URL(
+    `${normalizedRepoUrl}/compare/${encodeCompareRef(input.base)}...${encodeCompareRef(input.branch)}`,
+  );
+  url.searchParams.set('expand', '1');
+  url.searchParams.set('title', input.title);
+  if (options.includeBody ?? true) {
+    url.searchParams.set('body', input.body);
+  }
+  return url.toString();
+}
+
+export async function openPrCreateWebFlow(
+  input: PrCreateWebInput,
+  cwd: string,
+  options: { repoUrl?: string } = {},
+): Promise<PrCreateWebResult> {
+  const repoUrl = options.repoUrl ?? (await getRepositoryWebUrl(cwd));
+  const bodyIncluded = input.body.length <= WEB_PR_BODY_URL_LIMIT;
+  let bodyFilePath: string | null = null;
+  let bodyFileError: string | null = null;
+  if (!bodyIncluded) {
+    try {
+      bodyFilePath = writeTempMarkdownFile('pr-body', input.body);
+    } catch (error) {
+      bodyFileError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const url = buildPrCreateWebUrl(repoUrl, input, {
+    includeBody: bodyIncluded,
+  });
+  try {
+    await openUrl(url);
+  } catch (error) {
+    if (!bodyFilePath) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DubError(message, [
+      `Copy the URL '${url}' into your browser manually.`,
+      `Copy the PR body from '${bodyFilePath}' into the browser form.`,
+    ]);
+  }
+  return { url, bodyIncluded, bodyFilePath, bodyFileError };
 }
 
 /**
@@ -1453,4 +1804,8 @@ function normalizeGitHubRepositoryUrl(remoteUrl: string): string {
       "Run 'git remote set-url origin <github-url>' to point the remote at GitHub.",
     ],
   );
+}
+
+function encodeCompareRef(ref: string): string {
+  return ref.split('/').map(encodeURIComponent).join('/');
 }

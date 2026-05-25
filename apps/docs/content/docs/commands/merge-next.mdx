@@ -8,17 +8,23 @@ description: Merge the next PR in stack order.
 ```bash
 dub merge-next
 dub land
+dub merge-next --queue
+dub merge-next --no-queue
 ```
 
 ## Description
 
 Merges the bottom-most PR in the stack that is approved and passing checks. PRs are merged in order from the base of the stack upward.
 
+When the trunk branch has GitHub native merge queue enabled, `dub merge-next` detects that branch protection and enqueues the PR with GitHub auto-merge instead of directly merging. Queue mode skips post-merge maintenance because the merge has not happened yet; run `dub sync` after GitHub processes the queue.
+
 ## Options
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Show which PR would be merged without merging |
+| `--queue` | Require GitHub native merge queue mode |
+| `--no-queue` | Force the direct merge path even when queue protection is detected |
 
 ## Examples
 
@@ -31,4 +37,10 @@ dub land
 
 # Preview without merging
 dub land --dry-run
+
+# Require queue mode
+dub merge-next --queue
+
+# Force direct merge mode
+dub merge-next --no-queue
 ```

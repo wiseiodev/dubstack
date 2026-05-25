@@ -33,12 +33,19 @@ dub submit --stack
 # Submit only a single named branch
 dub submit --branch feat/api
 
+# Open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # Queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
 
 # Request reviewers on every submitted PR
 dub submit --reviewers alice,bob,@org/team
+
+# Re-request existing reviewers after updating PRs
+dub submit --rerequest-review
+dub submit --rerequest-review-only monalisa,hubot
 ```
 
 ## Flags
@@ -55,16 +62,21 @@ dub submit --reviewers alice,bob,@org/team
 | `--upstack` | Current branch + all descendants |
 | `--stack` | Full tree from trunk |
 | `--branch <name>` | Only the specified branch |
+| `--web` | Open GitHub PR create forms in the browser for branches without open PRs |
 | `--merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
 | `--method <method>` | Auto-merge strategy: `squash` (default), `merge`, or `rebase` |
 | `--reviewers <list>` | Request comma-separated GitHub users or teams on every submitted PR |
 | `--no-reviewers` | Skip repo-default reviewers for this submit |
+| `--rerequest-review` | Re-request review from existing reviewers on updated PRs |
+| `--rerequest-review-only <users>` | Re-request review only from comma-separated reviewers on updated PRs |
 | `--path <mode>` | _[deprecated]_ `current` maps to `--downstack`; `stack` maps to `--stack`. Removed in v2. |
 | `--fix` | _[deprecated]_ No-op alias retained for script compatibility |
 
 Scope flags are mutually exclusive. Passing more than one (or combining a scope flag with `--path`) is a validation error.
 
 `--draft` and `--publish` are mutually exclusive. `--draft` only affects newly created PRs; existing PRs stay in their current lifecycle state. `--publish` requires every selected branch to already have an open PR.
+
+`--rerequest-review` runs only for PRs that already existed before submit updated them. Newly created PRs are skipped. Use `--rerequest-review-only <users>` with a comma-separated list to re-request a smaller reviewer set.
 
 **Aliases:** `dub ss`
 
@@ -123,6 +135,12 @@ dub config reviewers --clear
 ```
 
 `dub submit` applies configured defaults unless you pass `--reviewers` for a one-run override or `--no-reviewers` to skip reviewer requests. DubStack validates user reviewers against repository collaborators and team reviewers against organization team slugs with repository access before it pushes branches or mutates PRs, so invalid handles fail early with a DubStack error.
+
+## Browser Create Flow
+
+`dub submit --web` pushes the submit scope, then opens the GitHub compare/create URL for each branch that does not already have an open PR. The browser form is prefilled with the commit-title PR title and the generated DubStack body. Existing PRs skip the browser create flow and are refreshed through `gh` just like a normal submit.
+
+When the generated body is longer than 4000 characters, DubStack writes it to a temp file, opens a title-only create URL, and prints the temp path so you can paste the body manually. After creating browser-opened PRs, rerun `dub submit` if you want DubStack to sync PR numbers and refresh hidden stack metadata.
 
 ## Auto-Merge Queue
 

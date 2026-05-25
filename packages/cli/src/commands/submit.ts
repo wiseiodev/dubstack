@@ -27,10 +27,14 @@ import {
   enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  getPrReviewers,
+  getRepositoryWebUrl,
   isPrAutoMergeEnabled,
   type MergeMethod,
   markPrReady,
+  openPrCreateWebFlow,
   type PrInfo,
+  rerequestPrReviewers,
   updatePrBody,
   validatePrReviewers,
 } from '../lib/github';
@@ -80,6 +84,9 @@ export interface SubmitOptions {
   method?: MergeMethod;
   reviewers?: string;
   noReviewers?: boolean;
+  web?: boolean;
+  rerequestReview?: boolean;
+  rerequestReviewOnly?: string[];
   summaryOverrides?: Map<string, string>;
 }
 
@@ -96,9 +103,15 @@ export interface SubmitResult {
   pushed: string[];
   created: string[];
   updated: string[];
+  webOpened: string[];
   published: string[];
   autoMergeEnabled: string[];
   autoMergeSkipped: string[];
+  reviewRerequests: Array<{
+    branch: string;
+    prNumber: number;
+    reviewers: string[];
+  }>;
   scope: SubmitScope;
   dryRun: boolean;
 }
@@ -211,9 +224,11 @@ export async function submit(
     pushed: [],
     created: [],
     updated: [],
+    webOpened: [],
     published: [],
     autoMergeEnabled: [],
     autoMergeSkipped: [],
+    reviewRerequests: [],
     scope: plan.scope,
     dryRun,
   };
@@ -223,6 +238,7 @@ export async function submit(
     plan.stack.branches,
     plan.rootBranch,
   );
+  let webRepoUrl: string | null = null;
 
   try {
     if (lifecycle === 'publish') {
@@ -271,9 +287,10 @@ export async function submit(
             );
           }
         } else {
-          console.log(
-            `[dry-run] would check/create PR: ${branch.name} → ${base}`,
-          );
+          const prAction = options.web
+            ? 'check/open PR form'
+            : 'check/create PR';
+          console.log(`[dry-run] would ${prAction}: ${branch.name} → ${base}`);
         }
         continue;
       }
@@ -288,6 +305,46 @@ export async function submit(
         if (reviewers.length > 0) {
           await addPrReviewers(existing.number, reviewers, cwd);
         }
+      } else if (options.web) {
+        const title = await getLastCommitMessage(branch.name, cwd);
+        const body = await buildWebCreatePrBody(
+          branch,
+          title,
+          plan.stack.branches,
+          prMap,
+          cwd,
+          {
+            useAi,
+            deps,
+            summaryOverrides: options.summaryOverrides,
+            prTemplate: templates?.prTemplate ?? null,
+            providerConfig: config.ai.provider,
+          },
+        );
+        webRepoUrl ??= await getRepositoryWebUrl(cwd);
+        const opened = await openPrCreateWebFlow(
+          {
+            branch: branch.name,
+            base,
+            title,
+            body,
+          },
+          cwd,
+          { repoUrl: webRepoUrl },
+        );
+        if (!opened.bodyIncluded && opened.bodyFilePath) {
+          console.log(
+            `⚠ PR body for '${branch.name}' is too large for a GitHub create URL; copy it from ${opened.bodyFilePath} into the browser form.`,
+          );
+        } else if (!opened.bodyIncluded) {
+          const reason = opened.bodyFileError
+            ? ` (${opened.bodyFileError})`
+            : '';
+          console.log(
+            `⚠ PR body for '${branch.name}' is too large for a GitHub create URL and could not be written to a temp file${reason}; paste the body manually if needed.`,
+          );
+        }
+        result.webOpened.push(branch.name);
       } else {
         if (lifecycle === 'publish') {
           throw new DubError(
@@ -335,6 +392,16 @@ export async function submit(
 
       if (lifecycle === 'publish') {
         await publishDraftPrs(plan.branches, prMap, cwd, result);
+      }
+
+      if (options.rerequestReview || options.rerequestReviewOnly != null) {
+        await rerequestUpdatedPrReviews(
+          plan.branches,
+          prMap,
+          cwd,
+          options,
+          result,
+        );
       }
 
       for (const branch of plan.branches) {
@@ -394,6 +461,11 @@ export async function submit(
           result.autoMergeEnabled.push(branch.name);
         }
         progress.complete('🔁 Enabling auto-merge');
+        if (options.web && result.webOpened.length > 0) {
+          console.log(
+            `⚠ Skipped auto-merge for ${result.webOpened.length} PR(s) opened in the browser; rerun 'dub submit --merge-when-ready' after creating them.`,
+          );
+        }
       }
     } else if (dryRun && options.mergeWhenReady) {
       console.log(
@@ -415,6 +487,69 @@ function resolveReviewers(
   if (options.reviewers != null) return parseReviewerList(options.reviewers);
   if (defaultReviewers.length === 0) return [];
   return parseReviewerList(defaultReviewers.join(','));
+}
+
+async function buildWebCreatePrBody(
+  branch: Branch,
+  commitMessage: string,
+  stackBranches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+  options: {
+    useAi: boolean;
+    deps: SubmitDependencies;
+    summaryOverrides?: Map<string, string>;
+    prTemplate: string | null;
+    providerConfig: NonNullable<
+      Awaited<ReturnType<typeof readConfig>>['ai']
+    >['provider'];
+  },
+): Promise<string> {
+  const tableEntries = new Map<string, { number: number; title: string }>();
+  for (const stackBranch of stackBranches) {
+    const pr = prMap.get(stackBranch.name);
+    if (pr) {
+      tableEntries.set(stackBranch.name, {
+        number: pr.number,
+        title: pr.title,
+      });
+    } else if (stackBranch.pr_number != null) {
+      tableEntries.set(stackBranch.name, {
+        number: stackBranch.pr_number,
+        title: stackBranch.name,
+      });
+    }
+  }
+
+  const aiSummaryOverride = options.summaryOverrides?.get(branch.name);
+  const aiSummary =
+    typeof aiSummaryOverride === 'string'
+      ? aiSummaryOverride
+      : options.useAi
+        ? await generatePrDescriptionSummary(
+            {
+              branch: branch.name,
+              baseBranch: branch.parent as string,
+              commitMessage,
+              diff: await getDiffForPrDescription(
+                branch.name,
+                branch.parent as string,
+                cwd,
+              ),
+            },
+            options.deps,
+            {
+              prTemplate: options.prTemplate,
+            },
+            options.providerConfig,
+          )
+        : '';
+  return composePrBody(
+    '',
+    aiSummary,
+    buildStackTable(stackBranches, tableEntries, branch.name),
+    '',
+  );
 }
 
 export async function resolveSubmitLifecycle(
@@ -478,6 +613,53 @@ async function publishDraftPrs(
     await markPrReady(pr.number, cwd);
     result.published.push(branch.name);
   }
+}
+
+async function rerequestUpdatedPrReviews(
+  branches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+  options: Pick<SubmitOptions, 'rerequestReviewOnly'>,
+  result: SubmitResult,
+): Promise<void> {
+  const updatedBranches = new Set(result.updated);
+  const only = options.rerequestReviewOnly
+    ? new Set(options.rerequestReviewOnly)
+    : null;
+
+  for (const branch of branches) {
+    if (!updatedBranches.has(branch.name)) continue;
+    const pr = prMap.get(branch.name);
+    if (!pr) continue;
+
+    const reviewers = await getPrReviewers(pr.number, cwd);
+    const requested = filterReviewers(reviewers.requested, only);
+    const reviewed = filterReviewers(reviewers.reviewed, only);
+    const rerequested = await rerequestPrReviewers(
+      pr.number,
+      { requested, reviewed },
+      cwd,
+    );
+
+    result.reviewRerequests.push({
+      branch: branch.name,
+      prNumber: pr.number,
+      reviewers: rerequested,
+    });
+    console.log(
+      rerequested.length > 0
+        ? `Re-requested review for PR #${pr.number} (${branch.name}): ${rerequested.join(', ')}`
+        : `No reviewers to re-request for PR #${pr.number} (${branch.name}).`,
+    );
+  }
+}
+
+function filterReviewers(
+  reviewers: Array<{ login: string }>,
+  only: Set<string> | null,
+): Array<{ login: string }> {
+  if (!only) return reviewers;
+  return reviewers.filter((reviewer) => only.has(reviewer.login));
 }
 
 export async function getSubmitPlan(

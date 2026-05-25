@@ -21,6 +21,7 @@ describe('flow', () => {
       pushed: ['feat/flow-preview'],
       created: ['feat/flow-preview'],
       updated: [],
+      webOpened: [],
       scope: { kind: 'downstack' },
       dryRun: false,
     });
@@ -145,6 +146,7 @@ describe('flow', () => {
           pushed: ['feat/flow-preview'],
           created: ['feat/flow-preview'],
           updated: [],
+          webOpened: [],
           scope: { kind: 'downstack' },
           dryRun: false,
         }),

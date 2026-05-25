@@ -160,6 +160,7 @@ beforeEach(() => {
     pushed: ['feat/b'],
     created: [],
     updated: ['feat/b'],
+    webOpened: [],
     scope: { kind: 'downstack' },
     dryRun: false,
   });
@@ -369,6 +370,7 @@ describe('postMerge', () => {
         pushed: ['feat/b', 'feat/c'],
         created: [],
         updated: ['feat/b', 'feat/c'],
+        webOpened: [],
         scope: { kind: 'stack' },
         dryRun: false,
       };
@@ -441,6 +443,7 @@ describe('postMerge', () => {
       pushed: ['feat/a'],
       created: [],
       updated: ['feat/a'],
+      webOpened: [],
       scope: { kind: 'downstack' },
       dryRun: false,
     });

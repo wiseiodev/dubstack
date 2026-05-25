@@ -185,6 +185,9 @@ dub ss --branch feat/api
 # AI-generate PR description body
 dub submit --ai
 
+# open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method squash
@@ -289,9 +292,15 @@ dub merge-check --pr 123
 
 # safest merge flow (bottom-up + maintenance)
 # merge-next pre-retargets direct child PRs before deleting merged branches
+# or enqueues when GitHub merge queue is enabled on trunk
 dub merge-next
 dub merge-next
 ```
+
+When trunk uses GitHub's native merge queue, `dub merge-next` defaults to queue
+mode and skips post-merge maintenance until the queue lands the PR. Run
+`dub sync` after GitHub processes the queue, or pass `--no-queue` to force the
+direct merge path.
 
 History note:
 

@@ -11,33 +11,46 @@ vi.mock('execa', () => ({
   execa: vi.fn(),
 }));
 
+vi.mock('./browser.js', () => ({
+  openUrl: vi.fn(),
+}));
+
 import { execa } from 'execa';
+import { openUrl } from './browser';
 import {
   __setGhRetryOptionsForTesting,
   addPrReviewers,
+  buildPrCreateWebUrl,
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
+  enqueuePrToMergeQueue,
   ensureGhInstalled,
   getAllPrSyncInfoBatch,
+  getBranchMergeQueueStatus,
   getBranchPrLifecycleState,
   getBranchPrSyncInfo,
   getPr,
   getPrByNumber,
   getPrMergeStatusByNumber,
+  getPrReviewers,
   getPrStateByNumber,
   getRepositoryWebUrl,
   getStackOverviewPrBatch,
   isPrAutoMergeEnabled,
   markPrReady,
   mergePr,
+  openPrCreateWebFlow,
   openPrInBrowser,
+  rerequestPrReviewers,
   retargetPrBase,
   updatePrBody,
   validatePrReviewers,
 } from './github';
+import { removeTempFile } from './temp-text-file';
 
 const mockExeca = execa as unknown as MockInstance;
+const mockOpenUrl = openUrl as unknown as MockInstance;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -126,6 +139,95 @@ describe('getPrByNumber', () => {
       new Error('GraphQL: Could not resolve to a PullRequest with the number'),
     );
     await expect(getPrByNumber(999999, '/repo')).resolves.toBeNull();
+  });
+});
+
+describe('getPrReviewers', () => {
+  it('returns pending reviewer requests and review authors', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        reviewRequests: [
+          { __typename: 'User', login: 'monalisa' },
+          {
+            __typename: 'Team',
+            slug: 'frontend',
+            organization: { login: 'octo-org' },
+          },
+        ],
+        reviews: [
+          { author: { login: 'hubot' } },
+          { author: { login: 'hubot' } },
+        ],
+      }),
+    });
+
+    await expect(getPrReviewers(42, '/repo')).resolves.toEqual({
+      requested: [{ login: 'monalisa' }, { login: 'octo-org/frontend' }],
+      reviewed: [{ login: 'hubot' }],
+    });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', '42', '--json', 'reviewRequests,reviews', '--jq', '.'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('throws a permission-focused error when reviewer lookup is forbidden', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
+
+    await expect(getPrReviewers(42, '/repo')).rejects.toThrow(
+      'GitHub token lacks required permissions',
+    );
+  });
+});
+
+describe('rerequestPrReviewers', () => {
+  it('removes and re-adds pending reviewers and adds prior reviewers', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: '' });
+
+    const result = await rerequestPrReviewers(
+      42,
+      {
+        requested: [{ login: 'monalisa' }],
+        reviewed: [{ login: 'hubot' }, { login: 'monalisa' }],
+      },
+      '/repo',
+    );
+
+    expect(result).toEqual(['monalisa', 'hubot']);
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['pr', 'edit', '42', '--remove-reviewer', 'monalisa'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'monalisa'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      3,
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'hubot'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('throws a permissions error when GitHub rejects reviewer edits', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('403 insufficient scope'));
+
+    await expect(
+      rerequestPrReviewers(
+        42,
+        { requested: [{ login: 'monalisa' }], reviewed: [] },
+        '/repo',
+      ),
+    ).rejects.toThrow('GitHub token lacks required permissions');
   });
 });
 
@@ -705,6 +807,105 @@ describe('createPr', () => {
   });
 });
 
+describe('buildPrCreateWebUrl', () => {
+  it('constructs a GitHub compare URL with encoded title and body', () => {
+    const url = buildPrCreateWebUrl('https://github.com/o/r', {
+      base: 'main',
+      branch: 'feat/pr-flow',
+      title: 'feat: add submit web flow',
+      body: '## Summary\n\nAdds browser PR creation.',
+    });
+
+    expect(url).toBe(
+      'https://github.com/o/r/compare/main...feat/pr-flow?expand=1&title=feat%3A+add+submit+web+flow&body=%23%23+Summary%0A%0AAdds+browser+PR+creation.',
+    );
+  });
+
+  it('can omit the body for long PR descriptions', () => {
+    const url = buildPrCreateWebUrl(
+      'https://github.com/o/r',
+      {
+        base: 'main',
+        branch: 'feat/a',
+        title: 'feat: a',
+        body: 'x'.repeat(4001),
+      },
+      { includeBody: false },
+    );
+
+    expect(url).toBe(
+      'https://github.com/o/r/compare/main...feat/a?expand=1&title=feat%3A+a',
+    );
+  });
+});
+
+describe('openPrCreateWebFlow', () => {
+  it('writes a temp body file and opens a title-only URL when the body is large', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r.git',
+      });
+    mockOpenUrl.mockResolvedValueOnce(undefined);
+
+    const result = await openPrCreateWebFlow(
+      {
+        base: 'main',
+        branch: 'feat/a',
+        title: 'feat: a',
+        body: 'x'.repeat(4001),
+      },
+      '/repo',
+    );
+
+    expect(result.bodyIncluded).toBe(false);
+    expect(result.bodyFilePath).toContain('dubstack-pr-body-');
+    expect(mockOpenUrl).toHaveBeenCalledWith(
+      'https://github.com/o/r/compare/main...feat/a?expand=1&title=feat%3A+a',
+    );
+    if (result.bodyFilePath) {
+      removeTempFile(result.bodyFilePath);
+    }
+  });
+
+  it('preserves the temp body file path when browser opening fails', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r.git',
+      });
+    mockOpenUrl.mockRejectedValueOnce(new Error('Failed to open URL'));
+
+    let bodyFilePath: string | null = null;
+    try {
+      await openPrCreateWebFlow(
+        {
+          base: 'main',
+          branch: 'feat/a',
+          title: 'feat: a',
+          body: 'x'.repeat(4001),
+        },
+        '/repo',
+      );
+      throw new Error('Expected openPrCreateWebFlow to fail');
+    } catch (error) {
+      expect(error).toMatchObject({
+        recovery: expect.arrayContaining([
+          expect.stringContaining('dubstack-pr-body-'),
+        ]),
+      });
+      const recovery = (error as { recovery?: string[] }).recovery ?? [];
+      const fileHint = recovery.find((hint) =>
+        hint.includes('dubstack-pr-body-'),
+      );
+      bodyFilePath =
+        fileHint?.match(/'([^']*dubstack-pr-body-[^']+)'/)?.[1] ?? null;
+    } finally {
+      if (bodyFilePath) removeTempFile(bodyFilePath);
+    }
+  });
+});
+
 describe('markPrReady', () => {
   it('calls gh pr ready with the PR number', async () => {
     mockExeca.mockResolvedValueOnce({ stdout: '' });
@@ -915,6 +1116,104 @@ describe('enablePrAutoMerge', () => {
       ),
     });
     expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getBranchMergeQueueStatus', () => {
+  it('returns true when branch protection includes required_merge_queue', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        required_status_checks: { strict: true },
+        required_merge_queue: { merge_method: 'SQUASH' },
+      }),
+    });
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: true,
+    });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['api', 'repos/{owner}/{repo}/branches/main/protection'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('returns false when branch protection has no merge queue', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        required_status_checks: { strict: true },
+        enforce_admins: { enabled: true },
+      }),
+    });
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: false,
+    });
+  });
+
+  it('returns false when branch protection is not enabled', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: false,
+    });
+  });
+
+  it('encodes branch names for the branch protection endpoint', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({ required_merge_queue: {} }),
+    });
+
+    await getBranchMergeQueueStatus('release/next', '/repo');
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['api', 'repos/{owner}/{repo}/branches/release%2Fnext/protection'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('uses the encoded branch endpoint in branch-protection recovery hints', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: '{invalid-json',
+    });
+
+    await expect(
+      getBranchMergeQueueStatus('release/next', '/repo'),
+    ).rejects.toMatchObject({
+      message: "Failed to parse branch protection for 'release/next'.",
+      recovery: expect.arrayContaining([
+        expect.stringContaining(
+          'repos/{owner}/{repo}/branches/release%2Fnext/protection',
+        ),
+      ]),
+    });
+  });
+});
+
+describe('enqueuePrToMergeQueue', () => {
+  it('enables auto-merge with squash strategy for merge queue enrollment', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(enqueuePrToMergeQueue(44, '/repo')).resolves.toBeUndefined();
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--squash'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+
+  it('surfaces enqueue failures with queue-specific recovery', async () => {
+    mockExeca.mockRejectedValue(new Error('merge queue disabled'));
+
+    await expect(enqueuePrToMergeQueue(44, '/repo')).rejects.toMatchObject({
+      message: expect.stringContaining(
+        'Failed to enqueue PR #44 to the merge queue',
+      ),
+      recovery: expect.arrayContaining([
+        expect.stringContaining('merge queue'),
+      ]),
+    });
   });
 });
 

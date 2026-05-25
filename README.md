@@ -445,9 +445,16 @@ dub submit --stack
 # submit only a single named branch
 dub submit --branch feat/api
 
+# open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
+
+# re-request existing reviewers after updating PRs
+dub submit --rerequest-review
+dub submit --rerequest-review-only monalisa,hubot
 ```
 
 Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exclusive. Passing more than one is a validation error.
@@ -461,6 +468,9 @@ Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exc
 Notes:
 - `--no-ai` disables AI PR description generation for one invocation.
 - AI submit only writes the PR description body; the PR title still comes from the last commit message.
+- `--web` pushes branches and opens GitHub compare/create URLs for branches without open PRs, with the title and body prefilled. Existing PRs still update through `gh` as usual. If the generated body is longer than 4000 characters, DubStack writes it to a temp file and opens a title-only URL so you can paste the body manually.
+- `--rerequest-review` re-requests review on updated PRs only. New PRs are skipped because they have no existing reviewers.
+- `--rerequest-review-only <users>` limits re-requests to a comma-separated reviewer list.
 - `--merge-when-ready` queues GitHub auto-merge on every PR in the submit scope. The default strategy is `squash`; pass `--method merge`, `--method squash`, or `--method rebase` to choose another strategy. DubStack starts with the requested strategy and falls back across repository-allowed methods.
 - Enabling auto-merge on every submitted PR is safer than only enabling it on the bottom PR: GitHub still respects stacked-base ordering, and the queue survives later rebases of the stack.
 - If the repo has a PR template in a supported GitHub template location, DubStack preserves that structure when generating AI PR descriptions.
@@ -636,8 +646,11 @@ dub merge-check --pr 123
 
 ### `dub merge-next` / `dub land`
 
-Merge the next safe PR in your current stack path, pre-retarget direct child PRs
-to the parent base, then run post-merge maintenance.
+Merge the next safe PR in your current stack path. On direct-merge branches,
+DubStack pre-retargets direct child PRs to the parent base, then runs
+post-merge maintenance. On GitHub merge-queue protected trunk branches,
+DubStack enqueues the PR instead and tells you to run `dub sync` after the
+queue processes.
 
 ```bash
 dub merge-next
@@ -646,6 +659,12 @@ dub land
 
 # preview only
 dub merge-next --dry-run
+
+# force GitHub native merge queue mode
+dub merge-next --queue
+
+# bypass queue auto-detection and direct-merge
+dub merge-next --no-queue
 ```
 
 ### `dub post-merge`
@@ -1053,6 +1072,13 @@ dub merge-next
 # run again for the next layer
 dub merge-next
 ```
+
+If the trunk branch uses GitHub's native merge queue, `dub merge-next` detects
+that branch protection and defaults to queue mode. Queue mode uses
+`gh pr merge --auto --squash`, skips local post-merge maintenance because the
+merge has not happened yet, and prints the follow-up `dub sync` command to run
+after GitHub processes the queue. Use `--queue` to require queue mode or
+`--no-queue` to force the direct merge path.
 
 If you merged manually, normalize state and retarget remaining PRs:
 
