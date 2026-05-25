@@ -11,8 +11,10 @@ coverage
 
 .worktrees
 .dispatch
+.reports
 .evalite
 .evalite-export
+.reports
 
 # Turborepo
 .turbo

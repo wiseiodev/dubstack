@@ -18,11 +18,13 @@
     "post-merge",
     "fold",
     "move",
+    "absorb",
     "unlink",
     "undo",
     "doctor",
     "track",
     "rename",
+    "revert",
     "stash",
     "skills"
   ]

@@ -3,13 +3,15 @@ import { resumeCleanup } from '../lib/cleanup-resume';
 import { DubError } from '../lib/errors';
 import { rebaseContinue } from '../lib/git';
 import { detectActiveOperation } from '../lib/operation-state';
+import { absorbContinue } from './absorb';
 import { aiResolve } from './ai-resolve';
 import { restackContinue } from './restack';
 
 interface ContinueCommandResult {
-  continued: 'rebase' | 'restack' | 'ai-resolve' | 'cleanup';
+  continued: 'rebase' | 'restack' | 'ai-resolve' | 'cleanup' | 'absorb';
   restackResult?: Awaited<ReturnType<typeof restackContinue>>;
   cleanupResult?: Awaited<ReturnType<typeof resumeCleanup>>;
+  absorbResult?: Awaited<ReturnType<typeof absorbContinue>>;
 }
 
 export async function continueCommand(
@@ -46,6 +48,11 @@ export async function continueCommand(
       "Run 'dub restack' to start restacking the current stack.",
       "Run 'git rebase --continue' if you have an in-progress rebase outside DubStack.",
     ]);
+  }
+
+  if (active === 'absorb') {
+    const absorbResult = await absorbContinue(cwd);
+    return { continued: 'absorb', absorbResult };
   }
 
   if (active === 'restack') {

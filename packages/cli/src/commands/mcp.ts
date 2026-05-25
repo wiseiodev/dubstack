@@ -7,6 +7,7 @@ import { getCurrentBranch } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
 import { getStackOverviewBatch } from '../lib/stack-overview';
+import { absorb } from './absorb';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
@@ -16,6 +17,7 @@ import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
 import { parent } from './parent';
+import { revert } from './revert';
 import { stashList, stashPop, stashPush } from './stash';
 import { status } from './status';
 import { submit } from './submit';
@@ -96,10 +98,12 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.revert': ['target', 'branch', 'submit'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
   'dubstack.stash-list': [],
+  'dubstack.absorb': ['ai', 'stack', 'dryRun'],
 };
 
 const BRANCH_SCHEMA = {
@@ -348,6 +352,59 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.revert',
+    description:
+      'Create a branch on trunk that reverts a merged PR or commit and track it as a new stack root.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description: 'Merged PR number (e.g. "123") or commit SHA to revert.',
+        },
+        branch: {
+          type: 'string',
+          description:
+            'Override the auto-generated branch name (default: revert/<source>-<short-sha>).',
+        },
+        submit: {
+          type: 'boolean',
+          description:
+            'Push the revert branch and open a PR after creating it.',
+        },
+      },
+      required: ['target'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.absorb',
+    description:
+      'Distribute fixup commits to their targets — autosquash by default, AI-pick targets with `ai`, cross-branch with `stack`.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ai: {
+          type: 'boolean',
+          description:
+            'AI-pick targets for ambiguous WIP commits on the current branch.',
+        },
+        stack: {
+          type: 'boolean',
+          description:
+            'Move fixup commits whose target lives on a different branch in the stack.',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Preview the plan without mutating.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -817,6 +874,31 @@ async function callTool(
       }
       return mutatingToolResult(() => checkout(branch, cwd));
     }
+    case 'dubstack.revert': {
+      const target = optionalString(args.target);
+      if (!target) {
+        throw new DubError("'target' is required for dubstack.revert.", [
+          "Pass {'target': '<pr-number-or-sha>'} in the tool arguments.",
+        ]);
+      }
+      if (optionalBoolean(args.editMessage)) {
+        // `git revert --edit` opens an interactive editor and would deadlock
+        // the MCP server — its stdio capture can't proxy a TTY.
+        throw new DubError(
+          "'editMessage' is not supported via the MCP tool — it requires a TTY.",
+          [
+            "Run 'dub revert --edit-message <target>' from a terminal instead.",
+            "Drop 'editMessage' from the MCP call to use --no-edit.",
+          ],
+        );
+      }
+      return mutatingToolResult(() =>
+        revert(cwd, target, {
+          branchName: optionalString(args.branch),
+          submit: optionalBoolean(args.submit),
+        }),
+      );
+    }
     case 'dubstack.delete':
       return mutatingToolResult(() =>
         deleteCommand(cwd, optionalString(args.branch), {
@@ -855,6 +937,16 @@ async function callTool(
       );
     case 'dubstack.stash-list':
       return jsonToolResult(await stashList(cwd));
+    case 'dubstack.absorb':
+      return mutatingToolResult(() =>
+        absorb(cwd, {
+          ai: optionalBoolean(args.ai),
+          stack: optionalBoolean(args.stack),
+          dryRun: optionalBoolean(args.dryRun),
+          interactive: false,
+          quiet: true,
+        }),
+      );
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`, [
         'Call tools/list to discover the available dubstack.* tool names.',

@@ -1,0 +1,88 @@
+---
+title: dub absorb
+description: Distribute fixup commits to their targets — git-native autosquash, AI ambiguity resolver, or cross-branch mover.
+---
+
+`dub absorb` takes accumulated fixup-style commits and folds each one into the
+right earlier commit. Three modes cover the three cases that show up in
+real-world stacked work:
+
+| Mode                | What it does                                                                                                                    | When to reach for it                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `dub absorb`        | Runs `git rebase --autosquash` for literal `fixup!` / `squash!` prefixes on the current branch.                                 | Standard reviewer-feedback flow: you used `git commit --fixup <sha>` while addressing notes.  |
+| `dub absorb --ai`   | Asks the configured AI provider to pick a target for each ambiguous WIP commit (≤ 50 chars, non-conventional, single-file).     | You have "wip", "tweak", "fix bug" commits sprinkled through the branch and want them folded. |
+| `dub absorb --stack`| Finds fixup commits whose target subject lives on a *different* branch in the stack, moves them, then restacks both branches.   | A reviewer's comment lands on the wrong branch and the fix belongs upstream.                  |
+
+After every successful absorb, DubStack restacks descendants automatically so
+children pick up the rewritten history in one step.
+
+## Usage
+
+```bash
+dub absorb              # autosquash literal fixup!/squash! commits on the current branch
+dub absorb --ai         # AI-pick targets for ambiguous WIP commits
+dub absorb --stack      # move cross-branch fixups across the stack
+dub absorb --dry-run    # print the plan without mutating
+```
+
+`--ai` and `--stack` are mutually exclusive.
+
+## What it adds beyond git-native autosquash
+
+`git rebase --autosquash` already handles the "literal `fixup!` /  `squash!`
+prefix points at a specific earlier commit by subject match" case natively.
+`dub absorb` adds two things on top:
+
+1. **Ambiguity resolution.** A WIP commit that touches files modified in
+   multiple earlier commits has no native autosquash target. `--ai` picks the
+   target by combining file-overlap with subject semantics.
+2. **Cross-branch absorption.** A fixup on branch B that semantically belongs
+   on a commit on parent branch A. Git-native autosquash doesn't cross
+   branch boundaries; `--stack` does.
+
+## Conflicts
+
+If any rebase pauses on a conflict, you'll see the standard recovery hints:
+
+- `dub continue` — finishes the rebase after you stage your resolution.
+- `dub continue --ai` — asks the configured AI provider to resolve the
+  conflict, then continues automatically.
+- `dub abort` — rolls back the absorb and clears the in-progress state.
+
+`dub undo` rolls back the entire stack to its pre-absorb tips when you've
+already completed the absorb but decided you don't want it.
+
+## Examples
+
+### Reviewer-feedback workflow (default mode)
+
+```bash
+# While addressing review notes:
+git commit --fixup HEAD~2 -m "fix: handle null case"
+git commit --fixup HEAD~4 -m "fix: typo"
+
+# Fold both fixups into their targets and restack descendants:
+dub absorb
+```
+
+### AI ambiguity resolution
+
+```bash
+# You have a string of WIP commits with no fixup! prefix:
+#   feat: add api endpoint
+#   feat: add validator
+#   wip
+#   tweak the validator
+#   address feedback
+
+# Let the AI pick targets:
+dub absorb --ai
+```
+
+### Cross-branch fixup
+
+```bash
+# feat/login is a child of feat/auth-base. You realize a "fixup! feat: add jwt
+# helper" commit you made on feat/login actually belongs on feat/auth-base.
+dub absorb --stack
+```

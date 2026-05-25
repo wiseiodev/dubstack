@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
+import { absorb } from './commands/absorb';
 import { branchInfoOutput } from './commands/branch';
 import {
   checkout,
@@ -53,6 +54,7 @@ import { ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { revert } from './commands/revert';
 import type { SplitMode } from './commands/split';
 import { split } from './commands/split';
 import { squash } from './commands/squash';
@@ -781,6 +783,68 @@ Examples:
   );
 
 program
+  .command('absorb')
+  .description(
+    'Distribute fixup commits to their target commits (git-native autosquash, AI ambiguity resolver, or cross-branch mover)',
+  )
+  .option(
+    '--ai',
+    'AI-pick targets for ambiguous WIP commits on the current branch',
+  )
+  .option(
+    '--stack',
+    'Move fixup commits whose target lives on a different branch in the stack',
+  )
+  .option('--dry-run', 'Print what would be absorbed without mutating')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub absorb                Autosquash literal 'fixup!' / 'squash!' commits on the current branch
+  $ dub absorb --ai           Use the configured AI provider to pick targets for ambiguous WIP commits
+  $ dub absorb --stack        Move fixup commits across branches in the stack, then restack
+  $ dub absorb --dry-run      Print the plan without mutating`,
+  )
+  .action(
+    async (options: { ai?: boolean; stack?: boolean; dryRun?: boolean }) => {
+      const result = await absorb(process.cwd(), options);
+      if (result.conflict) {
+        console.log(
+          chalk.yellow(
+            `⚠ Conflict during absorb on '${result.branch}'. Resolve and run 'dub continue' (or 'dub continue --ai').`,
+          ),
+        );
+        return;
+      }
+      if (result.absorbed === 0 && result.skipped === 0) {
+        console.log(
+          chalk.dim(
+            result.mode === 'stack'
+              ? 'Nothing to absorb: no cross-branch fixup commits found.'
+              : 'Nothing to absorb: no fixup commits found.',
+          ),
+        );
+        return;
+      }
+      const verb = options.dryRun ? 'Would absorb' : '✔ Absorbed';
+      console.log(chalk.green(`${verb} ${result.absorbed} commit(s)`));
+      if (result.skipped > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ skipped: ${result.skipped} ambiguous commit(s) the AI could not assign`,
+          ),
+        );
+      }
+      if (result.movedTo.length > 0) {
+        console.log(chalk.dim(`  ↳ moved onto: ${result.movedTo.join(', ')}`));
+      }
+      if (result.restacked.length > 0) {
+        console.log(chalk.dim(`  ↳ restacked: ${result.restacked.join(', ')}`));
+      }
+    },
+  );
+
+program
   .command('unlink')
   .argument('<branch>', 'Branch to detach from its parent')
   .option(
@@ -1033,6 +1097,17 @@ program
       console.log(chalk.green('✔ Continued git rebase.'));
       return;
     }
+    if (result.continued === 'absorb') {
+      console.log(chalk.green('✔ Continued absorb.'));
+      if (result.absorbResult && result.absorbResult.restacked.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ restacked: ${result.absorbResult.restacked.join(', ')}`,
+          ),
+        );
+      }
+      return;
+    }
     if (result.restackResult?.status === 'conflict') {
       console.log(
         chalk.yellow(
@@ -1060,6 +1135,10 @@ program
     const result = await abortCommand(process.cwd());
     if (result.aborted === 'restack') {
       console.log(chalk.green('✔ Aborted restack and cleared progress.'));
+      return;
+    }
+    if (result.aborted === 'absorb') {
+      console.log(chalk.green('✔ Aborted absorb and cleared progress.'));
       return;
     }
     console.log(chalk.green('✔ Aborted git rebase.'));
@@ -2106,6 +2185,62 @@ Examples:
         console.log(
           chalk.dim(
             `  ℹ Old remote branch '${result.oldName}' may still exist. Run 'git push origin --delete ${result.oldName}' to clean it up.`,
+          ),
+        );
+      }
+    },
+  );
+
+program
+  .command('revert')
+  .argument('<target>', 'Merged PR number (e.g. 123) or commit SHA to revert')
+  .option('-b, --branch <name>', 'Override the auto-generated branch name')
+  .option('--submit', 'Push the revert branch and open a PR after creating it')
+  .option(
+    '--edit-message',
+    "Open the editor for the revert commit message instead of '--no-edit'",
+  )
+  .description(
+    'Create a branch on trunk that reverts a merged PR or commit and track it',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub revert 123                       Revert merged PR #123 onto trunk
+  $ dub revert abc1234                   Revert commit abc1234 onto trunk
+  $ dub revert 123 --submit              Revert + push + open a PR
+  $ dub revert 123 -b revert/api-rollback  Use a custom branch name`,
+  )
+  .action(
+    async (
+      target: string,
+      options: { branch?: string; submit?: boolean; editMessage?: boolean },
+    ) => {
+      const result = await revert(process.cwd(), target, {
+        branchName: options.branch,
+        submit: options.submit,
+        editMessage: options.editMessage,
+      });
+      const origin =
+        result.prNumber != null
+          ? `PR #${result.prNumber}`
+          : `commit ${result.revertedShortSha}`;
+      console.log(
+        chalk.green(
+          `✔ Created revert branch '${result.branch}' on '${result.trunk}' (reverts ${origin})`,
+        ),
+      );
+      if (result.submitResult) {
+        console.log(
+          chalk.dim(
+            `  ↳ Submitted: pushed ${result.submitResult.pushed.length}, created ${result.submitResult.created.length}, updated ${result.submitResult.updated.length}`,
+          ),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            `  ↳ Run 'dub submit' to push the branch and open a PR, or rerun with '--submit'.`,
           ),
         );
       }
