@@ -2383,7 +2383,7 @@ program
   .option('--downstack', 'Also freeze ancestors toward trunk')
   .option('--upstack', 'Also freeze descendants')
   .description(
-    "Set the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+    "Set the 'frozen' flag on a tracked branch so restack/sync/post-merge skip it",
   )
   .addHelpText(
     'after',
@@ -2410,7 +2410,7 @@ program
   .option('--downstack', 'Also unfreeze ancestors toward trunk')
   .option('--upstack', 'Also unfreeze descendants')
   .description(
-    "Clear the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+    "Clear the 'frozen' flag so restack/sync/post-merge can mutate the branch again",
   )
   .addHelpText(
     'after',

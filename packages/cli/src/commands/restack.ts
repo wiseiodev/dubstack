@@ -31,6 +31,8 @@ interface RestackStep {
   parentOldTip: string;
   parentNewTip?: string;
   worktreePath?: string;
+  frozenReason?: boolean;
+  frozenAncestor?: string;
   status: 'pending' | 'done' | 'skipped' | 'conflicted';
 }
 
@@ -123,7 +125,20 @@ export async function restack(
   }
 
   for (const step of steps) {
-    if (step.status === 'skipped' && step.worktreePath) {
+    if (step.status !== 'skipped') continue;
+    if (step.frozenReason) {
+      console.log(
+        `🔒 Skipped '${step.branch}' (frozen). Run \`dub unfreeze ${step.branch}\` to allow restacking.`,
+      );
+    } else if (step.frozenAncestor) {
+      const relationship =
+        step.parent === step.frozenAncestor
+          ? 'parent is frozen'
+          : `ancestor '${step.frozenAncestor}' is frozen`;
+      console.log(
+        `   ↳ Also skipped descendant '${step.branch}' (${relationship}).`,
+      );
+    } else if (step.worktreePath) {
       console.log(
         formatWorktreeCheckoutSkipMessage(
           step.branch,
@@ -318,18 +333,36 @@ async function buildRestackSteps(
 
   for (const stack of stacks) {
     const ordered = topologicalOrder(stack);
+    const frozenAncestorByBranch = new Map<string, string>();
     for (const branch of ordered) {
-      if (branch.type === 'root' || !branch.parent) continue;
+      if (branch.type === 'root' || !branch.parent) {
+        if (branch.frozen) {
+          frozenAncestorByBranch.set(branch.name, branch.name);
+        }
+        continue;
+      }
       const parentOldTip =
         branch.parent_revision ??
         (await getMergeBase(branch.parent, branch.name, cwd));
+      const inheritedFrozenAncestor = frozenAncestorByBranch.get(branch.parent);
+      const frozenAncestor = branch.frozen
+        ? branch.name
+        : inheritedFrozenAncestor;
       steps.push({
         branch: branch.name,
         parent: branch.parent,
         parentOldTip,
         worktreePath: worktreeCheckouts.get(branch.name),
-        status: worktreeCheckouts.has(branch.name) ? 'skipped' : 'pending',
+        frozenReason: branch.frozen ? true : undefined,
+        frozenAncestor: branch.frozen ? undefined : inheritedFrozenAncestor,
+        status:
+          frozenAncestor || worktreeCheckouts.has(branch.name)
+            ? 'skipped'
+            : 'pending',
       });
+      if (frozenAncestor) {
+        frozenAncestorByBranch.set(branch.name, frozenAncestor);
+      }
     }
   }
 

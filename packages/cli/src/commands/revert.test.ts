@@ -118,6 +118,17 @@ describe('revert', () => {
       );
     });
 
+    it('keeps commit-not-found guidance when a numeric SHA fallback PR is missing', async () => {
+      const lookupPr = vi
+        .spyOn(github, 'getPrMergeInfoByNumber')
+        .mockResolvedValue(null);
+
+      await expect(revert(dir, '1234567')).rejects.toThrow(
+        "Commit '1234567' not found in this repository.",
+      );
+      expect(lookupPr).toHaveBeenCalledWith(1234567, dir);
+    });
+
     it('surfaces an ambiguous-short-SHA error when the prefix matches multiple commits', async () => {
       // Crafting two commits whose short SHAs share a prefix is impractical
       // with random data, so simulate git's error directly via a stubbed
