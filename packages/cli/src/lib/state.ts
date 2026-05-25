@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
+import { withStateLock } from './state-lock';
 import {
   RECONCILE_SOURCES,
   type ReconcileSource,
@@ -129,27 +130,29 @@ export async function readState(cwd: string): Promise<DubState> {
  * Creates the parent directory if it doesn't exist.
  */
 export async function writeState(state: DubState, cwd: string): Promise<void> {
-  const statePath = await getStatePath(cwd);
-  const dir = path.dirname(statePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  // Write-temp-then-rename so a process kill mid-write can never leave a
-  // partially-truncated state.json. fs.renameSync is atomic on the same
-  // filesystem (.git/dubstack lives next to the temp file).
-  const payload = `${JSON.stringify(state, null, 2)}\n`;
-  const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, payload);
-  try {
-    fs.renameSync(tmpPath, statePath);
-  } catch (error) {
-    try {
-      fs.unlinkSync(tmpPath);
-    } catch {
-      // best-effort cleanup; surface the original rename error
+  await withStateLock(cwd, async () => {
+    const statePath = await getStatePath(cwd);
+    const dir = path.dirname(statePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
-    throw error;
-  }
+    // Write-temp-then-rename so a process kill mid-write can never leave a
+    // partially-truncated state.json. fs.renameSync is atomic on the same
+    // filesystem (.git/dubstack lives next to the temp file).
+    const payload = `${JSON.stringify(state, null, 2)}\n`;
+    const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpPath, payload);
+    try {
+      fs.renameSync(tmpPath, statePath);
+    } catch (error) {
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        // best-effort cleanup; surface the original rename error
+      }
+      throw error;
+    }
+  });
 }
 
 /**
@@ -161,17 +164,19 @@ export async function writeState(state: DubState, cwd: string): Promise<void> {
 export async function initState(
   cwd: string,
 ): Promise<'created' | 'already_exists'> {
-  const statePath = await getStatePath(cwd);
-  const dir = path.dirname(statePath);
+  return withStateLock(cwd, async () => {
+    const statePath = await getStatePath(cwd);
+    const dir = path.dirname(statePath);
 
-  if (fs.existsSync(statePath)) {
-    return 'already_exists';
-  }
+    if (fs.existsSync(statePath)) {
+      return 'already_exists';
+    }
 
-  fs.mkdirSync(dir, { recursive: true });
-  const emptyState: DubState = { stacks: [] };
-  fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
-  return 'created';
+    fs.mkdirSync(dir, { recursive: true });
+    const emptyState: DubState = { stacks: [] };
+    fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
+    return 'created';
+  });
 }
 
 /**

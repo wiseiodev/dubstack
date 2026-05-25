@@ -11,6 +11,11 @@ import {
   readState,
   writeState,
 } from './state';
+import {
+  acquireStateLock,
+  getStateLockPath,
+  withStateLock,
+} from './state-lock';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -234,6 +239,132 @@ describe('writeState and readState roundtrip', () => {
     await writeState(state, dir);
     const loaded = await readState(dir);
     expect(loaded).toEqual(state);
+  });
+});
+
+describe('state lock', () => {
+  it('creates and clears the lockfile around write boundaries', async () => {
+    const lockPath = await getStateLockPath(dir);
+
+    await withStateLock(dir, () => {
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as {
+        pid: number;
+        startedAt: string;
+        command: string;
+      };
+      expect(lock.pid).toBe(process.pid);
+      expect(lock.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(lock.command).toContain('dub');
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('waits with feedback while another live process owns the lock', async () => {
+    const messages: string[] = [];
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 10,
+      timeoutMs: 1_000,
+      onWait: (message) => messages.push(message),
+      now: () => new Date('2026-05-23T10:15:00Z'),
+    });
+
+    const second = acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 1_000,
+      onWait: (message) => messages.push(message),
+      allowReentrant: false,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(messages).toContain(
+      'Another dub command (PID ' +
+        `${process.pid} running \`dub sync\` since 2026-05-23T10:15:00.000Z) is currently writing state. Waiting...`,
+    );
+
+    await first.release();
+    const secondLock = await second;
+    await secondLock.release();
+  });
+
+  it('reclaims stale locks whose owner process is gone', async () => {
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: 2_147_483_647,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const lock = await acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 100,
+      onWait: () => {
+        throw new Error('stale lock should not wait');
+      },
+    });
+
+    expect(lock.info.command).toBe('dub create feat/a');
+    await lock.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('times out with a clean DubError when a live lock never clears', async () => {
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        retryMs: 5,
+        timeoutMs: 20,
+        onWait: () => {},
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow(DubError);
+
+    await first.release();
+  });
+
+  it('allows nested state locks in one invocation and releases after the outer lock', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const outer = await acquireStateLock(dir, { commandName: 'dub create' });
+    const inner = await acquireStateLock(dir, { commandName: 'dub create' });
+
+    await inner.release();
+    expect(fs.existsSync(lockPath)).toBe(true);
+
+    await outer.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('allows read-only state reads while a write lock is held', async () => {
+    await initState(dir);
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+
+    await first.release();
   });
 });
 

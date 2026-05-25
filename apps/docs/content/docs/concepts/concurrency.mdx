@@ -1,0 +1,34 @@
+---
+title: Concurrency
+description: How DubStack protects local state when commands overlap.
+---
+
+DubStack stores repository state under `.git/dubstack/`. State writes are
+protected by `.git/dubstack/state.lock` so two overlapping `dub` commands do
+not write tracking metadata at the same time.
+
+## Write Locks
+
+When a command is about to write `state.json`, DubStack creates
+`.git/dubstack/state.lock` with the current process ID, command name, and start
+timestamp. The lock is created atomically, then removed after the state write
+finishes.
+
+If another live process already owns the lock, DubStack prints a waiting
+message and retries every 500ms for up to 30 seconds. If the lock owner exits
+before that timeout, the waiting command continues.
+
+## Stale Locks
+
+If the lockfile points at a process that is no longer running, DubStack treats
+the lock as stale, removes it, and continues. If the owner is still running and
+the wait times out, DubStack exits with a recovery hint to run `dub doctor` and
+remove `.git/dubstack/state.lock` manually only after confirming no `dub`
+process is still writing state.
+
+## Read-Only Commands
+
+Read-only commands do not acquire the write lock. Commands such as `dub log`,
+`dub status --json`, and `dub doctor --no-fetch` can keep reading
+`state.json` while another command is writing because `state.json` itself is
+written with an atomic temp-file rename.
