@@ -24,7 +24,7 @@ import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { absorb } from './commands/absorb';
 import { back, listBackHistory } from './commands/back';
-import { branchInfoOutput } from './commands/branch';
+import { branchInfo, branchInfoOutput } from './commands/branch';
 import {
   checkout,
   interactiveCheckout,
@@ -43,7 +43,7 @@ import { init } from './commands/init';
 import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
-import { mergeCheck } from './commands/merge-check';
+import { mergeCheck, runMergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
@@ -89,6 +89,7 @@ import {
   redactSensitiveText,
   sanitizeCommandArgs,
 } from './lib/history';
+import { jsonErrorEnvelope, withSchemaVersion } from './lib/json-schemas';
 import { detectActiveOperation } from './lib/operation-state';
 import { setVerbose } from './lib/progress';
 import {
@@ -105,6 +106,24 @@ const { version } = require('../package.json') as { version: string };
 
 const program = new Command();
 
+/**
+ * Set to true when the current action handles its own JSON output. The
+ * top-level error handler uses this to emit a `{ schemaVersion, error }`
+ * envelope instead of the human red-error formatting, so consumers of
+ * `--json` always get parseable output on both success and failure.
+ */
+let jsonOutputActive = false;
+
+function activateJsonMode(): void {
+  jsonOutputActive = true;
+}
+
+function emitJsonError(error: DubError): void {
+  console.log(
+    JSON.stringify(jsonErrorEnvelope(error.message, error.recovery), null, 2),
+  );
+}
+
 async function canShowAiPrompt(cwd: string): Promise<boolean> {
   try {
     return await isAiPromptOptionEnabled(cwd);
@@ -115,8 +134,14 @@ async function canShowAiPrompt(cwd: string): Promise<boolean> {
 
 async function showInfo(
   branch: string | undefined,
-  options: { diff?: boolean },
+  options: { diff?: boolean; json?: boolean },
 ): Promise<void> {
+  if (options.json) {
+    activateJsonMode();
+    const info = await branchInfo(process.cwd(), branch);
+    console.log(JSON.stringify(withSchemaVersion(info), null, 2));
+    return;
+  }
   console.log(
     await branchInfoOutput(process.cwd(), branch, { diff: options.diff }),
   );
@@ -531,6 +556,7 @@ program
       .description('Show tracked stack info for the current branch')
       .argument('[branch]', 'Branch to inspect (defaults to current branch)')
       .option('-d, --diff', 'Show the parent-relative git diff for the branch')
+      .option('--json', 'Output branch info as JSON')
       .action(showInfo),
   );
 
@@ -538,6 +564,7 @@ program
   .command('info')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .option('-d, --diff', 'Show the parent-relative git diff for the branch')
+  .option('--json', 'Output branch info as JSON')
   .description('Show tracked stack info for a branch')
   .action(showInfo);
 
@@ -980,18 +1007,30 @@ Examples:
 program
   .command('parent')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
+  .option('--json', 'Output parent info as JSON')
   .description('Show the direct parent branch')
-  .action(async (branch?: string) => {
+  .action(async (branch: string | undefined, options: { json?: boolean }) => {
+    if (options.json) activateJsonMode();
     const result = await parent(process.cwd(), branch);
+    if (options.json) {
+      console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+      return;
+    }
     console.log(result.parent);
   });
 
 program
   .command('children')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
+  .option('--json', 'Output children info as JSON')
   .description('Show direct child branches')
-  .action(async (branch?: string) => {
+  .action(async (branch: string | undefined, options: { json?: boolean }) => {
+    if (options.json) activateJsonMode();
     const result = await children(process.cwd(), branch);
+    if (options.json) {
+      console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+      return;
+    }
     if (result.children.length === 0) {
       console.log('(none)');
       return;
@@ -1004,9 +1043,15 @@ program
 program
   .command('trunk')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
+  .option('--json', 'Output trunk info as JSON')
   .description('Show trunk/root branch for the active stack')
-  .action(async (branch?: string) => {
+  .action(async (branch: string | undefined, options: { json?: boolean }) => {
+    if (options.json) activateJsonMode();
     const result = await trunk(process.cwd(), branch);
+    if (options.json) {
+      console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+      return;
+    }
     console.log(result.trunk);
   });
 
@@ -1354,6 +1399,7 @@ program
     parseScope,
     'current' as ScopeMode,
   )
+  .option('--json', 'Output merge-check results as JSON')
   .addHelpText(
     'after',
     `
@@ -1361,10 +1407,29 @@ Examples:
   $ dub merge-check                       Check the current branch's PR
   $ dub merge-check --scope downstack     Check current branch + ancestors
   $ dub merge-check --scope stack         Check every branch in the stack
-  $ dub merge-check --pr 123              Check a specific PR (scope ignored)`,
+  $ dub merge-check --pr 123              Check a specific PR (scope ignored)
+  $ dub merge-check --json                Emit structured JSON (exits 1 on failure)`,
   )
   .action(
-    async (options: { pr?: number; branch?: string; scope: ScopeMode }) => {
+    async (options: {
+      pr?: number;
+      branch?: string;
+      scope: ScopeMode;
+      json?: boolean;
+    }) => {
+      if (options.json) {
+        activateJsonMode();
+        const result = await runMergeCheck(process.cwd(), {
+          pr: options.pr,
+          branch: options.branch,
+          scope: options.scope,
+        });
+        console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+        if (!result.ok) {
+          process.exitCode = 1;
+        }
+        return;
+      }
       const result = await mergeCheck(process.cwd(), {
         pr: options.pr,
         branch: options.branch,
@@ -1550,34 +1615,42 @@ program
   .description('Run stack health checks and print actionable remediation steps')
   .option('-a, --all', 'Check all stacks instead of only the current stack')
   .option('--no-fetch', 'Skip remote fetch before remote drift checks')
-  .action(async (options: { all?: boolean; fetch?: boolean }) => {
-    const result = await doctor(process.cwd(), options);
-    if (result.issues.length === 0) {
-      console.log(
-        chalk.green(`✔ No issues found for '${result.checkedBranch}'.`),
-      );
-    } else {
-      console.log(
-        chalk.yellow(
-          `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
-        ),
-      );
-      for (const issue of result.issues) {
-        console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
-        console.log(chalk.dim(`  ${issue.details}`));
-        for (const fix of issue.fixes) {
-          console.log(chalk.dim(`  ↳ ${fix}`));
+  .option('--json', 'Output doctor results as JSON')
+  .action(
+    async (options: { all?: boolean; fetch?: boolean; json?: boolean }) => {
+      if (options.json) activateJsonMode();
+      const result = await doctor(process.cwd(), options);
+      if (options.json) {
+        console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+        return;
+      }
+      if (result.issues.length === 0) {
+        console.log(
+          chalk.green(`✔ No issues found for '${result.checkedBranch}'.`),
+        );
+      } else {
+        console.log(
+          chalk.yellow(
+            `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
+          ),
+        );
+        for (const issue of result.issues) {
+          console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
+          console.log(chalk.dim(`  ${issue.details}`));
+          for (const fix of issue.fixes) {
+            console.log(chalk.dim(`  ↳ ${fix}`));
+          }
         }
       }
-    }
-    for (const notice of result.notices) {
-      console.log(chalk.blue(`ℹ [${notice.code}] ${notice.summary}`));
-      console.log(chalk.dim(`  ${notice.details}`));
-      for (const branch of notice.branches) {
-        console.log(chalk.dim(`  ↳ ${branch}`));
+      for (const notice of result.notices) {
+        console.log(chalk.blue(`ℹ [${notice.code}] ${notice.summary}`));
+        console.log(chalk.dim(`  ${notice.details}`));
+        for (const branch of notice.branches) {
+          console.log(chalk.dim(`  ↳ ${branch}`));
+        }
       }
-    }
-  });
+    },
+  );
 
 program
   .command('status')
@@ -1597,12 +1670,15 @@ Examples:
   $ dub status --no-pr        Skip the PR fetch (shell prompts without gh)`,
   )
   .action(async (options: { json?: boolean; live?: boolean; pr?: boolean }) => {
+    if (options.json) activateJsonMode();
     const result = await status(process.cwd(), {
       live: options.live,
       pr: options.pr,
     });
     if (options.json) {
-      console.log(JSON.stringify(result, null, 2));
+      // status already includes `schemaVersion: 1` inline; wrap defensively
+      // so the helper stays the single point of truth for the version.
+      console.log(JSON.stringify(withSchemaVersion(result), null, 2));
       return;
     }
     console.log(formatStatus(result));
@@ -1642,14 +1718,18 @@ Examples:
       json?: boolean;
       verbose?: boolean;
     }) => {
+      if (options.json) activateJsonMode();
       const result = await ready(process.cwd(), {
         scope: options.scope,
         ai: options.ai,
         aiSkipReview: options.aiSkipReview,
       });
       if (options.json) {
-        console.log(JSON.stringify(result, null, 2));
-        if (result.blockers.includes('ai-review')) {
+        console.log(JSON.stringify(withSchemaVersion(result), null, 2));
+        // Mirror the non-JSON contract: any blocker (doctor failures, missing
+        // submit preflight, ai-review) flips the exit code so scripts can
+        // gate on `dub ready --json` without re-parsing the result.
+        if (!result.ready) {
           process.exitCode = 1;
         }
         return;
@@ -2278,13 +2358,14 @@ program
   )
   .option('--json', 'Output history as JSON')
   .action(async (options: { limit?: number; json?: boolean }) => {
+    if (options.json) activateJsonMode();
     const { formatHistory, history } = await import('./commands/history');
     const result = await history(process.cwd(), {
       limit: options.limit ?? 20,
     });
 
     if (options.json) {
-      console.log(JSON.stringify(result.entries, null, 2));
+      console.log(JSON.stringify(withSchemaVersion(result), null, 2));
       return;
     }
 
@@ -3115,7 +3196,14 @@ async function printLog(
   };
 
   if (options.json) {
-    console.log(JSON.stringify(await logJson(cwd, logOptions), null, 2));
+    activateJsonMode();
+    console.log(
+      JSON.stringify(
+        withSchemaVersion(await logJson(cwd, logOptions)),
+        null,
+        2,
+      ),
+    );
     return;
   }
 
@@ -3361,16 +3449,33 @@ async function main() {
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof DubError) {
-      const [firstLine, ...rest] = formatDubError(error).split('\n');
-      console.error(chalk.red(`✖ ${firstLine}`));
-      for (const line of rest) {
-        console.error(line);
+      if (jsonOutputActive) {
+        emitJsonError(error);
+      } else {
+        const [firstLine, ...rest] = formatDubError(error).split('\n');
+        console.error(chalk.red(`✖ ${firstLine}`));
+        for (const line of rest) {
+          console.error(line);
+        }
       }
       await finalizeHistoryCapture('error', error.message);
       await releaseInvocationStateLock();
       process.exit(1);
     }
 
+    if (jsonOutputActive) {
+      // Surface unexpected exceptions as a parseable envelope so
+      // `--json` consumers never see a raw Node stack trace on stdout.
+      console.log(
+        JSON.stringify(
+          jsonErrorEnvelope(
+            error instanceof Error ? error.message : 'Unknown error',
+          ),
+          null,
+          2,
+        ),
+      );
+    }
     await finalizeHistoryCapture(
       'error',
       error instanceof Error ? error.message : 'Unknown error',

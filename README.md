@@ -1038,6 +1038,17 @@ dub history --limit 50
 dub history --json
 ```
 
+### Programmatic use (`--json`)
+
+Every read-only command supports `--json` for scripts, MCP, and IDE
+integrations. Each payload carries a top-level `schemaVersion: 1` and a
+stable shape; failures are emitted as `{ schemaVersion, error: { message,
+recovery } }` with a non-zero exit code. Covered commands: `log`, `info`,
+`branch info`, `status`, `doctor`, `history`, `parent`, `children`, `trunk`,
+`merge-check`, `ready`. See the
+[Programmatic use guide](https://dubstack.dev/docs/guides/json-output) for
+the full schema reference.
+
 ## Typical Workflows
 
 ### Add review feedback to a middle branch

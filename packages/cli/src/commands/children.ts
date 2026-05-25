@@ -2,7 +2,7 @@ import { DubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
 import { findStackForBranch, readState } from '../lib/state';
 
-interface ChildrenResult {
+export interface ChildrenResult {
   branch: string;
   children: string[];
 }

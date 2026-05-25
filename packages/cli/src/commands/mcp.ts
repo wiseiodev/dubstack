@@ -37,7 +37,7 @@ import { fold } from './fold';
 import { freeze } from './freeze';
 import { history } from './history';
 import { logJson } from './log';
-import { mergeCheck } from './merge-check';
+import { runMergeCheck } from './merge-check';
 import { modify } from './modify';
 import { move } from './move';
 import { parent } from './parent';
@@ -1660,22 +1660,16 @@ async function mergeCheckTool(
   cwd: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
-  try {
-    return await mergeCheck(cwd, {
-      pr: optionalPositiveInteger(args.pr),
-      branch: optionalString(args.branch),
-      scope: optionalScopeMode(args.scope),
-    });
-  } catch (error) {
-    if (error instanceof DubError) {
-      return {
-        ok: false,
-        reason: error.message,
-        fixes: error.recovery,
-      };
-    }
-    throw error;
-  }
+  // `runMergeCheck` returns a full `MergeCheckResult` with `ok: false` for
+  // per-branch failures, so MCP consumers see the same wire shape on success
+  // and failure. Scope-resolution errors (e.g. untracked current branch)
+  // still throw `DubError`, which is propagated and handled by the outer
+  // MCP tool error envelope.
+  return await runMergeCheck(cwd, {
+    pr: optionalPositiveInteger(args.pr),
+    branch: optionalString(args.branch),
+    scope: optionalScopeMode(args.scope),
+  });
 }
 
 async function proposeCreateMetadataTool(

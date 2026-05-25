@@ -1,0 +1,113 @@
+---
+title: Programmatic use (JSON output)
+description: Every read-only DubStack command supports `--json` for scripting, MCP, and IDE integrations.
+---
+
+Every read-only command emits a stable, machine-readable JSON document when
+called with `--json`. Use it from shell scripts, the MCP server, editor
+extensions, and CI checks.
+
+## Supported commands
+
+| Command          | Description                                  |
+| ---------------- | -------------------------------------------- |
+| `dub log`        | Full stack tree                              |
+| `dub info`       | Tracked metadata for the current branch      |
+| `dub branch info`| Same shape as `dub info`                     |
+| `dub status`     | One-shot snapshot of branch + PR + drift     |
+| `dub doctor`     | Stack health issues and notices              |
+| `dub history`    | Recent DubStack command history              |
+| `dub parent`     | Direct parent of a branch                    |
+| `dub children`   | Direct children of a branch                  |
+| `dub trunk`      | Trunk (root) of the active stack             |
+| `dub merge-check`| Mergeability findings for one or many PRs    |
+| `dub ready`      | Combined health + submit-preflight result    |
+
+## Envelope
+
+Every payload carries `schemaVersion: 1` at the top level:
+
+```json
+{
+  "schemaVersion": 1,
+  "branch": "feat/api",
+  "parent": "main"
+}
+```
+
+`schemaVersion` is a numeric integer. Backward-compatible additions (new
+optional keys) keep the same major version. Breaking changes bump the major.
+
+### Errors
+
+When a `--json` command fails with a `DubError`, DubStack still emits valid
+JSON to stdout and exits with code 1:
+
+```json
+{
+  "schemaVersion": 1,
+  "error": {
+    "message": "Branch 'feat/x' is not tracked.",
+    "recovery": [
+      "Run 'dub track feat/x --parent <branch>'.",
+      "Run 'dub log' to see currently tracked branches."
+    ]
+  }
+}
+```
+
+`recovery` is always an array of strings; it is empty when there is nothing
+for the user to do.
+
+## TypeScript types
+
+All wire shapes are exported from a single module so the CLI, the MCP server,
+and downstream tooling stay in sync:
+
+```ts
+import type {
+  BranchInfoJsonOutput,
+  ChildrenJsonOutput,
+  DoctorJsonOutput,
+  HistoryJsonOutput,
+  JsonErrorEnvelope,
+  LogJsonOutput,
+  MergeCheckJsonOutput,
+  ParentJsonOutput,
+  ReadyJsonOutput,
+  StatusJsonOutput,
+  TrunkJsonOutput,
+} from 'dubstack/lib/json-schemas';
+```
+
+The module also exports `SCHEMA_VERSION`, `withSchemaVersion`, and
+`jsonErrorEnvelope` for code that produces or asserts on these payloads.
+
+## Compatibility
+
+- `--json` is mutually compatible with `--no-color` and any quiet/verbose
+  flags the command also exposes; the JSON payload is always emitted to
+  stdout untouched.
+- `merge-check --json` exits 1 when any branch in scope fails the mergeability
+  check, but still prints the full structured result so scripts can act on the
+  per-branch findings instead of parsing an error message.
+- `ready --json` exits 1 when the AI readiness check finds critical issues
+  (same as the non-JSON behavior).
+
+## Examples
+
+Inspect the parent branch from a shell script:
+
+```bash
+parent=$(dub parent --json | jq -r '.parent')
+git diff "$parent"...HEAD
+```
+
+Block CI when health checks fail:
+
+```bash
+if ! dub doctor --json | jq -e '.healthy' >/dev/null; then
+  echo "Stack drift detected"
+  exit 1
+fi
+```

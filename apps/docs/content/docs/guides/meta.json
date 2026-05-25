@@ -6,6 +6,7 @@
     "ai-assistant",
     "mcp",
     "shell-integration",
+    "json-output",
     "github-action-retarget",
     "migration-from-graphite"
   ]
