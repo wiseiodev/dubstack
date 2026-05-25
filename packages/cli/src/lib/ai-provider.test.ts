@@ -21,6 +21,7 @@ function createDeps(): ResolveAiProviderDeps {
     createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
     createGateway: vi.fn().mockReturnValue(vi.fn()),
     createAmazonBedrock: vi.fn().mockReturnValue(vi.fn()),
+    createOpenAI: vi.fn().mockReturnValue(vi.fn()),
     fromIni: vi.fn().mockReturnValue('ini-credentials'),
     fromNodeProviderChain: vi.fn().mockReturnValue('default-chain'),
   };
@@ -36,6 +37,7 @@ function createConfig(
     gemini: null,
     gateway: null,
     bedrock: null,
+    openai: null,
     ...overrides.models,
   };
 
@@ -119,11 +121,73 @@ describe('resolveAiProvider', () => {
     expect(resolved.provider).toBe('gateway');
   });
 
+  it('uses OpenAI when selected explicitly with repo model override', () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    process.env.DUBSTACK_OPENAI_MODEL = 'env-openai-model';
+
+    const deps = createDeps();
+    const openAiModel = vi.fn().mockReturnValue('openai-model');
+    deps.createOpenAI = vi.fn().mockReturnValue(openAiModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig({
+        selected: 'openai',
+        models: {
+          openai: 'repo-openai-model',
+        },
+      }),
+    });
+
+    expect(deps.createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(deps.createOpenAI).toHaveBeenCalledWith({ apiKey: 'openai-key' });
+    expect(openAiModel).toHaveBeenCalledWith('repo-openai-model');
+    expect(resolved.provider).toBe('openai');
+    expect(resolved.modelId).toBe('repo-openai-model');
+  });
+
+  it('uses the OpenAI env model override when no repo override is set', () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    process.env.DUBSTACK_OPENAI_MODEL = 'gpt-custom';
+
+    const deps = createDeps();
+    const openAiModel = vi.fn().mockReturnValue('openai-model');
+    deps.createOpenAI = vi.fn().mockReturnValue(openAiModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig({ selected: 'openai' }),
+    });
+
+    expect(openAiModel).toHaveBeenCalledWith('gpt-custom');
+    expect(resolved.modelId).toBe('gpt-custom');
+  });
+
+  it('uses OpenAI in auto mode when only OpenAI is configured', () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+
+    const deps = createDeps();
+    const openAiModel = vi.fn().mockReturnValue('openai-model');
+    deps.createOpenAI = vi.fn().mockReturnValue(openAiModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig(),
+    });
+
+    expect(deps.createOpenAI).toHaveBeenCalledWith({ apiKey: 'openai-key' });
+    expect(openAiModel).toHaveBeenCalledWith('gpt-5.5');
+    expect(resolved.provider).toBe('openai');
+    expect(resolved.modelId).toBe('gpt-5.5');
+  });
+
   it('preserves the existing auto fallback order of gemini, gateway, then bedrock', () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
     process.env.DUBSTACK_BEDROCK_AWS_REGION = 'us-east-1';
     process.env.DUBSTACK_BEDROCK_MODEL = 'bedrock-model';
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
 
     const deps = createDeps();
     const googleModel = vi.fn().mockReturnValue('google-model');

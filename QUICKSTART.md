@@ -11,7 +11,7 @@ This guide gets you from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# 1) guided setup for Gemini, AI Gateway, or Amazon Bedrock
+# 1) guided setup for Gemini, AI Gateway, Amazon Bedrock, or OpenAI
 dub ai setup
 
 # 2) reload your shell using the command DubStack prints
@@ -26,6 +26,8 @@ dub config ai-provider gemini
 dub config ai-provider gateway
 # or:
 dub config ai-provider bedrock
+# or:
+dub config ai-provider openai
 
 # 5) optional: enable AI defaults
 dub config ai-defaults create on

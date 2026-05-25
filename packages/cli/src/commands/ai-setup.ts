@@ -32,6 +32,7 @@ interface AiSetupDeps {
   selectModelScope: () => Promise<ModelScope>;
   inputGeminiKey: () => Promise<string | undefined>;
   inputGatewayKey: () => Promise<string | undefined>;
+  inputOpenAiKey: () => Promise<string | undefined>;
   inputBedrockProfile: () => Promise<string | undefined>;
   inputBedrockRegion: () => Promise<string | undefined>;
   configureAiEnv: (
@@ -49,6 +50,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
         { name: 'Gemini', value: 'gemini' },
         { name: 'AI Gateway', value: 'gateway' },
         { name: 'Amazon Bedrock', value: 'bedrock' },
+        { name: 'OpenAI', value: 'openai' },
       ],
     }),
   selectModel: async (provider) =>
@@ -82,6 +84,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
   inputGeminiKey: async () => optionalSecret('Enter DUBSTACK_GEMINI_API_KEY'),
   inputGatewayKey: async () =>
     optionalSecret('Enter DUBSTACK_AI_GATEWAY_API_KEY'),
+  inputOpenAiKey: async () => optionalSecret('Enter DUBSTACK_OPENAI_API_KEY'),
   inputBedrockProfile: async () =>
     optionalText('Enter DUBSTACK_BEDROCK_AWS_PROFILE'),
   inputBedrockRegion: async () =>
@@ -163,6 +166,14 @@ async function buildEnvOptions(
     };
   }
 
+  if (provider === 'openai') {
+    const openaiKey = await deps.inputOpenAiKey();
+    return {
+      openaiKey,
+      openaiModel: modelScope === 'global' ? model : undefined,
+    };
+  }
+
   return {
     bedrockProfile: await deps.inputBedrockProfile(),
     bedrockRegion: await deps.inputBedrockRegion(),
@@ -203,6 +214,14 @@ function getModelChoices(provider: AiModelProvider): Array<{
     return [
       { label: 'Google Gemini 3 Flash', value: 'google/gemini-3-flash' },
       { label: 'Google Gemini 2.5 Pro', value: 'google/gemini-2.5-pro' },
+      { label: 'Custom model', value: CUSTOM_MODEL },
+    ];
+  }
+
+  if (provider === 'openai') {
+    return [
+      { label: 'GPT-5.5', value: 'gpt-5.5' },
+      { label: 'GPT-5.4 Mini', value: 'gpt-5.4-mini' },
       { label: 'Custom model', value: CUSTOM_MODEL },
     ];
   }

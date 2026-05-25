@@ -25,6 +25,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
       gemini: null,
       gateway: null,
       bedrock: null,
+      openai: null,
     },
   };
 }
@@ -93,6 +94,46 @@ describe('generateCreateMetadata', () => {
     expect(generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'gateway-model',
+      }),
+    );
+  });
+
+  it('uses the OpenAI provider when only the OpenAI key is set', async () => {
+    delete process.env.DUBSTACK_GEMINI_API_KEY;
+    delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/openai","message":"feat: openai"}',
+    });
+    const createGoogleGenerativeAI = vi.fn();
+    const createGateway = vi.fn();
+    const openAiModel = vi.fn().mockReturnValue('openai-model');
+    const createOpenAI = vi.fn().mockReturnValue(openAiModel);
+
+    const result = await generateCreateMetadata(
+      'diff --git a/file b/file',
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createGateway,
+        createOpenAI,
+      },
+      {},
+      createProviderConfig(),
+    );
+
+    expect(result).toEqual({
+      branch: 'feat/openai',
+      message: 'feat: openai',
+    });
+    expect(createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(createGateway).not.toHaveBeenCalled();
+    expect(createOpenAI).toHaveBeenCalledWith({ apiKey: 'openai-key' });
+    expect(openAiModel).toHaveBeenCalledWith('gpt-5.5');
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'openai-model',
       }),
     );
   });

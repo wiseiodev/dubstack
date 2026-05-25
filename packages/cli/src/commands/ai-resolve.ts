@@ -1,5 +1,6 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, streamText } from 'ai';
 import chalk from 'chalk';
@@ -25,6 +26,7 @@ export interface AiResolveDeps {
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
+  createOpenAI?: typeof createOpenAI;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
   readConfig: typeof readConfig;
@@ -44,6 +46,7 @@ const DEFAULT_DEPS: AiResolveDeps = {
   createGoogleGenerativeAI,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
   fromIni,
   fromNodeProviderChain,
   readConfig,

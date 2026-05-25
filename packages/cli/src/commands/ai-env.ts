@@ -10,6 +10,8 @@ const GATEWAY_MODEL_NAME = 'DUBSTACK_AI_GATEWAY_MODEL';
 const BEDROCK_PROFILE_NAME = 'DUBSTACK_BEDROCK_AWS_PROFILE';
 const BEDROCK_REGION_NAME = 'DUBSTACK_BEDROCK_AWS_REGION';
 const BEDROCK_MODEL_NAME = 'DUBSTACK_BEDROCK_MODEL';
+const OPENAI_KEY_NAME = 'DUBSTACK_OPENAI_API_KEY';
+const OPENAI_MODEL_NAME = 'DUBSTACK_OPENAI_MODEL';
 
 export interface ConfigureAiEnvOptions {
   geminiKey?: string;
@@ -19,6 +21,8 @@ export interface ConfigureAiEnvOptions {
   bedrockProfile?: string;
   bedrockRegion?: string;
   bedrockModel?: string;
+  openaiKey?: string;
+  openaiModel?: string;
   shell?: string;
   profile?: string;
 }
@@ -39,10 +43,12 @@ export async function configureAiEnv(
     !options.gatewayModel &&
     !options.bedrockProfile &&
     !options.bedrockRegion &&
-    !options.bedrockModel
+    !options.bedrockModel &&
+    !options.openaiKey &&
+    !options.openaiModel
   ) {
     throw new DubError('Provide at least one key, model, or Bedrock setting.', [
-      "Pass at least one of '--gemini-key', '--gateway-key', '--gemini-model', '--gateway-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
+      "Pass at least one of '--gemini-key', '--gateway-key', '--openai-key', '--gemini-model', '--gateway-model', '--openai-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
     ]);
   }
 
@@ -68,6 +74,12 @@ export async function configureAiEnv(
     content = upsertExport(content, GATEWAY_KEY_NAME, options.gatewayKey);
     updated.push(GATEWAY_KEY_NAME);
     appliedValues[GATEWAY_KEY_NAME] = options.gatewayKey;
+  }
+
+  if (options.openaiKey) {
+    content = upsertExport(content, OPENAI_KEY_NAME, options.openaiKey);
+    updated.push(OPENAI_KEY_NAME);
+    appliedValues[OPENAI_KEY_NAME] = options.openaiKey;
   }
 
   if (options.geminiModel !== undefined) {
@@ -103,6 +115,13 @@ export async function configureAiEnv(
     content = upsertExport(content, BEDROCK_MODEL_NAME, model);
     updated.push(BEDROCK_MODEL_NAME);
     appliedValues[BEDROCK_MODEL_NAME] = model;
+  }
+
+  if (options.openaiModel !== undefined) {
+    const model = normalizeOpenAiModel(options.openaiModel);
+    content = upsertExport(content, OPENAI_MODEL_NAME, model);
+    updated.push(OPENAI_MODEL_NAME);
+    appliedValues[OPENAI_MODEL_NAME] = model;
   }
 
   if (!content.endsWith('\n')) {
@@ -265,6 +284,21 @@ function normalizeBedrockModel(value: string): string {
   if (model.length === 0) {
     throw new DubError('Bedrock model cannot be empty.', [
       'Pass a non-empty Bedrock model identifier.',
+    ]);
+  }
+  return model;
+}
+
+function normalizeOpenAiModel(value: string): string {
+  const model = value.trim();
+  if (model.length === 0) {
+    throw new DubError('OpenAI model cannot be empty.', [
+      "Pass a non-empty OpenAI model identifier (e.g. 'gpt-5.5').",
+    ]);
+  }
+  if (model.includes('/')) {
+    throw new DubError("OpenAI model should not include '/'.", [
+      "Pass the bare model name without provider prefix (e.g. 'gpt-5.5').",
     ]);
   }
   return model;

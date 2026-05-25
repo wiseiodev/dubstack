@@ -104,9 +104,17 @@ describe('config ai-provider', () => {
     expect(config.ai.provider.selected).toBe('bedrock');
   });
 
+  it('writes OpenAI as a selected provider', async () => {
+    const result = await configAiProvider(dir, 'openai');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ provider: 'openai', changed: true });
+    expect(config.ai.provider.selected).toBe('openai');
+  });
+
   it('throws for invalid provider names', async () => {
     await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
-      "AI provider must be one of 'auto', 'gemini', 'gateway', or 'bedrock'.",
+      "AI provider must be one of 'auto', 'gemini', 'gateway', 'bedrock', or 'openai'.",
     );
   });
 });
@@ -133,6 +141,17 @@ describe('config ai-model', () => {
     expect(config.ai.provider.models.bedrock).toBe(
       'us.anthropic.claude-sonnet-4-6',
     );
+  });
+
+  it('writes an OpenAI model override', async () => {
+    const result = await configAiModel(dir, 'openai', 'gpt-5.5');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      model: 'gpt-5.5',
+      changed: true,
+    });
+    expect(config.ai.provider.models.openai).toBe('gpt-5.5');
   });
 
   it('clears a provider-specific model override', async () => {
