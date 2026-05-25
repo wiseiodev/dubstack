@@ -11,7 +11,8 @@ For repositories with large stacks or many active branches, you can opt in to SQ
 dub migrate storage --to sqlite
 ```
 
-The migration copies the current JSON state into `.git/dubstack/state.sqlite` and sets the repo-local config value:
+The migration copies the current JSON state into `.git/dubstack/state.sqlite` and updates `.git/dubstack/config.json` automatically.
+You can inspect the selected backend afterward with:
 
 ```bash
 dub config storage-backend sqlite

@@ -11,9 +11,6 @@ const require = createRequire(import.meta.url);
 const SCHEMA_VERSION = 1;
 
 let Database: typeof BetterSqlite3 | null = null;
-let cachedReadDb: BetterSqlite3.Database | null = null;
-let cachedReadDbPath: string | null = null;
-let registeredExitClose = false;
 
 interface StackRow {
   id: string;
@@ -74,7 +71,10 @@ export async function readSQLiteState(cwd: string): Promise<DubState> {
     ]);
   }
 
-  const db = openCachedReadDatabase(dbPath);
+  const db = openDatabase(dbPath, {
+    readonly: true,
+    fileMustExist: true,
+  });
   try {
     ensureReadableSchema(db);
     return readSQLiteStateFromOpenDatabase(db);
@@ -84,6 +84,8 @@ export async function readSQLiteState(cwd: string): Promise<DubState> {
       "Run 'dub migrate storage --to json' if state.json still has the correct state.",
       'Restore .git/dubstack/state.sqlite from backup, then retry the command.',
     ]);
+  } finally {
+    db.close();
   }
 }
 
@@ -100,7 +102,6 @@ async function writeSQLiteStateUnlocked(
 ): Promise<void> {
   const dbPath = await getSQLiteStatePath(cwd);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  closeCachedReadDatabase(dbPath);
   const db = openDatabase(dbPath);
   try {
     configureDatabase(db);
@@ -122,36 +123,6 @@ function openDatabase(
 ): BetterSqlite3.Database {
   const DatabaseConstructor = loadDatabase();
   return new DatabaseConstructor(dbPath, options);
-}
-
-function openCachedReadDatabase(dbPath: string): BetterSqlite3.Database {
-  if (cachedReadDb && cachedReadDbPath === dbPath && cachedReadDb.open) {
-    return cachedReadDb;
-  }
-
-  closeCachedReadDatabase();
-  cachedReadDb = openDatabase(dbPath, {
-    readonly: true,
-    fileMustExist: true,
-  });
-  cachedReadDbPath = dbPath;
-
-  if (!registeredExitClose) {
-    registeredExitClose = true;
-    process.once('exit', () => {
-      closeCachedReadDatabase();
-    });
-  }
-
-  return cachedReadDb;
-}
-
-function closeCachedReadDatabase(dbPath?: string): void {
-  if (!cachedReadDb) return;
-  if (dbPath && cachedReadDbPath !== dbPath) return;
-  cachedReadDb.close();
-  cachedReadDb = null;
-  cachedReadDbPath = null;
 }
 
 function configureDatabase(db: BetterSqlite3.Database): void {

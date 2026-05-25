@@ -1,6 +1,6 @@
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
-import { readJsonState, writeJsonState } from '../lib/state';
+import { type DubState, readJsonState, writeJsonState } from '../lib/state';
 import { withStateLock } from '../lib/state-lock';
 import { readSQLiteState, writeSQLiteState } from '../lib/state-sqlite';
 
@@ -27,44 +27,85 @@ async function migrateStorageLocked(
 ): Promise<StorageMigrationResult> {
   const target = parseStorageMigrationTarget(to);
   const config = await readConfig(cwd);
-  const source = config.storageBackend;
+  const source = await resolveMigrationSource(cwd, config.storageBackend);
+  const writeTargetState = source.from !== target;
+  const writeTargetConfig = config.storageBackend !== target;
 
-  if (target === source) {
-    const state =
-      target === 'sqlite'
-        ? await readSQLiteState(cwd)
-        : await readJsonState(cwd);
-    return {
-      from: source,
-      to: target,
-      ...countState(state),
-      changed: false,
-    };
+  if (writeTargetState) {
+    await writeStateForBackend(target, source.state, cwd);
   }
 
-  const state =
-    target === 'sqlite' ? await readJsonState(cwd) : await readSQLiteState(cwd);
-
-  if (target === 'sqlite') {
-    await writeSQLiteState(state, cwd);
-  } else {
-    await writeJsonState(state, cwd);
+  if (writeTargetConfig) {
+    await writeConfig(
+      {
+        ...config,
+        storageBackend: target,
+      },
+      cwd,
+    );
   }
-
-  await writeConfig(
-    {
-      ...config,
-      storageBackend: target,
-    },
-    cwd,
-  );
 
   return {
-    from: source,
+    from: source.from,
     to: target,
-    ...countState(state),
-    changed: true,
+    ...countState(source.state),
+    changed: writeTargetState || writeTargetConfig,
   };
+}
+
+async function resolveMigrationSource(
+  cwd: string,
+  configuredBackend: StorageMigrationTarget,
+): Promise<{
+  from: StorageMigrationTarget;
+  state: DubState;
+}> {
+  const configured = await tryReadBackend(configuredBackend, cwd);
+  if (configured.ok) {
+    return { from: configuredBackend, state: configured.state };
+  }
+
+  const fallbackBackend = oppositeBackend(configuredBackend);
+  const fallback = await tryReadBackend(fallbackBackend, cwd);
+  if (fallback.ok) {
+    return { from: fallbackBackend, state: fallback.state };
+  }
+
+  throw configured.error;
+}
+
+async function tryReadBackend(
+  backend: StorageMigrationTarget,
+  cwd: string,
+): Promise<{ ok: true; state: DubState } | { ok: false; error: unknown }> {
+  try {
+    return { ok: true, state: await readStateForBackend(backend, cwd) };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+function readStateForBackend(
+  backend: StorageMigrationTarget,
+  cwd: string,
+): Promise<DubState> {
+  return backend === 'sqlite' ? readSQLiteState(cwd) : readJsonState(cwd);
+}
+
+function writeStateForBackend(
+  backend: StorageMigrationTarget,
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  return backend === 'sqlite'
+    ? writeSQLiteState(state, cwd)
+    : writeJsonState(state, cwd);
+}
+
+function oppositeBackend(
+  backend: StorageMigrationTarget,
+): StorageMigrationTarget {
+  return backend === 'sqlite' ? 'json' : 'sqlite';
 }
 
 function parseStorageMigrationTarget(value: string): StorageMigrationTarget {

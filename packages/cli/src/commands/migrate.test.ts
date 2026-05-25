@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
-import { readConfig } from '../lib/config';
+import { readConfig, writeConfig } from '../lib/config';
 import {
   type DubState,
   readJsonState,
@@ -82,6 +82,24 @@ describe('migrateStorage', () => {
     });
     expect(config.storageBackend).toBe('json');
     expect(await readJsonState(dir)).toEqual(normalizedState);
+    expect(await readState(dir)).toEqual(normalizedState);
+  });
+
+  it('recovers when config already names the target but state is still in the other backend', async () => {
+    await writeJsonState(state, dir);
+    const normalizedState = await readJsonState(dir);
+    const config = await readConfig(dir);
+    await writeConfig({ ...config, storageBackend: 'sqlite' }, dir);
+
+    const result = await migrateStorage(dir, 'sqlite');
+
+    expect(result).toEqual({
+      from: 'json',
+      to: 'sqlite',
+      stackCount: 1,
+      branchCount: 2,
+      changed: true,
+    });
     expect(await readState(dir)).toEqual(normalizedState);
   });
 
