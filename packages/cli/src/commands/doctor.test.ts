@@ -125,6 +125,46 @@ describe('doctor', () => {
     expect(result.healthy).toBe(false);
   });
 
+  it('lists frozen branches as an informational notice without flagging an issue', async () => {
+    mockReadState.mockResolvedValue({
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              frozen: true,
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await doctor('/repo');
+    expect(result.issues).toEqual([]);
+    expect(result.healthy).toBe(true);
+    expect(result.notices).toHaveLength(1);
+    expect(result.notices[0]?.code).toBe('frozen-branches');
+    expect(result.notices[0]?.branches).toEqual(['feat/a']);
+  });
+
   it('does not flag branching stacks as a doctor issue', async () => {
     mockReadState.mockResolvedValue(
       makeState([

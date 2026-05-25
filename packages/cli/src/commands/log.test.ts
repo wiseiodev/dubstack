@@ -185,6 +185,52 @@ describe('log', () => {
     expect(output).toContain('\n\n');
   });
 
+  it('marks frozen branches with 🔒 in rendered output and JSON', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              frozen: true,
+            },
+            {
+              name: 'feat/b',
+              parent: 'feat/a',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+
+    const output = await log(dir);
+    expect(output).toContain('>feat/a 🔒');
+    expect(output).not.toContain('feat/b 🔒');
+
+    const json = await logJson(dir);
+    const frozenBranch = json.stacks[0]?.root?.children[0];
+    expect(frozenBranch?.name).toBe('feat/a');
+    expect(frozenBranch?.frozen).toBe(true);
+    expect(frozenBranch?.children[0]?.frozen).toBe(false);
+  });
+
   it('marks branches that are missing from git', async () => {
     const state: DubState = {
       stacks: [
@@ -976,8 +1022,8 @@ describe('log', () => {
       expect(featA?.draft).toBe(false);
       expect(featA?.committedRel).toBe('1 hour ago');
       expect(featA?.shortSha).toBe('aaaa1111');
-      // frozen is reserved for DUB-37; stays undefined for now.
-      expect(featA?.frozen).toBeUndefined();
+      // frozen is always present (DUB-37); false for unfrozen branches.
+      expect(featA?.frozen).toBe(false);
       // Tracked branch present in overview but with no PR — explicit NONE,
       // not undefined, so consumers can distinguish "no overview" from "no PR".
       const featB = featA?.children[0];
