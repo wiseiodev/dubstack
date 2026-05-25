@@ -427,6 +427,12 @@ dub submit --dry-run
 # AI-generate PR description body
 dub submit --ai
 
+# create new PRs as drafts
+dub submit --draft
+
+# promote existing draft PRs to ready for review
+dub submit --publish
+
 # submit current branch + ancestors to trunk (default)
 dub submit
 
@@ -445,6 +451,10 @@ dub submit --merge-when-ready --method rebase
 ```
 
 Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exclusive. Passing more than one is a validation error.
+
+`--draft` creates new PRs as drafts. Existing PRs are left in their current lifecycle state.
+
+`--publish` promotes existing draft PRs in the submit scope to ready for review. It errors if any selected branch does not already have an open PR.
 
 `--path current` and `--path stack` still work but emit a deprecation warning and will be removed in v2. Use `--downstack` and `--stack` respectively.
 
@@ -772,6 +782,24 @@ dub config ai-defaults create
 dub config ai-defaults create on
 dub config ai-defaults submit on
 dub config ai-defaults flow on
+```
+
+### `dub config submit-default [auto|draft|publish]`
+
+Manage repo-local defaults for the submit PR lifecycle.
+
+```bash
+# inspect current value
+dub config submit-default
+
+# create new submit PRs as drafts by default
+dub config submit-default draft
+
+# publish existing draft PRs by default
+dub config submit-default publish
+
+# create drafts when `.github/workflows/` contains workflow files, otherwise create ready PRs
+dub config submit-default auto
 ```
 
 ### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock|openai|ollama]`

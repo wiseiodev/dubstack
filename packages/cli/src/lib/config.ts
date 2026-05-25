@@ -4,10 +4,12 @@ import { DubError } from './errors';
 import { getDubDir } from './state';
 
 export type McpMode = 'read-only' | 'interactive' | 'trusted';
+export type SubmitDefault = 'auto' | 'draft' | 'publish';
 
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   mcpMode: McpMode;
+  submitDefault: SubmitDefault;
   ai: {
     defaults: {
       createMetadata: boolean;
@@ -64,6 +66,7 @@ type DeepPartial<T> =
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   mcpMode: 'interactive',
+  submitDefault: 'auto',
   ai: {
     defaults: {
       createMetadata: false,
@@ -153,6 +156,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
     mcpMode: normalizeMcpMode(config.mcpMode),
+    submitDefault: normalizeSubmitDefault(config.submitDefault),
     ai: {
       defaults: {
         createMetadata:
@@ -264,6 +268,13 @@ function normalizeMcpMode(value: unknown): McpMode {
     return value;
   }
   return DEFAULT_CONFIG.mcpMode;
+}
+
+function normalizeSubmitDefault(value: unknown): SubmitDefault {
+  if (value === 'auto' || value === 'draft' || value === 'publish') {
+    return value;
+  }
+  return DEFAULT_CONFIG.submitDefault;
 }
 
 function normalizeAiProviderModel(value: unknown): string | null {
