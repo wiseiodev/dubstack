@@ -109,7 +109,7 @@ function isTableLine(line: string): boolean {
 
 function formatTable(lines: string[]): string[] {
   const rows = lines
-    .filter((line) => !/^\|\s*[: -]+(\|\s*[: -]+)+\|$/.test(line))
+    .filter((line) => !/^\|[ \t:-]+(\|[ \t:-]+)+\|$/.test(line))
     .map((line) =>
       line
         .slice(1, -1)
