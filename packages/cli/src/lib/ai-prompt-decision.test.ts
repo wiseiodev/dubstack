@@ -10,6 +10,7 @@ import type { DubConfig } from './config';
 const baseConfig: DubConfig = {
   aiAssistantEnabled: true,
   mcpMode: 'interactive',
+  reviewers: [],
   submitDefault: 'auto',
   ai: {
     defaults: {

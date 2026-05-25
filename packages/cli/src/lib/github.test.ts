@@ -19,6 +19,7 @@ import { execa } from 'execa';
 import { openUrl } from './browser';
 import {
   __setGhRetryOptionsForTesting,
+  addPrReviewers,
   buildPrCreateWebUrl,
   checkGhAuth,
   createPr,
@@ -44,6 +45,7 @@ import {
   rerequestPrReviewers,
   retargetPrBase,
   updatePrBody,
+  validatePrReviewers,
 } from './github';
 import { removeTempFile } from './temp-text-file';
 
@@ -737,6 +739,35 @@ describe('createPr', () => {
     expect(result.url).toBe('https://github.com/o/r/pull/99');
   });
 
+  it('passes reviewers to gh pr create', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: 'https://github.com/o/r/pull/99\n',
+    });
+
+    await createPr('feat/x', 'main', 'title', '/tmp/body.md', '/repo', {
+      reviewers: ['alice', '@org/team'],
+    });
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      [
+        'pr',
+        'create',
+        '--head',
+        'feat/x',
+        '--base',
+        'main',
+        '--title',
+        'title',
+        '--body-file',
+        '/tmp/body.md',
+        '--reviewer',
+        'alice,org/team',
+      ],
+      { cwd: '/repo' },
+    );
+  });
+
   it('passes --draft when creating a draft PR', async () => {
     mockExeca.mockResolvedValueOnce({
       stdout: 'https://github.com/o/r/pull/99\n',
@@ -905,6 +936,73 @@ describe('updatePrBody', () => {
 
     await expect(updatePrBody(42, '/tmp/body.md', '/repo')).rejects.toThrow(
       'permissions',
+    );
+  });
+});
+
+describe('addPrReviewers', () => {
+  it('calls gh pr edit with reviewer handles', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await addPrReviewers(42, ['alice', '@org/team'], '/repo');
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'alice,org/team'],
+      { cwd: '/repo' },
+    );
+  });
+});
+
+describe('validatePrReviewers', () => {
+  it('validates users against repo collaborators and teams against repo access', async () => {
+    mockExeca.mockResolvedValue({ stdout: '' });
+
+    await validatePrReviewers(['alice', '@org/team'], '/repo');
+
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['api', 'repos/{owner}/{repo}/collaborators/alice', '--silent'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['api', 'orgs/org/teams/team/repos/{owner}/{repo}', '--silent'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('surfaces invalid collaborators with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(validatePrReviewers(['ghost'], '/repo')).rejects.toThrow(
+      "Reviewer 'ghost' is not a collaborator",
+    );
+  });
+
+  it('surfaces auth failures while validating users with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 403: Forbidden'));
+
+    await expect(validatePrReviewers(['alice'], '/repo')).rejects.toThrow(
+      "Cannot validate reviewer 'alice' because GitHub denied access",
+    );
+  });
+
+  it('surfaces team reviewers without repository access with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(validatePrReviewers(['@org/team'], '/repo')).rejects.toThrow(
+      "Team reviewer '@org/team' cannot review this repository",
+    );
+  });
+
+  it('surfaces auth failures while validating teams with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 401: Unauthorized'));
+
+    await expect(validatePrReviewers(['@org/team'], '/repo')).rejects.toThrow(
+      "Cannot validate team reviewer '@org/team' because GitHub denied access",
     );
   });
 });
@@ -1106,7 +1204,7 @@ describe('enqueuePrToMergeQueue', () => {
   });
 
   it('surfaces enqueue failures with queue-specific recovery', async () => {
-    mockExeca.mockRejectedValueOnce(new Error('merge queue disabled'));
+    mockExeca.mockRejectedValue(new Error('merge queue disabled'));
 
     await expect(enqueuePrToMergeQueue(44, '/repo')).rejects.toMatchObject({
       message: expect.stringContaining(

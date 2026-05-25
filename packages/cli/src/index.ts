@@ -1257,6 +1257,11 @@ program
     parseMergeMethod,
   )
   .option(
+    '--reviewers <list>',
+    'Comma-separated GitHub users or teams to request for review',
+  )
+  .option('--no-reviewers', 'Skip repo-default reviewers for this submit')
+  .option(
     '--rerequest-review',
     'Re-request review from existing reviewers on updated PRs',
   )
@@ -1277,6 +1282,8 @@ Examples:
   $ dub submit --draft      Create new PRs as drafts
   $ dub submit --publish    Promote existing draft PRs to ready for review
   $ dub submit --ai         Generate a PR description before updating the PR body
+  $ dub submit --reviewers alice,bob,@org/team
+                            Request reviewers for every submitted PR
   $ dub submit --web        Open browser PR create forms for new PRs
   $ dub submit --merge-when-ready --method squash
                             Queue GitHub auto-merge for submitted PRs
@@ -1319,6 +1326,11 @@ program
     'Auto-merge strategy: merge|squash|rebase',
     parseMergeMethod,
   )
+  .option(
+    '--reviewers <list>',
+    'Comma-separated GitHub users or teams to request for review',
+  )
+  .option('--no-reviewers', 'Skip repo-default reviewers for this submit')
   .option(
     '--rerequest-review',
     'Re-request review from existing reviewers on updated PRs',
@@ -1972,6 +1984,50 @@ program
           console.log(chalk.yellow(`⚠ MCP mode is already '${result.mode}'`));
         }
       }),
+  )
+  .addCommand(
+    new Command('reviewers')
+      .argument('[list]', 'Comma-separated GitHub users or teams')
+      .option('--clear', 'Remove repo-default reviewers')
+      .description('Manage repo-default PR reviewers')
+      .action(
+        async (list: string | undefined, options: { clear?: boolean }) => {
+          const { configReviewers } = await import('./commands/config');
+          const { formatReviewers } = await import('./lib/reviewers');
+          const result = await configReviewers(process.cwd(), list, {
+            clear: options.clear,
+          });
+
+          if (!options.clear && list == null) {
+            console.log(
+              chalk.blue(
+                result.reviewers.length > 0
+                  ? `Default reviewers: ${formatReviewers(result.reviewers)}`
+                  : 'No default reviewers configured for this repository.',
+              ),
+            );
+            return;
+          }
+
+          if (result.changed) {
+            console.log(
+              chalk.green(
+                result.reviewers.length > 0
+                  ? `✔ Default reviewers set: ${formatReviewers(result.reviewers)}`
+                  : '✔ Default reviewers cleared',
+              ),
+            );
+          } else {
+            console.log(
+              chalk.yellow(
+                result.reviewers.length > 0
+                  ? `⚠ Default reviewers already set: ${formatReviewers(result.reviewers)}`
+                  : '⚠ No default reviewers were configured',
+              ),
+            );
+          }
+        },
+      ),
   )
   .addCommand(
     new Command('submit-default')
@@ -2782,6 +2838,7 @@ async function runSubmit(options: {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: 'merge' | 'squash' | 'rebase';
+  reviewers?: string | false;
   web?: boolean;
   rerequestReview?: boolean;
   rerequestReviewOnly?: string[];
@@ -2799,6 +2856,9 @@ async function runSubmit(options: {
     fix: options.fix ?? false,
     mergeWhenReady: options.mergeWhenReady,
     method: options.method,
+    reviewers:
+      typeof options.reviewers === 'string' ? options.reviewers : undefined,
+    noReviewers: options.reviewers === false,
     web: options.web,
     rerequestReview: options.rerequestReview,
     rerequestReviewOnly: options.rerequestReviewOnly,

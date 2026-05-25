@@ -9,6 +9,7 @@ export type SubmitDefault = 'auto' | 'draft' | 'publish';
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   mcpMode: McpMode;
+  reviewers: string[];
   submitDefault: SubmitDefault;
   ai: {
     defaults: {
@@ -66,6 +67,7 @@ type DeepPartial<T> =
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   mcpMode: 'interactive',
+  reviewers: [],
   submitDefault: 'auto',
   ai: {
     defaults: {
@@ -156,6 +158,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
     mcpMode: normalizeMcpMode(config.mcpMode),
+    reviewers: normalizeReviewers(config.reviewers),
     submitDefault: normalizeSubmitDefault(config.submitDefault),
     ai: {
       defaults: {
@@ -226,6 +229,13 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
       },
     },
   };
+}
+
+function normalizeReviewers(value: unknown): string[] {
+  if (!Array.isArray(value)) return DEFAULT_CONFIG.reviewers;
+  return value.filter((entry): entry is string => {
+    return typeof entry === 'string' && entry.trim().length > 0;
+  });
 }
 
 function normalizeAiPromptMode(

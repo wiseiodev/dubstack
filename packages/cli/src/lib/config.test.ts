@@ -24,6 +24,7 @@ describe('readConfig', () => {
     expect(config).toEqual({
       aiAssistantEnabled: false,
       mcpMode: 'interactive',
+      reviewers: [],
       submitDefault: 'auto',
       ai: {
         defaults: {
@@ -86,6 +87,7 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.reviewers).toEqual([]);
     expect(config.ai.prompts).toEqual({
       mode: 'auto',
       autoAccept: 'off',
@@ -192,6 +194,14 @@ describe('writeConfig', () => {
     });
   });
 
+  it('persists reviewer defaults', async () => {
+    await writeConfig({ reviewers: ['alice', '@org/team'] }, dir);
+
+    const config = await readConfig(dir);
+
+    expect(config.reviewers).toEqual(['alice', '@org/team']);
+  });
+
   it('persists submit lifecycle defaults', async () => {
     await writeConfig(
       {
@@ -228,12 +238,14 @@ describe('writeConfig', () => {
             },
           },
         },
+        reviewers: ['alice', '', 123],
         submitDefault: 'ready',
       }),
     );
 
     const config = await readConfig(dir);
 
+    expect(config.reviewers).toEqual(['alice']);
     expect(config.submitDefault).toBe('auto');
     expect(config.ai.prompts).toEqual({
       mode: 'auto',

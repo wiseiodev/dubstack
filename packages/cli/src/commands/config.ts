@@ -1,6 +1,7 @@
 import type { DubConfig, McpMode, SubmitDefault } from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
+import { parseReviewerList } from '../lib/reviewers';
 
 export interface ConfigBooleanResult {
   enabled: boolean;
@@ -19,6 +20,11 @@ export interface ConfigModelResult {
 
 export interface ConfigMcpModeResult {
   mode: McpMode;
+  changed: boolean;
+}
+
+export interface ConfigReviewersResult {
+  reviewers: string[];
   changed: boolean;
 }
 
@@ -299,6 +305,44 @@ export async function configMcpMode(
   };
 }
 
+export async function configReviewers(
+  cwd: string,
+  reviewers?: string,
+  options: { clear?: boolean } = {},
+): Promise<ConfigReviewersResult> {
+  if (options.clear && reviewers != null) {
+    throw new DubError("'--clear' cannot be combined with a reviewer list.", [
+      "Run 'dub config reviewers --clear' to remove defaults.",
+      "Run 'dub config reviewers alice,bob' to set defaults.",
+    ]);
+  }
+
+  const config = await readConfig(cwd);
+  if (!options.clear && reviewers == null) {
+    return {
+      reviewers: config.reviewers,
+      changed: false,
+    };
+  }
+
+  const next = options.clear ? [] : parseReviewerList(reviewers ?? '');
+  const changed = !sameReviewers(config.reviewers, next);
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        reviewers: next,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    reviewers: next,
+    changed,
+  };
+}
+
 export async function configSubmitDefault(
   cwd: string,
   mode?: string,
@@ -327,6 +371,12 @@ export async function configSubmitDefault(
     mode: parsed,
     changed,
   };
+}
+
+function sameReviewers(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length && left.every((value, i) => value === right[i])
+  );
 }
 
 function parseMcpMode(value: string): McpMode {
