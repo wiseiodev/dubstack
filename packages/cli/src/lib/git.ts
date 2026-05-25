@@ -575,6 +575,36 @@ export async function getLastCommitMessage(
   }
 }
 
+/**
+ * Returns the commit messages (subject + body) for the commits on `branch`
+ * since `base`, ordered most-recent-first. Used by `dub squash` to assemble
+ * the default concatenated message when no override is supplied.
+ */
+export async function getCommitMessagesBetween(
+  base: string,
+  branch: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '--format=%B%x1e', `${base}..${branch}`],
+      { cwd },
+    );
+    return stdout
+      .split('\x1e')
+      .map((entry) => entry.replace(/^\n+|\n+$/g, ''))
+      .filter((entry) => entry.length > 0);
+  } catch {
+    throw new DubError(
+      `Failed to read commit messages between '${base}' and '${branch}'.`,
+      [
+        `Run 'git log ${base}..${branch}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
 /** Per-branch commit metadata returned by {@link getBranchCommitMetaBatch}. */
 export interface BranchCommitMeta {
   /** `git for-each-ref %(committerdate:relative)`, e.g. "3 hours ago". */
