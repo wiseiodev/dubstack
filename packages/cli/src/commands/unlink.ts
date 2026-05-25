@@ -16,6 +16,7 @@ import { getDescendants } from '../lib/graph';
 import { assertStateInvariants } from '../lib/invariants';
 import {
   findStackForBranch,
+  getStackTrunk,
   readState,
   type Stack,
   writeState,
@@ -130,7 +131,7 @@ export async function unlink(
       "Run 'dub doctor' to inspect the stack for metadata damage.",
     ]);
   }
-  const trunkName = trunkEntry.name;
+  const trunkName = getStackTrunk(stack);
 
   const descendants = getDescendants(stack, branch);
   const directChildren = stack.branches
@@ -218,6 +219,7 @@ export async function unlink(
 
   const newStack: Stack = {
     id: crypto.randomUUID(),
+    trunk: trunkName,
     branches: movedBranches,
   };
   state.stacks.push(newStack);

@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { execa } from './exec';
-import { getRepoRoot, isGitRepo } from './git';
+import { getCurrentBranch, getRepoRoot, isGitRepo } from './git';
 import { withStateLock } from './state-lock';
 import {
   RECONCILE_SOURCES,
@@ -70,6 +70,8 @@ export interface Branch {
 export interface Stack {
   /** Unique identifier for this stack. */
   id: string;
+  /** Configured trunk this stack is rooted against. */
+  trunk?: string;
   /** Ordered list of branches in the stack. */
   branches: Branch[];
 }
@@ -84,6 +86,10 @@ export interface LastSyncSummary {
 
 /** Root state persisted to `.git/dubstack/state.json`. */
 export interface DubState {
+  /** Configured real trunk branches in this repository. */
+  trunks?: string[];
+  /** Trunk used when creating a stack from an untracked branch. */
+  defaultTrunk?: string;
   /** All tracked stacks in this repository. */
   stacks: Stack[];
   /** Summary of the most recent `dub sync` invocation. */
@@ -191,7 +197,12 @@ export async function initState(
     }
 
     fs.mkdirSync(dir, { recursive: true });
-    const emptyState: DubState = { stacks: [] };
+    const defaultTrunk = await detectDefaultTrunk(cwd);
+    const emptyState: DubState = {
+      trunks: [defaultTrunk],
+      defaultTrunk,
+      stacks: [],
+    };
     fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
     return 'created';
   });
@@ -309,6 +320,7 @@ export function addBranchToStack(
   child: string,
   parent: string,
   parentRevision?: string,
+  trunk?: string,
 ): void {
   if (findStackForBranch(state, child)) {
     throw new DubError(`Branch '${child}' is already tracked in a stack.`, [
@@ -332,7 +344,10 @@ export function addBranchToStack(
 
   if (existingStack) {
     existingStack.branches.push(childBranch);
+    existingStack.trunk = getStackTrunk(existingStack);
+    ensureConfiguredTrunk(state, existingStack.trunk);
   } else {
+    const stackTrunk = trunk ?? parent;
     const rootBranch: Branch = {
       name: parent,
       type: 'root',
@@ -346,22 +361,69 @@ export function addBranchToStack(
     };
     state.stacks.push({
       id: crypto.randomUUID(),
+      trunk: stackTrunk,
       branches: [rootBranch, childBranch],
     });
+    ensureConfiguredTrunk(state, stackTrunk);
   }
 }
 
 function normalizeState(state: DubState): DubState {
+  const normalizedStacks = (state.stacks ?? []).map((stack) =>
+    normalizeStack(stack),
+  );
+  const inferredTrunks = normalizedStacks
+    .map((stack) => inferConfiguredTrunk(stack))
+    .filter((trunk): trunk is string => Boolean(trunk));
+  const trunks = uniqueNonEmpty([...(state.trunks ?? []), ...inferredTrunks]);
+  const defaultTrunk =
+    state.defaultTrunk && state.defaultTrunk.trim().length > 0
+      ? state.defaultTrunk
+      : (trunks[0] ?? 'main');
+  if (!trunks.includes(defaultTrunk)) trunks.unshift(defaultTrunk);
+
   const normalized: DubState = {
-    stacks: state.stacks.map((stack) => ({
-      ...stack,
-      branches: stack.branches.map((branch) => normalizeBranch(branch)),
-    })),
+    trunks,
+    defaultTrunk,
+    stacks: normalizedStacks,
   };
   if (state.last_sync) {
     normalized.last_sync = state.last_sync;
   }
   return normalized;
+}
+
+function normalizeStack(stack: Stack): Stack {
+  const branches = (stack.branches ?? []).map((branch) =>
+    normalizeBranch(branch),
+  );
+  const root = branches.find((branch) => branch.type === 'root');
+  return {
+    ...stack,
+    trunk:
+      stack.trunk && stack.trunk.trim().length > 0
+        ? stack.trunk
+        : root?.detached_root
+          ? undefined
+          : root?.name,
+    branches,
+  };
+}
+
+function uniqueNonEmpty(values: string[]): string[] {
+  return Array.from(
+    new Set(
+      values.map((value) => value.trim()).filter((value) => value.length > 0),
+    ),
+  );
+}
+
+async function detectDefaultTrunk(cwd: string): Promise<string> {
+  try {
+    return await getCurrentBranch(cwd);
+  } catch {
+    return 'main';
+  }
 }
 
 const LEGACY_RECONCILE_SOURCE_MAP: Record<string, ReconcileSource> = {
@@ -618,4 +680,33 @@ export function topologicalOrder(stack: Stack): Branch[] {
   }
 
   return result;
+}
+
+export function getStackTrunk(stack: Stack): string {
+  const root = stack.branches.find((branch) => branch.type === 'root');
+  return stack.trunk ?? root?.name ?? 'main';
+}
+
+export function getConfiguredTrunks(state: DubState): string[] {
+  return (
+    state.trunks ??
+    uniqueNonEmpty(state.stacks.map((stack) => inferConfiguredTrunk(stack)))
+  );
+}
+
+export function getDefaultTrunk(state: DubState): string {
+  return state.defaultTrunk ?? getConfiguredTrunks(state)[0] ?? 'main';
+}
+
+export function ensureConfiguredTrunk(state: DubState, trunk: string): void {
+  const trunks = new Set(state.trunks ?? []);
+  trunks.add(trunk);
+  state.trunks = Array.from(trunks);
+  state.defaultTrunk ??= trunk;
+}
+
+function inferConfiguredTrunk(stack: Stack): string {
+  if (stack.trunk) return stack.trunk;
+  const root = stack.branches.find((branch) => branch.type === 'root');
+  return root?.detached_root ? '' : (root?.name ?? '');
 }
