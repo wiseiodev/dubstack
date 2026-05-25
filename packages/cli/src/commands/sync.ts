@@ -1368,7 +1368,13 @@ export async function sync(
     if (options.restack) {
       console.log('🥞 Restacking branches...');
       const rootsToRestack = options.all
-        ? Array.from(new Set(scopeStacks.map((stack) => getStackTrunk(stack))))
+        ? Array.from(
+            new Set(
+              scopeStacks
+                .map((stack) => getStackTrunk(stack))
+                .filter((root) => roots.includes(root)),
+            ),
+          )
         : [roots[0]].filter(Boolean);
       for (const root of rootsToRestack) {
         if (recordWorktreeSkip(root)) continue;

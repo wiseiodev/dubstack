@@ -2400,5 +2400,75 @@ describe('sync', () => {
       // Real trunk (main) WAS treated as a trunk.
       expect(result.trunksSynced).not.toContain('feat/unlinked');
     });
+
+    it('does NOT restack a legacy detached root as though it were a configured trunk', async () => {
+      mockReadState.mockResolvedValue({
+        trunks: ['main'],
+        defaultTrunk: 'main',
+        stacks: [
+          {
+            id: 'stack-1',
+            trunk: 'main',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: {
+                  head_sha: 'feat/a-sha',
+                  base_sha: 'main-sha',
+                  base_branch: 'main',
+                  version_number: null,
+                  source: 'submit',
+                },
+                last_synced_at: null,
+                sync_source: 'submit',
+              },
+            ],
+          },
+          {
+            id: 'stack-2',
+            branches: [
+              {
+                name: 'feat/unlinked',
+                type: 'root',
+                detached_root: true,
+                parent: null,
+                pr_number: 99,
+                pr_link: 'https://x/99',
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', {
+        interactive: false,
+        all: true,
+        restack: true,
+      });
+
+      expect(mockCheckoutBranch).toHaveBeenCalledWith('main', '/repo');
+      expect(mockCheckoutBranch).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        '/repo',
+      );
+      expect(mockRestack).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -21,12 +21,14 @@ browser-demoable UI surface for the behavior.
   configured trunk plus every stack branch.
 - `dub doctor` reports stacks rooted at unconfigured trunks.
 - The docs build includes the new multi-trunk guide.
+- `dub sync --all --restack` does not treat legacy detached-root feature stacks
+  as configured trunks.
 
 ## Evidence
 
 - `pnpm checks` passed.
 - `pnpm typecheck` passed.
-- `pnpm test` passed: 123 CLI test files, 1353 CLI tests, docs tests, and
+- `pnpm test` passed: 123 CLI test files, 1354 CLI tests, docs tests, and
   retarget-action tests.
 
 ## Follow-up flag

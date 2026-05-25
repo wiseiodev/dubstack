@@ -24,6 +24,18 @@ Resolution:
 - Verified the focused test with:
   `pnpm --filter dubstack exec vitest run src/commands/trunk.test.ts`.
 
+`dub sync --all --restack` could treat a legacy detached-root stack as though
+the promoted feature root were a configured trunk. Trunk fetch/fast-forward
+already skipped detached roots, but the restack root list needed the same
+configured-trunk filter.
+
+Resolution:
+
+- Filtered `rootsToRestack` through the real configured trunk list in
+  `packages/cli/src/commands/sync.ts`.
+- Added a regression test in `packages/cli/src/commands/sync.test.ts` proving a
+  legacy `detached_root` branch is not checked out/restacked as a trunk.
+
 ### Critical
 
 None remaining.
