@@ -11,12 +11,12 @@ export type CompletionShell = 'bash' | 'zsh' | 'fish';
 /**
  * Subcommands that accept a branch name as their primary positional argument.
  * Used to drive shell-level branch-name completion via `git for-each-ref`.
+ * `up` and `down` take a numeric step count, not a branch, so they are
+ * intentionally absent.
  */
 const BRANCH_ARG_COMMANDS = [
   'checkout',
   'co',
-  'up',
-  'down',
   'delete',
   'untrack',
   'track',
@@ -31,11 +31,13 @@ const BRANCH_VALUE_FLAGS = ['--parent', '--branch', '--before', '--after'];
 
 /**
  * Flags whose value should be completed with file paths (default shell
- * filename completion).
+ * filename completion). Limited to the long flag name — the same shell-level
+ * file completion runs for both `--by-file foo.ts bar.ts` and any future
+ * variadic file-valued option.
  */
-const FILE_VALUE_FLAGS = ['--input-file', '--profile'];
+const FILE_VALUE_FLAGS = ['--by-file'];
 
-interface OptionSpec {
+export interface OptionSpec {
   flags: string;
   long: string | null;
   short: string | null;
@@ -43,7 +45,7 @@ interface OptionSpec {
   description: string;
 }
 
-interface CommandSpec {
+export interface CommandSpec {
   name: string;
   aliases: string[];
   description: string;
@@ -55,7 +57,7 @@ interface CommandSpec {
   takesFileArg: boolean;
 }
 
-interface ProgramSpec {
+export interface ProgramSpec {
   name: string;
   description: string;
   options: OptionSpec[];
@@ -159,44 +161,91 @@ function commandFlagList(cmd: CommandSpec): string[] {
   return cmd.options.flatMap(flagTokens);
 }
 
+interface CommandPath {
+  /** Joined with `::` for use as a bash case key. */
+  key: string;
+  /** Pipe-joined name + aliases for the *terminal* name only. */
+  patterns: string;
+  /** All `::`-joined keys that should dispatch to this entry (including aliases). */
+  aliasKeys: string[];
+  flags: string[];
+  /** Names of any direct subcommands (including aliases). */
+  childNames: string[];
+  cmd: CommandSpec;
+}
+
+/**
+ * Flatten the command tree into per-path entries — one for every reachable
+ * `dub` invocation, top-level and nested. `dub config ai-provider`
+ * collapses to key `config::ai-provider`, with `aliasKeys` accounting for
+ * the parent's aliases too so e.g. `dub co <Tab>` and `dub checkout <Tab>`
+ * dispatch identically.
+ */
+function enumerateCommandPaths(commands: CommandSpec[]): CommandPath[] {
+  const out: CommandPath[] = [];
+  const walk = (cmd: CommandSpec, parents: string[][]) => {
+    // parents is a list of equivalent ancestor-path arrays (each one a
+    // valid concrete path via aliases). For the root the list is `[[]]`.
+    const selfNames = [cmd.name, ...cmd.aliases];
+    const ownPaths: string[][] = [];
+    for (const parent of parents) {
+      for (const name of selfNames) ownPaths.push([...parent, name]);
+    }
+    const key = ownPaths[0].join('::');
+    const aliasKeys = ownPaths.map((p) => p.join('::'));
+    out.push({
+      key,
+      patterns: selfNames.join('|'),
+      aliasKeys,
+      flags: commandFlagList(cmd),
+      childNames: cmd.subcommands.flatMap((s) => [s.name, ...s.aliases]),
+      cmd,
+    });
+    for (const sub of cmd.subcommands) walk(sub, ownPaths);
+  };
+  for (const cmd of commands) walk(cmd, [[]]);
+  return out;
+}
+
 export function generateBashCompletion(program: Command): string {
   const spec = describeProgram(program);
   const topLevel = collectCommandNames(spec).join(' ');
   const branchValueFlags = BRANCH_VALUE_FLAGS.join('|');
   const fileValueFlags = FILE_VALUE_FLAGS.join('|');
 
-  // Build a case branch per command resolving to its flag set + arg behavior.
+  const paths = enumerateCommandPaths(spec.commands);
+
+  // Per-path case entries. Includes top-level and any nested subcommand
+  // paths so `dub config ai-provider --<Tab>` lists that nested command's
+  // flags rather than the parent's.
   const cmdCases: string[] = [];
-  const branchArgCmds: string[] = [];
-  const fileArgCmds: string[] = [];
-  for (const cmd of spec.commands) {
-    const flagList = commandFlagList(cmd);
-    const subNames = cmd.subcommands.flatMap((s) => [s.name, ...s.aliases]);
-    // Single-quote the completion list. Flags from commander are kebab-case
-    // (`--foo-bar`, `-x`), so they cannot contain single quotes; this keeps
-    // any `$` or `"` in a hypothetical future flag from being expanded by
-    // bash inside the generated case body.
-    const completions = [...flagList, ...subNames].join(' ');
-    const patterns = [cmd.name, ...cmd.aliases].join('|');
+  const branchArgKeys: string[] = [];
+  const fileArgKeys: string[] = [];
+  // Index of every known command path key, used by __dub_walk_path to know
+  // how deep to descend before stopping.
+  const knownKeys = new Set<string>();
+  for (const p of paths) {
+    for (const k of p.aliasKeys) knownKeys.add(k);
+    const completions = [...p.flags, ...p.childNames].join(' ');
+    // The case label must accept every alias-key variant — bash patterns
+    // can't be empty, so we join with `|`.
+    const label = p.aliasKeys.join('|');
     cmdCases.push(
-      `    ${patterns})\n      __dub_complete_words '${completions}'\n      ;;`,
+      `    ${label})\n      __dub_complete_words '${completions}'\n      ;;`,
     );
-    if (cmd.takesBranchArg) {
-      branchArgCmds.push(...[cmd.name, ...cmd.aliases]);
-    }
-    if (cmd.takesFileArg) {
-      fileArgCmds.push(...[cmd.name, ...cmd.aliases]);
-    }
+    if (p.cmd.takesBranchArg) branchArgKeys.push(...p.aliasKeys);
+    if (p.cmd.takesFileArg) fileArgKeys.push(...p.aliasKeys);
   }
 
-  const branchArgPattern = branchArgCmds.join('|');
-  const fileArgPattern = fileArgCmds.join('|');
+  const branchArgPattern = branchArgKeys.join('|');
+  const fileArgPattern = fileArgKeys.join('|');
+  const knownKeysLiteral = [...knownKeys].sort().join(' ');
 
   // Wrap each per-pattern case in a conditional so empty patterns do not
   // produce `case "$x" in )` — bash treats that as a syntax error.
   const branchArgCase = branchArgPattern
-    ? `  if [[ "$cur" != -* ]] && [[ "$cword" -eq 2 ]]; then
-    case "$subcmd" in
+    ? `  if [[ "$cur" != -* ]] && [[ -n "$path" ]]; then
+    case "$path" in
       ${branchArgPattern})
         __dub_compreply_lines "$(__dub_branches)"
         return 0
@@ -206,7 +255,7 @@ export function generateBashCompletion(program: Command): string {
     : '';
   const fileArgCase = fileArgPattern
     ? `  if [[ "$cur" != -* ]]; then
-    case "$subcmd" in
+    case "$path" in
       ${fileArgPattern})
         COMPREPLY=( $(compgen -f -- "$cur") )
         return 0
@@ -240,6 +289,34 @@ __dub_complete_words() {
   COMPREPLY=( $(compgen -W "$words" -- "$cur") )
 }
 
+# Returns the deepest known command path (e.g. "config::ai-provider") for
+# the current argv, descending through nested subcommands while skipping
+# flags and their values. The path is whatever portion of the argv we can
+# confidently classify; flag completion is left to the per-path case below.
+__dub_known_keys=" ${knownKeysLiteral} "
+__dub_walk_path() {
+  local idx=1 next path=""
+  while [ "$idx" -lt "$cword" ]; do
+    next="\${words[$idx]}"
+    if [[ "$next" == -* ]]; then
+      idx=$((idx+1))
+      continue
+    fi
+    local candidate
+    if [ -z "$path" ]; then
+      candidate="$next"
+    else
+      candidate="\${path}::$next"
+    fi
+    case "$__dub_known_keys" in
+      *" $candidate "*) path="$candidate" ;;
+      *) break ;;
+    esac
+    idx=$((idx+1))
+  done
+  echo "$path"
+}
+
 _dub() {
   local cur prev words cword
   cur="\${COMP_WORDS[COMP_CWORD]}"
@@ -265,17 +342,18 @@ _dub() {
     return 0
   fi
 
-  local subcmd="\${words[1]}"
+  local path
+  path="$(__dub_walk_path)"
 
-  # Branch-arg subcommands: complete with local branches when the user is on
-  # the first positional and the current token is not a flag.
+  # Branch-arg commands: complete with local branches when the user is on
+  # a positional position and the current token is not a flag.
 ${branchArgCase}
 
-  # File-arg subcommands fall through to default file completion.
+  # File-arg commands fall through to default file completion.
 ${fileArgCase}
 
   # Otherwise complete that command's flags/subcommands.
-  case "$subcmd" in
+  case "$path" in
 ${cmdCases.join('\n')}
     *)
       COMPREPLY=( $(compgen -W "--help" -- "$cur") )
@@ -302,9 +380,58 @@ export function generateZshCompletion(program: Command): string {
     )
     .join('\n');
 
+  // Per-top-level case branches. When a command has subcommands we route to
+  // a second-level case so nested invocations like `dub config ai-provider`
+  // complete that subcommand's flags rather than the parent's.
   const subcommandCases = spec.commands
     .map((cmd) => {
       const patterns = [cmd.name, ...cmd.aliases].join('|');
+      if (cmd.subcommands.length > 0) {
+        const nestedCases = cmd.subcommands
+          .map((sub) => {
+            const subPatterns = [sub.name, ...sub.aliases].join('|');
+            const subFlags = sub.options
+              .map(zshOptionSpec)
+              .filter(Boolean)
+              .join(' \\\n            ');
+            const subArg = zshArgSpec(sub);
+            return `        ${subPatterns})
+          _arguments -s \\
+            ${subFlags || ':: :->done'} \\
+            ${subArg}
+          ;;`;
+          })
+          .join('\n');
+        const subDescribe = cmd.subcommands
+          .map((sub) => `        '${sub.name}:${escapeZsh(sub.description)}'`)
+          .join('\n');
+        const parentFlags = cmd.options
+          .map(zshOptionSpec)
+          .filter(Boolean)
+          .join(' \\\n        ');
+        return `    ${patterns})
+      _arguments -C \\
+        ${parentFlags ? `${parentFlags} \\\n        ` : ''}'1: :->sub' \\
+        '*:: :->subargs'
+      case $state in
+        sub)
+          local -a subs
+          subs=(
+${subDescribe}
+          )
+          _describe -t subcommands '${cmd.name} subcommand' subs
+          ;;
+        subargs)
+          case "\${line[1]}" in
+${nestedCases}
+            *)
+              _message 'no more arguments'
+              ;;
+          esac
+          ;;
+      esac
+      ;;`;
+      }
       const flagSpecs = cmd.options
         .map(zshOptionSpec)
         .filter(Boolean)
@@ -377,9 +504,23 @@ function zshOptionSpec(option: OptionSpec): string {
   const head = tokens.length > 1 ? `(${tokens.join(' ')})` : '';
   const flag = tokens[0];
   if (option.takesValue) {
-    return `'${head}${flag}[${desc}]:value:'`;
+    // Route option values through the right completer when the flag is on
+    // the branch- or file-valued allow-list. Falls back to generic `:value:`
+    // for plain string options.
+    const valueAction = optionValueAction(option);
+    return `'${head}${flag}[${desc}]${valueAction}'`;
   }
   return `'${head}${flag}[${desc}]'`;
+}
+
+function optionValueAction(option: OptionSpec): string {
+  if (option.long && BRANCH_VALUE_FLAGS.includes(option.long)) {
+    return ':branch:__dub_branches';
+  }
+  if (option.long && FILE_VALUE_FLAGS.includes(option.long)) {
+    return ':file:_files';
+  }
+  return ':value:';
 }
 
 function zshArgSpec(cmd: CommandSpec): string {
@@ -401,15 +542,17 @@ function zshArgSpec(cmd: CommandSpec): string {
 }
 
 function escapeZsh(value: string): string {
-  // Single-quoted zsh strings are mostly literal — the only character that
-  // needs special treatment is `'` itself (close-quote-then-reopen idiom).
-  // Escape `[`, `]`, and `:` because they are syntactically meaningful inside
-  // _arguments option specs and _describe candidate strings. Also escape
-  // backticks and dollar signs defensively: even inside single quotes they
-  // do not expand, but when an _arguments spec is reconstructed by zsh some
-  // contexts re-evaluate the description, so neutralising them keeps the
-  // generator output robust against future zsh quirks.
-  return value.replace(/'/g, "'\\''").replace(/[[\]:`$]/g, '\\$&');
+  // Escape backslashes first so the subsequent escape passes can't re-double
+  // a backslash we added ourselves. Then handle single quotes (close-then-
+  // reopen idiom inside a single-quoted string), and finally the characters
+  // zsh treats specially inside _arguments option specs and _describe
+  // candidate strings: `[`, `]`, `:`. Backticks and dollar signs are
+  // neutralised defensively — even inside single quotes they do not expand,
+  // but some _arguments contexts re-evaluate the description.
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "'\\''")
+    .replace(/[[\]:`$]/g, '\\$&');
 }
 
 export function generateFishCompletion(program: Command): string {
@@ -430,6 +573,15 @@ export function generateFishCompletion(program: Command): string {
   out.push('function __dub_using_command');
   out.push('  set -l cmd (commandline -opc)');
   out.push('  test (count $cmd) -ge 2; and test $cmd[2] = $argv[1]');
+  out.push('  and test (count $cmd) -lt 3');
+  out.push('end');
+  out.push('');
+  // Predicate for nested subcommands. argv[1] = parent, argv[2] = child.
+  out.push('function __dub_using_nested');
+  out.push('  set -l cmd (commandline -opc)');
+  out.push(
+    '  test (count $cmd) -ge 3; and test $cmd[2] = $argv[1]; and test $cmd[3] = $argv[2]',
+  );
   out.push('end');
   out.push('');
   out.push('function __dub_no_subcommand');
@@ -456,37 +608,69 @@ export function generateFishCompletion(program: Command): string {
   for (const cmd of spec.commands) {
     const names = [cmd.name, ...cmd.aliases];
     for (const name of names) {
-      // Branch arg
-      if (cmd.takesBranchArg) {
+      const usingCondition = `__dub_using_command ${name}`;
+      if (cmd.subcommands.length > 0) {
+        // Subcommand names are valid completions at depth 1.
+        for (const sub of cmd.subcommands) {
+          const subDesc = escapeFish(sub.description);
+          out.push(
+            `complete -c dub -n '${usingCondition}' -f -a '${sub.name}' -d '${subDesc}'`,
+          );
+        }
+      } else if (cmd.takesBranchArg) {
         out.push(
-          `complete -c dub -n '__dub_using_command ${name}' -f -a '(__dub_branches)'`,
+          `complete -c dub -n '${usingCondition}' -f -a '(__dub_branches)'`,
         );
       } else if (cmd.takesFileArg) {
-        out.push(`complete -c dub -n '__dub_using_command ${name}' -F`);
+        out.push(`complete -c dub -n '${usingCondition}' -F`);
       }
-      // Flags
-      for (const option of cmd.options) {
-        const long = option.long ? option.long.replace(/^--/, '') : '';
-        const short = option.short ? option.short.replace(/^-/, '') : '';
-        const desc = escapeFish(option.description || '');
-        const parts = [`complete -c dub -n '__dub_using_command ${name}'`];
-        if (long) parts.push(`-l ${long}`);
-        if (short) parts.push(`-s ${short}`);
-        if (option.takesValue) parts.push('-r');
-        parts.push(`-d '${desc}'`);
-        out.push(parts.join(' '));
-      }
-      // Nested subcommand names
+      emitFishFlagCompletions(out, cmd.options, usingCondition);
+
+      // Nested subcommands get their own predicate so e.g.
+      // `dub config ai-provider --<Tab>` lists ai-provider's flags.
       for (const sub of cmd.subcommands) {
-        const subDesc = escapeFish(sub.description);
-        out.push(
-          `complete -c dub -n '__dub_using_command ${name}' -f -a '${sub.name}' -d '${subDesc}'`,
-        );
+        const nestedCondition = `__dub_using_nested ${name} ${sub.name}`;
+        if (sub.takesBranchArg) {
+          out.push(
+            `complete -c dub -n '${nestedCondition}' -f -a '(__dub_branches)'`,
+          );
+        } else if (sub.takesFileArg) {
+          out.push(`complete -c dub -n '${nestedCondition}' -F`);
+        }
+        emitFishFlagCompletions(out, sub.options, nestedCondition);
       }
     }
   }
 
   return `${out.join('\n')}\n`;
+}
+
+function emitFishFlagCompletions(
+  out: string[],
+  options: OptionSpec[],
+  condition: string,
+): void {
+  for (const option of options) {
+    const long = option.long ? option.long.replace(/^--/, '') : '';
+    const short = option.short ? option.short.replace(/^-/, '') : '';
+    const desc = escapeFish(option.description || '');
+    const parts = [`complete -c dub -n '${condition}'`];
+    if (long) parts.push(`-l ${long}`);
+    if (short) parts.push(`-s ${short}`);
+    if (option.takesValue) {
+      parts.push('-r');
+      // Surface branch/file completers for value-taking flags that the
+      // allow-lists know about. Plain string flags still default to the
+      // shell's no-suggestion behavior, which is what fish users expect.
+      if (option.long && BRANCH_VALUE_FLAGS.includes(option.long)) {
+        parts.push("-a '(__dub_branches)'");
+      } else if (option.long && FILE_VALUE_FLAGS.includes(option.long)) {
+        parts.push('-F');
+      }
+    }
+    parts.push(`-d '${desc}'`);
+    out.push(parts.join(' '));
+  }
 }
 
 function escapeFish(value: string): string {

@@ -143,11 +143,17 @@ default.
 The generated script completes:
 
 - Top-level subcommands (`dub <Tab>`).
-- Local branch names for branch-arg commands (`dub co <Tab>`, `dub up <Tab>`,
-  `dub down <Tab>`, `dub delete <Tab>`, `dub track <Tab>`, `dub untrack <Tab>`).
+- Nested subcommands and their flags (e.g. `dub config ai-provider <Tab>`,
+  `dub trunk add <Tab>`).
+- Local branch names for branch-arg commands: `dub co <Tab>` (alias
+  `checkout`), `dub delete <Tab>`, `dub track <Tab>`, `dub untrack <Tab>`.
+  (`dub up` and `dub down` take a numeric step count, not a branch.)
+- Branch names for branch-valued flags: `--parent`, `--branch`, `--before`,
+  `--after`.
+- File paths for `--by-file` and for commands that take positional file
+  arguments.
 - Per-command flags read directly from the `dub` binary's commander metadata,
   so completions stay in sync with the CLI version installed in `$PATH`.
-- File paths for commands that take a file argument.
 
 Regenerate the script after upgrading `dub` so new flags and commands show up.
 

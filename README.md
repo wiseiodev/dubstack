@@ -771,9 +771,12 @@ dub man > ~/.local/share/man/man1/dub.1
 man dub
 ```
 
-Completions cover top-level subcommands, per-command flags, and local branch
-names for `co`, `up`, `down`, `delete`, `track`, and `untrack`. Regenerate
-after upgrading `dub` to pick up new commands and flags. Full docs:
+Completions cover top-level subcommands, nested subcommands and their flags
+(e.g. `dub config ai-provider <Tab>`), per-command flags, and local branch
+names for `co`/`checkout`, `delete`, `track`, and `untrack`. Branch-valued
+flags (`--parent`, `--branch`, `--before`, `--after`) also complete local
+branches. Regenerate after upgrading `dub` to pick up new commands and
+flags. Full docs:
 [`apps/docs/content/docs/guides/shell-integration.mdx`](apps/docs/content/docs/guides/shell-integration.mdx).
 
 ### `dub skills`

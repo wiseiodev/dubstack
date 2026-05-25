@@ -71,6 +71,36 @@ describe('man', () => {
     expect(out).toContain('trunk add');
   });
 
+  it('documents options on nested subcommands (not only the parent)', () => {
+    const program = new Command();
+    program.name('dub').description('manage stacked diffs');
+    const cfg = program.command('config').description('Manage config');
+    cfg
+      .command('ai-provider')
+      .option('--clear', 'Clear the override')
+      .description('Set the AI provider');
+    const out = man(program, { version: '1.0.0' });
+    // The nested command should appear as a labelled .TP entry with its
+    // option in an indented .RS block underneath. Hyphens render as `\-`
+    // in roff after escapeRoff.
+    expect(out).toContain('config ai\\-provider');
+    expect(out).toContain('\\-\\-clear');
+    expect(out).toContain('Clear the override');
+  });
+
+  it('renders alias suffix with a space separating it from the command name', () => {
+    const program = new Command();
+    program.name('dub').description('manage stacked diffs');
+    program.command('checkout').alias('co').description('Checkout a branch');
+    const out = man(program, { version: '1.0.0' });
+    // Regression: escapeRoff used to strip the leading space inside the
+    // suffix, producing "checkout(aliases: co)". Now the space lives
+    // outside the escaped fragment.
+    expect(out).toMatch(
+      /checkout\\fR \\&\(aliases: co\)|checkout\\fR \(aliases: co\)/,
+    );
+  });
+
   it('escapes hyphens as \\- so man rendering preserves them', () => {
     const out = man(buildFixtureProgram(), { version: '1.0.0' });
     // Description "Print verbose output" contains no hyphen, but

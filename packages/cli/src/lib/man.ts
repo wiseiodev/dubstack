@@ -1,5 +1,5 @@
 import type { Command } from 'commander';
-import { describeProgram } from './completion';
+import { type CommandSpec, describeProgram } from './completion';
 
 /**
  * Generates roff (groff_man) markup for `dub.1`. Output goes to stdout and is
@@ -48,30 +48,7 @@ export function generateManPage(
 
   lines.push('.SH COMMANDS');
   for (const cmd of spec.commands) {
-    const aliasSuffix =
-      cmd.aliases.length > 0 ? ` (aliases: ${cmd.aliases.join(', ')})` : '';
-    lines.push('.TP');
-    lines.push(`\\fB${escapeRoff(cmd.name)}\\fR${escapeRoff(aliasSuffix)}`);
-    lines.push(escapeRoff(cmd.description || ''));
-    if (cmd.options.length > 0) {
-      lines.push('.RS');
-      for (const option of cmd.options) {
-        lines.push('.TP');
-        lines.push(`\\fB${escapeRoff(option.flags)}\\fR`);
-        lines.push(escapeRoff(option.description || ''));
-      }
-      lines.push('.RE');
-    }
-    if (cmd.subcommands.length > 0) {
-      lines.push('.RS');
-      lines.push('.B Subcommands:');
-      for (const sub of cmd.subcommands) {
-        lines.push('.TP');
-        lines.push(`\\fB${escapeRoff(`${cmd.name} ${sub.name}`)}\\fR`);
-        lines.push(escapeRoff(sub.description || ''));
-      }
-      lines.push('.RE');
-    }
+    renderCommandEntry(lines, cmd, [cmd.name]);
   }
 
   lines.push('.SH FILES');
@@ -86,6 +63,42 @@ export function generateManPage(
   lines.push('DubStack contributors. https://github.com/wiseiodev/dubstack');
 
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Recursively renders a command (and any nested subcommands) as a `.TP`
+ * entry plus its options. The original implementation only listed nested
+ * subcommand names without their options, which left useful surfaces like
+ * `dub config ai-provider` and `dub skills add` undocumented.
+ */
+function renderCommandEntry(
+  lines: string[],
+  cmd: CommandSpec,
+  path: string[],
+): void {
+  const fullName = path.join(' ');
+  // Build the label with a literal leading space outside escapeRoff so the
+  // trim() inside the escaper doesn't collapse the spacing between the
+  // command name and the alias suffix.
+  const aliasSuffix =
+    cmd.aliases.length > 0 ? ` (aliases: ${cmd.aliases.join(', ')})` : '';
+  lines.push('.TP');
+  lines.push(
+    `\\fB${escapeRoff(fullName)}\\fR${aliasSuffix ? ` ${escapeRoff(aliasSuffix.trimStart())}` : ''}`,
+  );
+  lines.push(escapeRoff(cmd.description || ''));
+  if (cmd.options.length > 0) {
+    lines.push('.RS');
+    for (const option of cmd.options) {
+      lines.push('.TP');
+      lines.push(`\\fB${escapeRoff(option.flags)}\\fR`);
+      lines.push(escapeRoff(option.description || ''));
+    }
+    lines.push('.RE');
+  }
+  for (const sub of cmd.subcommands) {
+    renderCommandEntry(lines, sub, [...path, sub.name]);
+  }
 }
 
 /**
