@@ -23,6 +23,7 @@ import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { absorb } from './commands/absorb';
+import { back, listBackHistory } from './commands/back';
 import { branchInfoOutput } from './commands/branch';
 import {
   checkout,
@@ -413,6 +414,37 @@ program
       await printLog(process.cwd(), options);
     },
   );
+
+program
+  .command('back')
+  .argument('[steps]', 'Number of checkout-history entries to go back')
+  .option('-l, --list', 'List recent checkout history without switching')
+  .description('Return to a previously checked-out branch')
+  .action(async (stepsArg: string | undefined, options: { list?: boolean }) => {
+    if (options.list) {
+      const entries = await listBackHistory(process.cwd());
+      if (entries.length === 0) {
+        console.log(chalk.yellow('⚠ No checkout history found'));
+        return;
+      }
+      for (const [index, entry] of entries.entries()) {
+        console.log(
+          `${index + 1}. ${entry.branch} ${chalk.dim(`(${entry.via}, ${entry.at})`)}`,
+        );
+      }
+      return;
+    }
+
+    const result = await back(process.cwd(), parseBackSteps(stepsArg));
+    for (const entry of result.skipped) {
+      console.log(
+        chalk.yellow(
+          `⚠ Skipped '${entry.branch}' from checkout history because it no longer exists locally.`,
+        ),
+      );
+    }
+    console.log(chalk.green(`✔ Switched back to '${result.branch}'`));
+  });
 
 program
   .command('up')
@@ -2487,6 +2519,17 @@ function parseSteps(positional?: string, option?: string): number {
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new DubError('Steps must be a positive integer.', [
       "Pass '<n>' or '--steps <n>' as a positive integer (e.g. 'dub up 2').",
+    ]);
+  }
+  return parsed;
+}
+
+function parseBackSteps(positional?: string): number {
+  if (!positional) return 1;
+  const parsed = Number(positional);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new DubError('Back steps must be a positive integer.', [
+      "Pass a positive integer, for example 'dub back 2'.",
     ]);
   }
   return parsed;

@@ -8,6 +8,7 @@ import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { detectActiveOperation } from '../lib/operation-state';
 import { getStackOverviewBatch } from '../lib/stack-overview';
 import { absorb } from './absorb';
+import { back } from './back';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
@@ -96,6 +97,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   ],
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
+  'dubstack.back': ['steps'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
@@ -350,6 +352,22 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.back',
+    description: 'Return to a previously checked-out branch.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Number of available history entries to go back.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -845,6 +863,10 @@ async function callTool(
       }
       return mutatingToolResult(() => checkout(branch, cwd));
     }
+    case 'dubstack.back':
+      return mutatingToolResult(() =>
+        back(cwd, optionalPositiveInteger(args.steps) ?? 1),
+      );
     case 'dubstack.delete':
       return mutatingToolResult(() =>
         deleteCommand(cwd, optionalString(args.branch), {

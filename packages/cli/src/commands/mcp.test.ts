@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import { appendCheckoutHistory } from '../lib/checkout-history';
 import { getCurrentBranch } from '../lib/git';
 import { readHistory } from '../lib/history';
 import { type DubState, initState, writeState } from '../lib/state';
@@ -101,6 +102,7 @@ describe('mcp command', () => {
       'dubstack.submit',
       'dubstack.sync',
       'dubstack.checkout',
+      'dubstack.back',
       'dubstack.absorb',
       'dubstack.unlink',
       'dubstack.delete',
@@ -273,6 +275,38 @@ describe('mcp mutating tools', () => {
     expect(result.structuredContent.result.branch).toBe('main');
     expect(confirm).not.toHaveBeenCalled();
     expect(await getCurrentBranch(dir)).toBe('main');
+  });
+
+  it('runs dubstack.back in trusted mode without confirmation', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    await gitInRepo(dir, ['checkout', 'main']);
+    await gitInRepo(dir, ['checkout', '-b', 'feat/b']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat b']);
+    await appendCheckoutHistory(dir, 'main', { via: 'checkout' });
+    await appendCheckoutHistory(dir, 'feat/a', { via: 'checkout' });
+    await appendCheckoutHistory(dir, 'feat/b', { via: 'checkout' });
+    await configMcpMode(dir, 'trusted');
+
+    const confirm = vi.fn<ConfirmMutatingFn>();
+    const response = await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.back',
+        arguments: {},
+      },
+    });
+
+    const result = response.result as {
+      isError?: boolean;
+      structuredContent: { result: { branch: string } };
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent.result.branch).toBe('feat/a');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(await getCurrentBranch(dir)).toBe('feat/a');
   });
 
   it('runs dubstack.checkout in interactive mode only after confirmation', async () => {
