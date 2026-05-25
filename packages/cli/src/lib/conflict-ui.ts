@@ -282,6 +282,26 @@ export async function promptFileAction(
   });
 }
 
+export async function promptAdjudicationChoice(input: {
+  file: string;
+  firstProvider: string;
+  secondProvider: string;
+}): Promise<'first' | 'second' | 'skip' | 'abort'> {
+  return promptChoice(
+    `${input.file}: [1] ${input.firstProvider}  [2] ${input.secondProvider}  [S]kip  [C]ancel: `,
+    {
+      '1': 'first',
+      first: 'first',
+      '2': 'second',
+      second: 'second',
+      s: 'skip',
+      skip: 'skip',
+      c: 'abort',
+      cancel: 'abort',
+    },
+  );
+}
+
 export function validateResolutionPaths(
   resolutions: FileResolution[],
   conflictedFiles: string[],

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAiProviderOptions,
   type ResolveAiProviderDeps,
+  resolveAdjudicationAiProviders,
   resolveAiProvider,
 } from './ai-provider';
 import type { DubConfig } from './config';
@@ -282,6 +283,53 @@ describe('resolveAiProvider', () => {
         providerConfig: createConfig({ selected: 'bedrock' }),
       }),
     ).toThrow('DUBSTACK_BEDROCK_AWS_REGION');
+  });
+});
+
+describe('resolveAdjudicationAiProviders', () => {
+  it('returns the first two configured auto providers in fallback order', () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
+
+    const deps = createDeps();
+    const providers = resolveAdjudicationAiProviders({
+      deps,
+      providerConfig: createConfig(),
+    });
+
+    expect(providers.map((provider) => provider.provider)).toEqual([
+      'google',
+      'anthropic',
+    ]);
+    expect(deps.createGateway).not.toHaveBeenCalled();
+  });
+
+  it('keeps the selected provider first and adds another configured provider', () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+
+    const deps = createDeps();
+    const providers = resolveAdjudicationAiProviders({
+      deps,
+      providerConfig: createConfig({ selected: 'openai' }),
+    });
+
+    expect(providers.map((provider) => provider.provider)).toEqual([
+      'openai',
+      'google',
+    ]);
+  });
+
+  it('returns one provider when only one provider is configured', () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+
+    const providers = resolveAdjudicationAiProviders({
+      deps: createDeps(),
+      providerConfig: createConfig(),
+    });
+
+    expect(providers.map((provider) => provider.provider)).toEqual(['openai']);
   });
 });
 

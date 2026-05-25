@@ -262,8 +262,9 @@ dub restack --continue
 Unified recovery commands:
 
 ```bash
-dub continue   # continue active restack/rebase
-dub abort      # abort active restack/rebase
+dub continue      # continue active restack/rebase
+dub continue --ai # ask configured AI provider(s) to resolve conflicts first
+dub abort         # abort active restack/rebase
 ```
 
 ## 9) Merge In Safe Order
