@@ -165,7 +165,7 @@ describe('getPrReviewers', () => {
     mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
 
     await expect(getPrReviewers(42, '/repo')).rejects.toThrow(
-      'Failed to fetch reviewers for PR #42',
+      'GitHub token lacks required permissions',
     );
   });
 });

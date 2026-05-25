@@ -283,6 +283,12 @@ export async function getPrReviewers(
   } catch (error) {
     const root = unwrapRetryError(error);
     const message = root instanceof Error ? root.message : String(root);
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
     throw new DubError(
       `Failed to fetch reviewers for PR #${prNumber}: ${message}`,
       [
