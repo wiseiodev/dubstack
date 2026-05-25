@@ -157,6 +157,7 @@ export async function popCheckoutHistory(
   const removeIndexes = new Set<number>();
   const skipped: CheckoutEntry[] = [];
   const popped: CheckoutEntry[] = [];
+  const cleanupIndexes = new Set<number>();
   let remainingSteps = steps;
   let target: CheckoutEntry | null = null;
   let onlySeenLeadingCurrent = true;
@@ -171,6 +172,7 @@ export async function popCheckoutHistory(
       entry.branch === opts.currentBranch
     ) {
       removeIndexes.add(index);
+      cleanupIndexes.add(index);
       continue;
     }
 
@@ -179,6 +181,7 @@ export async function popCheckoutHistory(
 
     if (!(await opts.branchExists(entry.branch))) {
       skipped.push(entry);
+      cleanupIndexes.add(index);
       continue;
     }
 
@@ -191,6 +194,12 @@ export async function popCheckoutHistory(
   }
 
   if (!target) {
+    if (cleanupIndexes.size > 0) {
+      await writeStored(
+        cwd,
+        entries.filter((_, index) => !cleanupIndexes.has(index)),
+      );
+    }
     return { target: null, skipped, popped };
   }
 

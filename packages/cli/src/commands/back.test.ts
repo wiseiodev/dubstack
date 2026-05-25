@@ -89,6 +89,22 @@ describe('back', () => {
       (await readCheckoutHistory(dir)).map((entry) => entry.branch),
     ).toEqual(['main']);
   });
+
+  it('cleans stale history entries even when no checkout target remains', async () => {
+    await createBranch('feat/deleted');
+    await createBranch('feat/current');
+    await gitInRepo(dir, ['checkout', 'feat/current']);
+    await gitInRepo(dir, ['branch', '-D', 'feat/deleted']);
+    await appendCheckoutHistory(dir, 'feat/deleted', { via: 'checkout' });
+    await appendCheckoutHistory(dir, 'feat/current', { via: 'checkout' });
+
+    await expect(back(dir)).rejects.toMatchObject({
+      message: 'No checkout history available.',
+    });
+
+    expect(await getCurrentBranch(dir)).toBe('feat/current');
+    expect(await readCheckoutHistory(dir)).toEqual([]);
+  });
 });
 
 async function createBranch(name: string): Promise<void> {
