@@ -86,6 +86,8 @@ This is a concise command reference for agents using `dub`.
 | `dub submit --stack` | Full tree from trunk |
 | `dub submit --branch <name>` | Exactly the named branch (no ancestors, no descendants) |
 | `dub submit --dry-run` | Preview submit actions |
+| `dub submit --merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
+| `dub submit --merge-when-ready --method squash` | Pick auto-merge strategy (`squash`, `merge`, or `rebase`) |
 | `dub pr` | Open current branch PR in browser |
 | `dub pr <branch-or-number>` | Open specific PR target |
 

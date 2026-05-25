@@ -93,6 +93,8 @@ This is a concise command reference for agents using `dub`.
 | `dub submit --branch <name>` | Only the specified branch |
 | `dub submit --path current` | _[deprecated]_ alias for `--downstack`; removed in v2 |
 | `dub submit --path stack` | _[deprecated]_ alias for `--stack`; removed in v2 |
+| `dub submit --merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
+| `dub submit --merge-when-ready --method squash` | Pick auto-merge strategy (`squash`, `merge`, or `rebase`) |
 | `dub merge-check --pr <number>` | Validate DubStack merge-order dependencies |
 | `dub merge-next` / `dub land` | Merge next safe PR in current path |
 | `dub merge-next --dry-run` | Preview merge-next actions |

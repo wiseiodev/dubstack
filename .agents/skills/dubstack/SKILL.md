@@ -119,6 +119,8 @@ dub submit
 dub submit --upstack
 dub submit --stack
 dub submit --branch feat/api
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method squash
 dub merge-check --pr 123
 dub merge-next
 dub post-merge

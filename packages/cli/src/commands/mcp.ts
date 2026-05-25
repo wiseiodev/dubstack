@@ -510,6 +510,17 @@ const TOOLS: ToolDefinition[] = [
           type: 'boolean',
           description: '[deprecated] No-op alias retained for compatibility.',
         },
+        mergeWhenReady: {
+          type: 'boolean',
+          description:
+            'Queue GitHub auto-merge for every submitted PR in the chosen scope.',
+        },
+        method: {
+          type: 'string',
+          enum: ['merge', 'squash', 'rebase'],
+          description:
+            "Auto-merge strategy for mergeWhenReady. Defaults to 'squash'.",
+        },
       },
       additionalProperties: false,
     },
@@ -1379,6 +1390,8 @@ async function callTool(
           branch: optionalString(args.branch),
           path: optionalSubmitPath(args.path),
           fix: optionalBoolean(args.fix) ?? false,
+          mergeWhenReady: optionalBoolean(args.mergeWhenReady),
+          method: optionalMergeMethod(args.method),
         }),
       );
     case 'dubstack.sync':
@@ -1814,6 +1827,15 @@ async function mutatingToolResult<T>(
 
 function optionalSubmitPath(value: unknown): 'current' | 'stack' | undefined {
   if (value === 'current' || value === 'stack') return value;
+  return undefined;
+}
+
+function optionalMergeMethod(
+  value: unknown,
+): 'merge' | 'squash' | 'rebase' | undefined {
+  if (value === 'merge' || value === 'squash' || value === 'rebase') {
+    return value;
+  }
   return undefined;
 }
 
