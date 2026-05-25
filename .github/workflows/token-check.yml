@@ -7,6 +7,10 @@ on:
 env:
   NPM_TOKEN_EXPIRES: "2026-08-21"
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   check:
     runs-on: ubuntu-latest

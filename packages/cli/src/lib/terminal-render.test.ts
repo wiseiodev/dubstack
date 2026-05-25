@@ -55,6 +55,24 @@ describe('createTerminalRenderer', () => {
     expect(capture.writes.join('')).toBe('# Summary\n\n- item\n');
   });
 
+  it('strips markdown table separator rows and resists pathological inputs', () => {
+    const capture = createCapture(true);
+    const renderer = createTerminalRenderer(capture.output);
+
+    renderer.renderMarkdown(
+      ['| Name | Value |', '| :--- | ---: |', '| foo | 1 |'].join('\n'),
+    );
+    const rendered = capture.writes.join('');
+    expect(rendered).not.toContain(':---');
+    expect(rendered).not.toContain('---:');
+
+    const pathological = `| ${' '.repeat(40)}|x`;
+    const start = Date.now();
+    const capture2 = createCapture(true);
+    createTerminalRenderer(capture2.output).renderMarkdown(pathological);
+    expect(Date.now() - start).toBeLessThan(100);
+  });
+
   it('renders preview panels and tool activity lines', () => {
     const capture = createCapture(true);
     const renderer = createTerminalRenderer(capture.output);
