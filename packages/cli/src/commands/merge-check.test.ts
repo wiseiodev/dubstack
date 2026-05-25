@@ -32,8 +32,9 @@ import {
   getPrMergeStatusByNumber,
   getPrStateByNumber,
 } from '../lib/github';
+import { withSchemaVersion } from '../lib/json-schemas';
 import { findStackForBranch, readState } from '../lib/state';
-import { mergeCheck } from './merge-check';
+import { mergeCheck, runMergeCheck } from './merge-check';
 
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
@@ -298,5 +299,35 @@ describe('mergeCheck (scoped, tree-shaped stack)', () => {
       scope: 'stack',
     });
     expect(result.branches.map((b) => b.branch)).toEqual(['feat/b1']);
+  });
+});
+
+describe('runMergeCheck (--json contract)', () => {
+  it('returns ok: true result without throwing on success', async () => {
+    const result = await runMergeCheck('/repo', { pr: 11 });
+    expect(result.ok).toBe(true);
+    expect(withSchemaVersion(result)).toMatchObject({
+      schemaVersion: 1,
+      ok: true,
+      scope: 'current',
+    });
+  });
+
+  it('returns ok: false result instead of throwing on failure', async () => {
+    mockGetPrByNumber.mockResolvedValue({
+      number: 12,
+      url: 'https://github.com/o/r/pull/12',
+      title: 'feat: b',
+      body: dubstackBody(11, 12),
+    });
+    mockGetPrStateByNumber.mockResolvedValue('OPEN');
+
+    const result = await runMergeCheck('/repo', { pr: 12 });
+    expect(result.ok).toBe(false);
+    expect(result.branches[0]?.ok).toBe(false);
+    expect(result.branches[0]?.reason).toContain('cannot be merged yet');
+
+    // Wrapped JSON envelope still serialises cleanly.
+    expect(withSchemaVersion(result).schemaVersion).toBe(1);
   });
 });

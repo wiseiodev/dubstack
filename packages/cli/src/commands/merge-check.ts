@@ -50,6 +50,22 @@ export async function mergeCheck(
   cwd: string,
   options: { pr?: number; branch?: string; scope?: ScopeMode } = {},
 ): Promise<MergeCheckResult> {
+  const result = await runMergeCheck(cwd, options);
+  if (!result.ok) {
+    throwIfAnyFailed(result.branches);
+  }
+  return result;
+}
+
+/**
+ * Computes merge-check findings without throwing on failure. Use this from
+ * `--json` callers (CLI and MCP) so the failure shape can be serialised
+ * end-to-end; wrap with {@link mergeCheck} to preserve the throwing UX.
+ */
+export async function runMergeCheck(
+  cwd: string,
+  options: { pr?: number; branch?: string; scope?: ScopeMode } = {},
+): Promise<MergeCheckResult> {
   await ensureGhInstalled();
   await checkGhAuth();
 
@@ -62,14 +78,7 @@ export async function mergeCheck(
       cwd,
       newCaches(),
     );
-    throwIfAnyFailed([finding]);
-    return {
-      ok: true,
-      scope: 'current',
-      prNumber: finding.prNumber,
-      reason: finding.reason,
-      branches: [finding],
-    };
+    return buildResult('current', [finding]);
   }
 
   const scope = options.scope ?? 'current';
@@ -79,14 +88,7 @@ export async function mergeCheck(
     const branchName = options.branch ?? (await getCurrentBranch(cwd));
     const pr = await getPr(branchName, cwd);
     const finding = await checkPrFinding(branchName, pr, cwd, newCaches());
-    throwIfAnyFailed([finding]);
-    return {
-      ok: true,
-      scope: 'current',
-      prNumber: finding.prNumber,
-      reason: finding.reason,
-      branches: [finding],
-    };
+    return buildResult('current', [finding]);
   }
 
   // Scope walks multiple branches in the stack.
@@ -120,11 +122,17 @@ export async function mergeCheck(
     const pr = await getPr(branch.name, cwd);
     findings.push(await checkPrFinding(branch.name, pr, cwd, caches));
   }
-  throwIfAnyFailed(findings);
+  return buildResult(scope, findings);
+}
 
+function buildResult(
+  scope: ScopeMode,
+  findings: MergeCheckBranchFinding[],
+): MergeCheckResult {
   const [first] = findings;
+  const ok = findings.every((f) => f.ok);
   return {
-    ok: true,
+    ok,
     scope,
     prNumber: first?.prNumber ?? null,
     reason:

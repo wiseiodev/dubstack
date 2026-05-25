@@ -10,7 +10,7 @@ import {
   writeState,
 } from '../lib/state';
 
-interface TrunkResult {
+export interface TrunkResult {
   branch: string;
   trunk: string;
 }
