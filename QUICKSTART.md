@@ -11,7 +11,7 @@ This guide gets you from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# 1) guided setup for Gemini, Anthropic, AI Gateway, Amazon Bedrock, or OpenAI
+# 1) guided setup for Gemini, Anthropic, AI Gateway, Amazon Bedrock, OpenAI, or Ollama
 dub ai setup
 
 # 2) reload your shell using the command DubStack prints
@@ -30,6 +30,8 @@ dub config ai-provider gateway
 dub config ai-provider bedrock
 # or:
 dub config ai-provider openai
+# or:
+dub config ai-provider ollama
 
 # 5) optional: enable AI defaults
 dub config ai-defaults create on
@@ -66,6 +68,18 @@ dub config ai-provider anthropic
 
 DubStack does not add or manage AWS secret key environment variables for Bedrock.
 `dub ai setup` and `dub ai env` print the exact activation command to run after updating your shell profile.
+
+For local Ollama:
+
+```bash
+dub ai env \
+  --ollama-base-url "http://localhost:11434" \
+  --ollama-model "qwen2.5-coder"
+
+dub config ai-provider ollama
+```
+
+Local models can be useful for privacy-sensitive repositories, but they are usually lower-quality than frontier hosted models. Expect weaker conflict resolution and split proposals unless your local model is strong.
 
 Optional template setup:
 

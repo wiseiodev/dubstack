@@ -30,6 +30,7 @@ import {
   getRepositoryWebUrl,
   getStackOverviewPrBatch,
   isPrAutoMergeEnabled,
+  markPrReady,
   mergePr,
   openPrInBrowser,
   retargetPrBase,
@@ -636,6 +637,28 @@ describe('createPr', () => {
     expect(result.url).toBe('https://github.com/o/r/pull/99');
   });
 
+  it('passes --draft when creating a draft PR', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: 'https://github.com/o/r/pull/99\n',
+    });
+
+    const result = await createPr(
+      'feat/x',
+      'main',
+      'title',
+      '/tmp/body.md',
+      '/repo',
+      { draft: true },
+    );
+
+    expect(result.isDraft).toBe(true);
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      expect.arrayContaining(['pr', 'create', '--draft']),
+      { cwd: '/repo' },
+    );
+  });
+
   it('throws descriptive error on 403', async () => {
     mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
 
@@ -650,6 +673,18 @@ describe('createPr', () => {
     await expect(
       createPr('feat/x', 'main', 'title', '/tmp/body.md', '/repo'),
     ).rejects.toThrow('Unexpected output');
+  });
+});
+
+describe('markPrReady', () => {
+  it('calls gh pr ready with the PR number', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await markPrReady(42, '/repo');
+
+    expect(mockExeca).toHaveBeenCalledWith('gh', ['pr', 'ready', '42'], {
+      cwd: '/repo',
+    });
   });
 });
 

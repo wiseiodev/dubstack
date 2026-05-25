@@ -4,10 +4,12 @@ import { DubError } from './errors';
 import { getDubDir } from './state';
 
 export type McpMode = 'read-only' | 'interactive' | 'trusted';
+export type SubmitDefault = 'auto' | 'draft' | 'publish';
 
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   mcpMode: McpMode;
+  submitDefault: SubmitDefault;
   ai: {
     defaults: {
       createMetadata: boolean;
@@ -25,13 +27,15 @@ export interface DubConfig {
         | 'anthropic'
         | 'gateway'
         | 'bedrock'
-        | 'openai';
+        | 'openai'
+        | 'ollama';
       models: {
         gemini: string | null;
         anthropic: string | null;
         gateway: string | null;
         bedrock: string | null;
         openai: string | null;
+        ollama: string | null;
       };
     };
     shortcutFallback: {
@@ -62,6 +66,7 @@ type DeepPartial<T> =
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   mcpMode: 'interactive',
+  submitDefault: 'auto',
   ai: {
     defaults: {
       createMetadata: false,
@@ -80,6 +85,7 @@ const DEFAULT_CONFIG: DubConfig = {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     },
     shortcutFallback: {
@@ -150,6 +156,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
     mcpMode: normalizeMcpMode(config.mcpMode),
+    submitDefault: normalizeSubmitDefault(config.submitDefault),
     ai: {
       defaults: {
         createMetadata:
@@ -177,6 +184,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
           openai: normalizeAiProviderModel(provider?.models?.openai),
+          ollama: normalizeAiProviderModel(provider?.models?.ollama),
         },
       },
       shortcutFallback: {
@@ -247,7 +255,8 @@ function normalizeAiProviderSelection(
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }
@@ -259,6 +268,13 @@ function normalizeMcpMode(value: unknown): McpMode {
     return value;
   }
   return DEFAULT_CONFIG.mcpMode;
+}
+
+function normalizeSubmitDefault(value: unknown): SubmitDefault {
+  if (value === 'auto' || value === 'draft' || value === 'publish') {
+    return value;
+  }
+  return DEFAULT_CONFIG.submitDefault;
 }
 
 function normalizeAiProviderModel(value: unknown): string | null {

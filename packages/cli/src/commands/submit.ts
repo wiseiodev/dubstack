@@ -1,14 +1,17 @@
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import {
   type AiMetadataDependencies,
   generatePrDescriptionSummary,
 } from '../lib/ai-metadata';
-import { readConfig } from '../lib/config';
+import { readConfig, type SubmitDefault } from '../lib/config';
 import { DubError } from '../lib/errors';
 import {
   getBranchTip,
@@ -25,6 +28,7 @@ import {
   getPr,
   isPrAutoMergeEnabled,
   type MergeMethod,
+  markPrReady,
   type PrInfo,
   updatePrBody,
 } from '../lib/github';
@@ -60,6 +64,8 @@ export type SubmitScope =
 export interface SubmitOptions {
   ai?: boolean;
   noAi?: boolean;
+  draft?: boolean;
+  publish?: boolean;
   /** @deprecated Use upstack/downstack/stack/branch. Emits a deprecation warning. */
   path?: SubmitPathMode;
   upstack?: boolean;
@@ -85,6 +91,7 @@ export interface SubmitResult {
   pushed: string[];
   created: string[];
   updated: string[];
+  published: string[];
   autoMergeEnabled: string[];
   autoMergeSkipped: string[];
   scope: SubmitScope;
@@ -92,6 +99,7 @@ export interface SubmitResult {
 }
 
 type SubmitDependencies = AiMetadataDependencies;
+type SubmitLifecycle = 'ready' | 'draft' | 'publish';
 
 const DEFAULT_DEPS: SubmitDependencies = {
   generateText,
@@ -100,6 +108,7 @@ const DEFAULT_DEPS: SubmitDependencies = {
   createGateway,
   createAmazonBedrock,
   createOpenAI,
+  createOpenAICompatible,
   fromIni,
   fromNodeProviderChain,
 };
@@ -123,6 +132,12 @@ export async function submit(
       "Pass '--no-ai' alone to skip AI generation for this run.",
     ]);
   }
+  if (options.draft && options.publish) {
+    throw new DubError("'--draft' cannot be combined with '--publish'.", [
+      "Pass '--draft' to create new PRs as drafts.",
+      "Pass '--publish' to promote existing draft PRs to ready for review.",
+    ]);
+  }
   if (options.method != null && !options.mergeWhenReady) {
     throw new DubError("'--method' requires '--merge-when-ready'.", [
       "Pass '--merge-when-ready --method squash' to queue auto-merge with a strategy.",
@@ -138,6 +153,11 @@ export async function submit(
 
   const plan = await getSubmitPlan(cwd, options);
   const config = await readConfig(cwd);
+  const lifecycle = await resolveSubmitLifecycle(
+    cwd,
+    options,
+    config.submitDefault,
+  );
   const useAi =
     options.ai === true
       ? true
@@ -168,6 +188,7 @@ export async function submit(
     pushed: [],
     created: [],
     updated: [],
+    published: [],
     autoMergeEnabled: [],
     autoMergeSkipped: [],
     scope: plan.scope,
@@ -181,6 +202,10 @@ export async function submit(
   );
 
   try {
+    if (lifecycle === 'publish') {
+      await preflightPublishPrs(plan.branches, prMap, cwd);
+    }
+
     if (!dryRun && plan.branches.length > 0) {
       progress.start('🚀 Pushing branches', plan.branches.length);
     }
@@ -211,25 +236,50 @@ export async function submit(
       const base = branch.parent as string;
 
       if (dryRun) {
-        console.log(
-          `[dry-run] would check/create PR: ${branch.name} → ${base}`,
-        );
+        if (lifecycle === 'publish') {
+          const pr = prMap.get(branch.name);
+          if (pr?.isDraft === true) {
+            console.log(
+              `[dry-run] would publish draft PR #${pr.number}: ${branch.name}`,
+            );
+          } else if (pr) {
+            console.log(
+              `[dry-run] PR #${pr.number} is already ready: ${branch.name}`,
+            );
+          }
+        } else {
+          console.log(
+            `[dry-run] would check/create PR: ${branch.name} → ${base}`,
+          );
+        }
         continue;
       }
       prIndex += 1;
       progress.update('📬 Syncing PRs', prIndex, subTreeTagger(branch.name));
 
-      const existing = await getPr(branch.name, cwd);
+      const existing =
+        prMap.get(branch.name) ?? (await getPr(branch.name, cwd));
       if (existing) {
         prMap.set(branch.name, existing);
         result.updated.push(branch.name);
       } else {
+        if (lifecycle === 'publish') {
+          throw new DubError(
+            `Cannot publish '${branch.name}' because no open PR exists.`,
+            [
+              "Run 'dub submit --draft' or 'dub submit' first to create PRs.",
+              "Rerun 'dub submit --publish' after the PR exists.",
+            ],
+          );
+        }
         const title = await getLastCommitMessage(branch.name, cwd);
         const created = await withTempMarkdownFile(
           'pr-body',
           '',
           async (tmpFile) => {
-            return createPr(branch.name, base, title, tmpFile, cwd);
+            return createPr(branch.name, base, title, tmpFile, cwd, {
+              draft: lifecycle === 'draft',
+            });
           },
         );
         prMap.set(branch.name, created);
@@ -255,6 +305,10 @@ export async function submit(
           providerConfig: config.ai.provider,
         },
       );
+
+      if (lifecycle === 'publish') {
+        await publishDraftPrs(plan.branches, prMap, cwd, result);
+      }
 
       for (const branch of plan.branches) {
         const pr = prMap.get(branch.name);
@@ -323,6 +377,69 @@ export async function submit(
     return result;
   } finally {
     progress.stop();
+  }
+}
+
+export async function resolveSubmitLifecycle(
+  cwd: string,
+  options: Pick<SubmitOptions, 'draft' | 'publish'>,
+  submitDefault: SubmitDefault,
+): Promise<SubmitLifecycle> {
+  if (options.draft && options.publish) {
+    throw new DubError("'--draft' cannot be combined with '--publish'.", [
+      "Pass '--draft' to create new PRs as drafts.",
+      "Pass '--publish' to promote existing draft PRs to ready for review.",
+    ]);
+  }
+  if (options.draft) return 'draft';
+  if (options.publish) return 'publish';
+  if (submitDefault === 'draft') return 'draft';
+  if (submitDefault === 'publish') return 'publish';
+  return (await hasGitHubWorkflowConfig(cwd)) ? 'draft' : 'ready';
+}
+
+async function hasGitHubWorkflowConfig(cwd: string): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(path.join(cwd, '.github', 'workflows'), {
+      withFileTypes: true,
+    });
+    return entries.some((entry) => entry.isFile() || entry.isSymbolicLink());
+  } catch {
+    return false;
+  }
+}
+
+async function preflightPublishPrs(
+  branches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+): Promise<void> {
+  for (const branch of branches) {
+    const existing = await getPr(branch.name, cwd);
+    if (!existing) {
+      throw new DubError(
+        `Cannot publish '${branch.name}' because no open PR exists.`,
+        [
+          "Run 'dub submit --draft' or 'dub submit' first to create PRs.",
+          "Rerun 'dub submit --publish' after the PR exists.",
+        ],
+      );
+    }
+    prMap.set(branch.name, existing);
+  }
+}
+
+async function publishDraftPrs(
+  branches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+  result: SubmitResult,
+): Promise<void> {
+  for (const branch of branches) {
+    const pr = prMap.get(branch.name);
+    if (!pr || pr.isDraft !== true) continue;
+    await markPrReady(pr.number, cwd);
+    result.published.push(branch.name);
   }
 }
 
