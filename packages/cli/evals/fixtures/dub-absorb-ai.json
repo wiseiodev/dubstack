@@ -1,0 +1,56 @@
+[
+  {
+    "input": {
+      "name": "match fixup to readiness commit",
+      "wipCommits": [
+        {
+          "shortSha": "bbb2222",
+          "subject": "fixup! feat: add ready AI gate",
+          "files": ["packages/cli/src/commands/ready.ts"]
+        },
+        {
+          "shortSha": "ddd4444",
+          "subject": "wip: scratch release notes",
+          "files": ["notes/release.md"]
+        }
+      ],
+      "candidateCommits": [
+        {
+          "shortSha": "aaa1111",
+          "subject": "feat: add ready AI gate",
+          "files": ["packages/cli/src/commands/ready.ts"]
+        },
+        {
+          "shortSha": "ccc3333",
+          "subject": "docs: update readme",
+          "files": ["README.md"]
+        }
+      ]
+    },
+    "output": {
+      "assignments": [
+        {
+          "wipSha": "bbb2222",
+          "targetSha": "aaa1111"
+        },
+        {
+          "wipSha": "ddd4444",
+          "targetSha": null
+        }
+      ]
+    },
+    "expected": {
+      "summary": "Absorb target matching links file-overlapping fixups and skips unrelated WIP.",
+      "assignments": [
+        {
+          "wipSha": "bbb2222",
+          "targetSha": "aaa1111"
+        },
+        {
+          "wipSha": "ddd4444",
+          "targetSha": null
+        }
+      ]
+    }
+  }
+]

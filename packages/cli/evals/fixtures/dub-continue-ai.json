@@ -1,0 +1,34 @@
+[
+  {
+    "input": {
+      "name": "rename plus edit",
+      "path": "packages/cli/src/commands/ready.ts",
+      "conflict": "<<<<<<< HEAD\nexport const commandName = 'review-ready';\nexport function render() { return 'ready'; }\n=======\nexport const commandName = 'ready';\nexport function render() { return 'ready with AI checks'; }\n>>>>>>> feature\n"
+    },
+    "output": {
+      "resolvedContent": "export const commandName = 'review-ready';\nexport function render() { return 'ready with AI checks'; }\n",
+      "explanation": "Keeps the upstream rename and the replayed AI readiness behavior."
+    },
+    "expected": {
+      "summary": "Conflict resolution preserves both rename and behavior edit.",
+      "preservedSnippets": ["review-ready", "ready with AI checks"],
+      "forbiddenSnippets": ["<<<<<<<", "=======", ">>>>>>>"]
+    }
+  },
+  {
+    "input": {
+      "name": "delete plus edit",
+      "path": "packages/cli/src/lib/legacy-ready.ts",
+      "conflict": "<<<<<<< HEAD\n=======\nexport function legacyReady() { return 'new behavior'; }\n>>>>>>> feature\n"
+    },
+    "output": {
+      "resolvedContent": "export function legacyReady() { return 'new behavior'; }\n",
+      "explanation": "Keeps the replayed edit because the feature branch still references this helper."
+    },
+    "expected": {
+      "summary": "Conflict resolution keeps necessary replayed content on delete/edit.",
+      "preservedSnippets": ["legacyReady", "new behavior"],
+      "forbiddenSnippets": ["<<<<<<<", "=======", ">>>>>>>"]
+    }
+  }
+]

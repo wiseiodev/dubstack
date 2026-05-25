@@ -1,0 +1,166 @@
+name: AI Evals
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/ai-*.ts'
+      - '**/*.eval.ts'
+      - '**/prompts/**'
+  schedule:
+    - cron: '17 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  cheap-model:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 2
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run cheap AI evals
+        id: run-evals
+        env:
+          DUBSTACK_GEMINI_API_KEY: ${{ secrets.DUBSTACK_GEMINI_API_KEY }}
+          DUBSTACK_GEMINI_MODEL: ${{ vars.DUBSTACK_GEMINI_MODEL || 'gemini-3-flash-preview' }}
+        shell: bash
+        run: |
+          mkdir -p .evalite-results
+          if [ -z "$DUBSTACK_GEMINI_API_KEY" ]; then
+            echo "Skipped AI evals: DUBSTACK_GEMINI_API_KEY is not configured." | tee .evalite-results/ai-evals.log
+            exit 0
+          fi
+          set -o pipefail
+          pnpm evals 2>&1 | tee .evalite-results/ai-evals.log
+          pnpm evals:export
+
+      - name: Upload AI eval report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-evals-pr
+          path: |
+            .evalite-results/
+            .evalite-export/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Comment AI eval result
+        if: always()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = '<!-- dubstack-ai-evals -->';
+            const outcome = '${{ steps.run-evals.outcome }}';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              marker,
+              '### DubStack AI evals',
+              '',
+              `Cheap-model eval outcome: **${outcome}**`,
+              '',
+              `Report artifact: [workflow run](${runUrl})`,
+            ].join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const previous = comments.data.find((comment) =>
+              comment.body?.includes(marker),
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  nightly-quality:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: anthropic
+          - provider: openai
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run nightly AI evals
+        env:
+          RAW_ANTHROPIC_API_KEY: ${{ secrets.DUBSTACK_ANTHROPIC_API_KEY }}
+          RAW_OPENAI_API_KEY: ${{ secrets.DUBSTACK_OPENAI_API_KEY }}
+          EVAL_PROVIDER: ${{ matrix.provider }}
+        shell: bash
+        run: |
+          mkdir -p ".evalite-results/${EVAL_PROVIDER}"
+          if [ "$EVAL_PROVIDER" = "anthropic" ]; then
+            if [ -z "$RAW_ANTHROPIC_API_KEY" ]; then
+              echo "Skipped anthropic: DUBSTACK_ANTHROPIC_API_KEY is not configured." | tee ".evalite-results/${EVAL_PROVIDER}/ai-evals.log"
+              exit 0
+            fi
+            export DUBSTACK_ANTHROPIC_API_KEY="$RAW_ANTHROPIC_API_KEY"
+            export DUBSTACK_ANTHROPIC_MODEL="claude-sonnet-4-20250514"
+            unset DUBSTACK_OPENAI_API_KEY
+          else
+            if [ -z "$RAW_OPENAI_API_KEY" ]; then
+              echo "Skipped openai: DUBSTACK_OPENAI_API_KEY is not configured." | tee ".evalite-results/${EVAL_PROVIDER}/ai-evals.log"
+              exit 0
+            fi
+            export DUBSTACK_OPENAI_API_KEY="$RAW_OPENAI_API_KEY"
+            export DUBSTACK_OPENAI_MODEL="gpt-5.5"
+            unset DUBSTACK_ANTHROPIC_API_KEY
+          fi
+          set -o pipefail
+          pnpm evals 2>&1 | tee ".evalite-results/${EVAL_PROVIDER}/ai-evals.log"
+          pnpm evals:export
+
+      - name: Upload nightly AI eval report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ai-evals-nightly-${{ matrix.provider }}
+          path: |
+            .evalite-results/
+            .evalite-export/
+          if-no-files-found: ignore
+          retention-days: 30
