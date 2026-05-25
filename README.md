@@ -774,7 +774,7 @@ dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
 
-### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock|openai]`
+### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock|openai|ollama]`
 
 Manage the repo-local AI provider selection.
 
@@ -790,6 +790,9 @@ dub config ai-provider anthropic
 
 # pin this repository to OpenAI
 dub config ai-provider openai
+
+# pin this repository to Ollama
+dub config ai-provider ollama
 
 # return to backward-compatible auto selection
 dub config ai-provider auto
@@ -836,6 +839,9 @@ dub config ai-model --provider openai
 # set a repo-local override
 dub config ai-model "gpt-5.5" --provider openai
 
+# set a repo-local Ollama override
+dub config ai-model "qwen2.5-coder" --provider ollama
+
 # set a repo-local Anthropic override
 dub config ai-model "claude-sonnet-4-20250514" --provider anthropic
 
@@ -858,15 +864,18 @@ To inspect your repository, `dub ai ask` can invoke a constrained shell tool lim
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
 
 Provider/model selection:
-- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `anthropic`, `gateway`, `bedrock`, or `openai`.
+- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `anthropic`, `gateway`, `bedrock`, `openai`, or `ollama`.
 - Repo-local model overrides from `dub config ai-model ...` win for that provider when present.
-- In `auto` mode, DubStack uses Gemini, then Anthropic, then AI Gateway, then Bedrock, then OpenAI.
+- In `auto` mode, DubStack uses Gemini, then Anthropic, then AI Gateway, then Bedrock, then OpenAI. Ollama is used in auto mode only when `DUBSTACK_OLLAMA_BASE_URL` or `DUBSTACK_OLLAMA_MODEL` is set.
 - Gemini uses `DUBSTACK_GEMINI_API_KEY` with optional `DUBSTACK_GEMINI_MODEL` override.
 - Anthropic uses `DUBSTACK_ANTHROPIC_API_KEY` with optional `DUBSTACK_ANTHROPIC_MODEL` override.
 - AI Gateway uses `DUBSTACK_AI_GATEWAY_API_KEY` with optional `DUBSTACK_AI_GATEWAY_MODEL` override.
 - Bedrock uses `DUBSTACK_BEDROCK_AWS_REGION`, `DUBSTACK_BEDROCK_MODEL`, and optional `DUBSTACK_BEDROCK_AWS_PROFILE`.
 - OpenAI uses `DUBSTACK_OPENAI_API_KEY` with optional `DUBSTACK_OPENAI_MODEL` override.
+- Ollama uses `DUBSTACK_OLLAMA_BASE_URL` (default `http://localhost:11434`) with optional `DUBSTACK_OLLAMA_MODEL` override. It checks `<base>/api/tags` before sending prompts, then uses the OpenAI-compatible `<base>/v1` endpoint. For LM Studio, set `DUBSTACK_OLLAMA_BASE_URL` to the server's `/v1` endpoint.
 - Bedrock support uses AWS credential-chain auth only. DubStack does not manage AWS secret key environment variables.
+
+Local Ollama and LM Studio models can be useful for privacy-sensitive repositories, but they are typically lower-quality than frontier hosted models. Expect weaker results for conflict resolution, split proposals, and generated PR/commit metadata unless you run a strong local model.
 
 Thinking is enabled by default for Gemini 3 Flash.
 
@@ -896,7 +905,7 @@ It mixes deterministic contract checks with an AI judge scorer so prompt changes
 
 ### `dub ai setup`
 
-Run the guided setup flow for Gemini, Anthropic, AI Gateway, Amazon Bedrock, or OpenAI.
+Run the guided setup flow for Gemini, Anthropic, AI Gateway, Amazon Bedrock, OpenAI, or Ollama.
 
 ```bash
 dub ai setup
@@ -927,6 +936,9 @@ dub ai env --anthropic-key "<your-key>"
 # write OpenAI key
 dub ai env --openai-key "<your-key>"
 
+# write Ollama endpoint
+dub ai env --ollama-base-url "http://localhost:11434"
+
 # write Gemini model override
 dub ai env --gemini-model "gemini-2.5-pro-preview"
 
@@ -938,6 +950,9 @@ dub ai env --gateway-model "google/gemini-2.5-pro"
 
 # write OpenAI model override
 dub ai env --openai-model "gpt-5.5"
+
+# write Ollama model override
+dub ai env --ollama-model "qwen2.5-coder"
 
 # write Bedrock profile + region + model
 dub ai env \

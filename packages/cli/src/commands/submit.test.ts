@@ -104,6 +104,7 @@ function makeConfig(overrides?: {
           gateway: null,
           bedrock: null,
           openai: null,
+          ollama: null,
         },
       },
       shortcutFallback: {

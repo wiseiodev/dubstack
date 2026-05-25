@@ -1862,7 +1862,7 @@ program
     new Command('ai-provider')
       .argument(
         '[provider]',
-        'Set to auto/gemini/anthropic/gateway/bedrock/openai (omit to inspect current value)',
+        'Set to auto/gemini/anthropic/gateway/bedrock/openai/ollama (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
       .action(async (provider?: string) => {
@@ -1919,7 +1919,7 @@ program
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
         '--provider <provider>',
-        'Provider name: gemini, anthropic, gateway, bedrock, or openai',
+        'Provider name: gemini, anthropic, gateway, bedrock, openai, or ollama',
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
@@ -2029,10 +2029,12 @@ program
       .option('--anthropic-key <key>', 'Set DUBSTACK_ANTHROPIC_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
       .option('--openai-key <key>', 'Set DUBSTACK_OPENAI_API_KEY')
+      .option('--ollama-base-url <url>', 'Set DUBSTACK_OLLAMA_BASE_URL')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
       .option('--anthropic-model <model>', 'Set DUBSTACK_ANTHROPIC_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
       .option('--openai-model <model>', 'Set DUBSTACK_OPENAI_MODEL')
+      .option('--ollama-model <model>', 'Set DUBSTACK_OLLAMA_MODEL')
       .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
       .option('--bedrock-region <region>', 'Set DUBSTACK_BEDROCK_AWS_REGION')
       .option('--bedrock-model <model>', 'Set DUBSTACK_BEDROCK_MODEL')
@@ -2050,10 +2052,12 @@ program
           anthropicKey?: string;
           gatewayKey?: string;
           openaiKey?: string;
+          ollamaBaseUrl?: string;
           geminiModel?: string;
           anthropicModel?: string;
           gatewayModel?: string;
           openaiModel?: string;
+          ollamaModel?: string;
           bedrockProfile?: string;
           bedrockRegion?: string;
           bedrockModel?: string;
@@ -2066,10 +2070,12 @@ program
             anthropicKey: options.anthropicKey,
             gatewayKey: options.gatewayKey,
             openaiKey: options.openaiKey,
+            ollamaBaseUrl: options.ollamaBaseUrl,
             geminiModel: options.geminiModel,
             anthropicModel: options.anthropicModel,
             gatewayModel: options.gatewayModel,
             openaiModel: options.openaiModel,
+            ollamaModel: options.ollamaModel,
             bedrockProfile: options.bedrockProfile,
             bedrockRegion: options.bedrockRegion,
             bedrockModel: options.bedrockModel,
