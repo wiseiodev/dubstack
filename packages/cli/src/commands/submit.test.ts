@@ -677,6 +677,52 @@ describe('submit', () => {
     expect(mockCreatePr).not.toHaveBeenCalled();
   });
 
+  it('rejects --publish dry-run when a selected branch has no open PR', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+
+    await expect(submit('/repo', true, { publish: true })).rejects.toThrow(
+      "Cannot publish 'feat/a' because no open PR exists.",
+    );
+    expect(mockGetPr).toHaveBeenCalledWith('feat/a', '/repo');
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockCreatePr).not.toHaveBeenCalled();
+  });
+
+  it('previews draft PR publishing during --publish dry-run without mutating GitHub', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+      isDraft: true,
+    });
+
+    await submit('/repo', true, { publish: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[dry-run] would publish draft PR #42: feat/a',
+    );
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockMarkPrReady).not.toHaveBeenCalled();
+    expect(mockUpdatePrBody).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
   it('rejects combining --draft and --publish', async () => {
     await expect(
       submit('/repo', false, { draft: true, publish: true }),

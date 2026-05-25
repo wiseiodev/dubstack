@@ -34,6 +34,20 @@ main risk area was partial mutation during `--publish`; the preflight runs
 before branch pushes and the regression test asserts no push/create happens
 when a PR is missing.
 
+## Follow-Up Review
+
+After PR publication, Copilot identified a valid dry-run gap: `--publish
+--dry-run` skipped the read-only PR existence preflight, so missing PRs would
+not error until a real publish. The fix now runs publish preflight in dry-run
+too, adds regression coverage for the missing-PR path, and makes successful
+publish dry-runs print draft-publish-specific output instead of the generic
+check/create wording.
+
+The external two-reviewer `claude --print` path from the adversarial-review
+skill was attempted for this follow-up, but the local CLI returned `401 Invalid
+authentication credentials`. I completed the fallback review manually against
+the current PR diff and Copilot's thread.
+
 ## Outcome
 
 Remaining critical findings: 0

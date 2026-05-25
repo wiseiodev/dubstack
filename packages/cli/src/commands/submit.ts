@@ -202,7 +202,7 @@ export async function submit(
   );
 
   try {
-    if (!dryRun && lifecycle === 'publish') {
+    if (lifecycle === 'publish') {
       await preflightPublishPrs(plan.branches, prMap, cwd);
     }
 
@@ -236,9 +236,22 @@ export async function submit(
       const base = branch.parent as string;
 
       if (dryRun) {
-        console.log(
-          `[dry-run] would check/create PR: ${branch.name} → ${base}`,
-        );
+        if (lifecycle === 'publish') {
+          const pr = prMap.get(branch.name);
+          if (pr?.isDraft === true) {
+            console.log(
+              `[dry-run] would publish draft PR #${pr.number}: ${branch.name}`,
+            );
+          } else if (pr) {
+            console.log(
+              `[dry-run] PR #${pr.number} is already ready: ${branch.name}`,
+            );
+          }
+        } else {
+          console.log(
+            `[dry-run] would check/create PR: ${branch.name} → ${base}`,
+          );
+        }
         continue;
       }
       prIndex += 1;

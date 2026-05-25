@@ -15,6 +15,9 @@ surface for the new lifecycle flags.
 - `dub submit --publish` preflights existing PRs, promotes draft PRs through
   `gh pr ready <num>`, and errors before pushing when a selected branch has no
   open PR.
+- `dub submit --publish --dry-run` now performs the same read-only PR
+  preflight, errors for missing PRs, and previews draft publication without
+  pushing, marking PRs ready, or updating PR bodies.
 - `dub config submit-default auto|draft|publish` persists and normalizes the
   repo-local lifecycle default.
 - `auto` resolves to draft when `.github/workflows/` contains workflow files
@@ -28,7 +31,8 @@ surface for the new lifecycle flags.
 - `pnpm typecheck` passed.
 - `pnpm test` passed, including docs build/tests, retarget-action tests, and
   the full CLI suite.
-- Earlier focused CLI test run also passed 122 test files / 1,255 tests.
+- Focused submit regression run passed 42 tests in
+  `src/commands/submit.test.ts`.
 
 ## Follow-up flag
 
