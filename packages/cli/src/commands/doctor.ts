@@ -12,6 +12,7 @@ import { detectActiveOperation } from '../lib/operation-state';
 import {
   type Branch,
   findStackForBranch,
+  getConfiguredTrunks,
   readState,
   type Stack,
 } from '../lib/state';
@@ -21,6 +22,7 @@ export type DoctorIssueCode =
   | 'untracked-current-branch'
   | 'parent-mismatch'
   | 'remote-base-mismatch'
+  | 'orphaned-stack'
   | 'missing-local'
   | 'missing-remote'
   | 'remote-drift'
@@ -63,6 +65,7 @@ export async function doctor(
   const scopedStacks = resolveScopedStacks(state.stacks, result.checkedBranch, {
     all: options.all ?? false,
   });
+  const configuredTrunks = new Set(getConfiguredTrunks(state));
 
   const activeOperation = await detectActiveOperation(cwd);
   if (activeOperation !== 'none') {
@@ -88,6 +91,19 @@ export async function doctor(
     });
     result.healthy = false;
     return result;
+  }
+
+  for (const stack of scopedStacks) {
+    const trunk = getReportableStackTrunk(stack);
+    if (!trunk) continue;
+    if (configuredTrunks.has(trunk)) continue;
+    result.issues.push({
+      code: 'orphaned-stack',
+      summary: `Stack '${stack.id}' is rooted at unconfigured trunk '${trunk}'.`,
+      details:
+        'DubStack tracks this stack against a trunk that is no longer registered in state.',
+      fixes: [`dub trunk add ${trunk}`, 'dub trunk list', 'dub log --all'],
+    });
   }
 
   const trackedNames = Array.from(
@@ -272,4 +288,10 @@ function pushRemoteCheckFailed(
     details,
     fixes: ['gh auth status', 'gh auth login', 'git fetch --all --prune'],
   });
+}
+
+function getReportableStackTrunk(stack: Stack): string | undefined {
+  if (stack.trunk) return stack.trunk;
+  const root = stack.branches.find((branch) => branch.type === 'root');
+  return root?.detached_root ? undefined : root?.name;
 }

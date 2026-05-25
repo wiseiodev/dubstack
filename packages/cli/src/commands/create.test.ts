@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { writeConfig } from '../lib/config';
 import { getBranchTip, getCurrentBranch } from '../lib/git';
-import { readState } from '../lib/state';
+import { readState, writeState } from '../lib/state';
 import { readUndoEntry } from '../lib/undo-log';
 import { create } from './create';
 import { init } from './init';
@@ -122,6 +122,64 @@ describe('create', () => {
     const state = await readState(dir);
     const child = state.stacks[0].branches.find((b) => b.name === 'feat/first');
     expect(child?.parent_revision).toBe(parentTip);
+  });
+
+  it('uses defaultTrunk when creating from an untracked branch', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'develop', 'main']);
+    await gitInRepo(dir, ['checkout', 'main']);
+    const state = await readState(dir);
+    state.trunks = ['main', 'develop'];
+    state.defaultTrunk = 'develop';
+    await writeState(state, dir);
+    await gitInRepo(dir, ['checkout', '-b', 'scratch', 'main']);
+
+    const parentTip = await getBranchTip('develop', dir);
+    const result = await create('feat/from-default-trunk', dir);
+
+    expect(result.parent).toBe('develop');
+    const mergeBase = await gitInRepo(dir, [
+      'merge-base',
+      'feat/from-default-trunk',
+      'develop',
+    ]);
+    expect(mergeBase.stdout).toBe(parentTip);
+    const undoEntry = await readUndoEntry(dir);
+    expect(undoEntry.previousBranch).toBe('scratch');
+    const loaded = await readState(dir);
+    expect(loaded.stacks[0]).toMatchObject({
+      trunk: 'develop',
+      branches: [
+        { name: 'develop', type: 'root', parent: null },
+        {
+          name: 'feat/from-default-trunk',
+          parent: 'develop',
+          parent_revision: parentTip,
+        },
+      ],
+    });
+  });
+
+  it('keeps tracked branch children in their stack trunk', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'develop', 'main']);
+    await gitInRepo(dir, ['checkout', 'main']);
+    const state = await readState(dir);
+    state.trunks = ['main', 'develop'];
+    state.defaultTrunk = 'develop';
+    await writeState(state, dir);
+    await gitInRepo(dir, ['checkout', 'develop']);
+    await create('feat/develop-base', dir);
+
+    const result = await create('feat/develop-child', dir);
+
+    expect(result.parent).toBe('feat/develop-base');
+    const loaded = await readState(dir);
+    expect(loaded.stacks[0]).toMatchObject({
+      trunk: 'develop',
+      branches: expect.arrayContaining([
+        expect.objectContaining({ name: 'feat/develop-base' }),
+        expect.objectContaining({ name: 'feat/develop-child' }),
+      ]),
+    });
   });
 });
 

@@ -279,6 +279,153 @@ describe('sync', () => {
     expect(mockRestack).not.toHaveBeenCalled();
   });
 
+  it('default sync only fetches the current stack trunk', async () => {
+    mockReadState.mockResolvedValue({
+      trunks: ['main', 'develop'],
+      defaultTrunk: 'main',
+      stacks: [
+        {
+          id: 'stack-main',
+          trunk: 'main',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'feat/a-sha',
+                base_sha: 'main-sha',
+                base_branch: 'main',
+                version_number: null,
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+        {
+          id: 'stack-develop',
+          trunk: 'develop',
+          branches: [
+            {
+              name: 'develop',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/b',
+              parent: 'develop',
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: {
+                head_sha: 'feat/b-sha',
+                base_sha: 'develop-sha',
+                base_branch: 'develop',
+                version_number: null,
+                source: 'submit',
+              },
+              last_synced_at: null,
+              sync_source: 'submit',
+            },
+          ],
+        },
+      ],
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    await sync('/repo', { interactive: false, restack: false });
+
+    expect(mockFetchBranches).toHaveBeenCalledWith(
+      ['main', 'feat/a'],
+      '/repo',
+      'origin',
+      expect.objectContaining({ onBranchStart: expect.any(Function) }),
+    );
+    expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+      'main',
+      'origin/main',
+      '/repo',
+    );
+    expect(mockFastForwardBranchToRef).not.toHaveBeenCalledWith(
+      'develop',
+      'origin/develop',
+      '/repo',
+    );
+  });
+
+  it('sync --all fetches every configured trunk and every stack branch', async () => {
+    const state = makeState([
+      { name: 'main', parent: null, type: 'root' },
+      { name: 'feat/a', parent: 'main' },
+    ]);
+    state.trunks = ['main', 'develop'];
+    state.defaultTrunk = 'main';
+    state.stacks.push({
+      id: 'stack-develop',
+      trunk: 'develop',
+      branches: [
+        {
+          name: 'develop',
+          type: 'root',
+          parent: null,
+          pr_number: null,
+          pr_link: null,
+          last_submitted_version: null,
+          last_synced_at: null,
+          sync_source: null,
+        },
+        {
+          name: 'feat/b',
+          parent: 'develop',
+          pr_number: null,
+          pr_link: null,
+          last_submitted_version: {
+            head_sha: 'feat/b-sha',
+            base_sha: 'develop-sha',
+            base_branch: 'develop',
+            version_number: null,
+            source: 'submit',
+          },
+          last_synced_at: null,
+          sync_source: 'submit',
+        },
+      ],
+    });
+    mockReadState.mockResolvedValue(state);
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    await sync('/repo', { all: true, interactive: false, restack: false });
+
+    expect(mockFetchBranches).toHaveBeenCalledWith(
+      ['main', 'develop', 'feat/a', 'feat/b'],
+      '/repo',
+      'origin',
+      expect.objectContaining({ onBranchStart: expect.any(Function) }),
+    );
+    expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+      'main',
+      'origin/main',
+      '/repo',
+    );
+    expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+      'develop',
+      'origin/develop',
+      '/repo',
+    );
+  });
+
   it('skips reconciliation for branches checked out in another worktree', async () => {
     mockReadState.mockResolvedValue(
       makeState([
@@ -2252,6 +2399,125 @@ describe('sync', () => {
       );
       // Real trunk (main) WAS treated as a trunk.
       expect(result.trunksSynced).not.toContain('feat/unlinked');
+    });
+
+    it('plain sync fetches a detached stack root through its stored trunk', async () => {
+      mockGetCurrentBranch.mockResolvedValue('feat/unlinked');
+      mockReadState.mockResolvedValue({
+        trunks: ['main'],
+        defaultTrunk: 'main',
+        stacks: [
+          {
+            id: 'stack-detached',
+            trunk: 'main',
+            branches: [
+              {
+                name: 'feat/unlinked',
+                type: 'root',
+                detached_root: true,
+                parent: null,
+                pr_number: 99,
+                pr_link: 'https://x/99',
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+
+      await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main'],
+        '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
+      );
+      expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+        'main',
+        'origin/main',
+        '/repo',
+      );
+      expect(mockFastForwardBranchToRef).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        'origin/feat/unlinked',
+        '/repo',
+      );
+    });
+
+    it('does NOT restack a legacy detached root as though it were a configured trunk', async () => {
+      mockReadState.mockResolvedValue({
+        trunks: ['main'],
+        defaultTrunk: 'main',
+        stacks: [
+          {
+            id: 'stack-1',
+            trunk: 'main',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+                last_submitted_version: {
+                  head_sha: 'feat/a-sha',
+                  base_sha: 'main-sha',
+                  base_branch: 'main',
+                  version_number: null,
+                  source: 'submit',
+                },
+                last_synced_at: null,
+                sync_source: 'submit',
+              },
+            ],
+          },
+          {
+            id: 'stack-2',
+            branches: [
+              {
+                name: 'feat/unlinked',
+                type: 'root',
+                detached_root: true,
+                parent: null,
+                pr_number: 99,
+                pr_link: 'https://x/99',
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+      mockGetRefSha.mockResolvedValue('same-sha');
+
+      await sync('/repo', {
+        interactive: false,
+        all: true,
+        restack: true,
+      });
+
+      expect(mockCheckoutBranch).toHaveBeenCalledWith('main', '/repo');
+      expect(mockCheckoutBranch).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        '/repo',
+      );
+      expect(mockRestack).toHaveBeenCalledTimes(1);
     });
   });
 });

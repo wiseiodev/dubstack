@@ -37,7 +37,11 @@ describe('readState', () => {
   it('reads valid state', async () => {
     await initState(dir);
     const state = await readState(dir);
-    expect(state).toEqual({ stacks: [] });
+    expect(state).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it('throws when state file is missing', async () => {
@@ -82,6 +86,9 @@ describe('readState', () => {
     );
 
     const state = await readState(dir);
+    expect(state.trunks).toEqual(['main']);
+    expect(state.defaultTrunk).toBe('main');
+    expect(state.stacks[0].trunk).toBe('main');
     expect(state.stacks[0].branches[0].last_submitted_version).toBeNull();
     expect(state.stacks[0].branches[0].last_synced_at).toBeNull();
     expect(state.stacks[0].branches[0].sync_source).toBeNull();
@@ -123,6 +130,7 @@ describe('writeState and readState roundtrip', () => {
     };
     await writeState(state, dir);
     const loaded = await readState(dir);
+    expect(loaded.stacks[0].trunk).toBe('main');
     expect(loaded.stacks[0].branches[0]).toMatchObject(
       state.stacks[0].branches[0],
     );
@@ -265,7 +273,11 @@ describe('writeState and readState roundtrip', () => {
     const state: DubState = { stacks: [] };
     await writeState(state, dir);
     const loaded = await readState(dir);
-    expect(loaded).toEqual(state);
+    expect(loaded).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it('mirrors state to git refs after writing JSON', async () => {
@@ -778,7 +790,11 @@ describe('state lock', () => {
       onWait: () => {},
     });
 
-    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+    await expect(readState(dir)).resolves.toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
 
     await first.release();
   });
@@ -789,7 +805,11 @@ describe('initState', () => {
     const result = await initState(dir);
     expect(result).toBe('created');
     const state = await readState(dir);
-    expect(state).toEqual({ stacks: [] });
+    expect(state).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it("is idempotent — returns 'already_exists' on second call", async () => {
@@ -818,6 +838,8 @@ describe('initState', () => {
     expect(result).toBe('already_exists');
 
     const loaded = await readState(dir);
+    expect(loaded.trunks).toEqual(['main']);
+    expect(loaded.defaultTrunk).toBe('main');
     expect(loaded.stacks[0].id).toBe('keep-me');
   });
 });
@@ -969,6 +991,9 @@ describe('addBranchToStack', () => {
     addBranchToStack(state, 'feat/a', 'main');
 
     expect(state.stacks).toHaveLength(1);
+    expect(state.trunks).toEqual(['main']);
+    expect(state.defaultTrunk).toBe('main');
+    expect(state.stacks[0].trunk).toBe('main');
     expect(state.stacks[0].branches).toHaveLength(2);
     expect(state.stacks[0].branches[0]).toMatchObject({
       name: 'main',
@@ -984,8 +1009,11 @@ describe('addBranchToStack', () => {
   it('stores parent_revision when provided', () => {
     const state: DubState = { stacks: [] };
 
-    addBranchToStack(state, 'feat/a', 'main', 'abc123');
+    addBranchToStack(state, 'feat/a', 'main', 'abc123', 'develop');
 
+    expect(state.trunks).toEqual(['develop']);
+    expect(state.defaultTrunk).toBe('develop');
+    expect(state.stacks[0].trunk).toBe('develop');
     expect(state.stacks[0].branches[1]).toMatchObject({
       name: 'feat/a',
       parent: 'main',
