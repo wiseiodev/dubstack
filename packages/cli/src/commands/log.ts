@@ -36,6 +36,7 @@ export interface LogJsonBranch {
   parent: string | null;
   current: boolean;
   exists: boolean;
+  frozen: boolean;
   prNumber: number | null;
   prLink: string | null;
   region: LogRegion;
@@ -48,8 +49,6 @@ export interface LogJsonBranch {
   draft?: boolean;
   committedRel?: string;
   shortSha?: string;
-  /** Reserved for DUB-37 (`dub freeze`); always undefined today. */
-  frozen?: boolean;
 }
 
 export interface LogJsonStack {
@@ -366,6 +365,7 @@ async function renderNodeJson(
     parent: branch.parent,
     current: branch.name === currentBranch,
     exists: await branchExists(branch.name, cwd),
+    frozen: branch.frozen === true,
     prNumber: branch.pr_number,
     prLink: branch.pr_link,
     region: regions.get(branch.name) ?? 'descendant',
@@ -455,6 +455,10 @@ async function renderNode(
     if (!exists) {
       label = `${label} ⚠ (missing)`;
     }
+  }
+
+  if (!isRoot && branch.frozen === true) {
+    label = `${label} 🔒`;
   }
 
   const overview = overviewMap.get(branch.name);

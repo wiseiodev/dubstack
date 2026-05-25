@@ -61,6 +61,7 @@ If you have `gt` muscle memory, use this as a fast map:
 | `gt submit` / `gt ss` | `dub submit` / `dub ss` |
 | `gt sync` | `dub sync` |
 | `gt checkout` / `gt co` | `dub checkout` / `dub co` |
+| `git checkout -` | `dub back` |
 | `gt log` / `gt ls` | `dub log` / `dub ls` |
 | `gt up` / `gt down` | `dub up` / `dub down` |
 | `gt top` / `gt bottom` | `dub top` / `dub bottom` |
@@ -320,6 +321,25 @@ dub trunk feat/auth-tests
 ```
 
 If branch metadata is missing, these commands print a remediation path using `dub track`.
+
+### `dub back`
+
+Return to a previously checked-out branch from DubStack checkout history.
+
+```bash
+# return to the previous branch
+dub back
+
+# go two available branch visits back
+dub back 2
+
+# inspect recent checkout history without switching
+dub back --list
+```
+
+Deleted local branches are skipped with a warning, and consumed history entries
+are removed so repeated `dub back` calls continue farther back instead of
+bouncing between the same two branches.
 
 ### `dub track [branch] [--parent <branch>]`
 
@@ -667,9 +687,31 @@ dub stash list
 
 See [`dub stash` docs](https://dubstack.dev/docs/commands/stash) for the full behavior, error matrix, and stash-log schema.
 
+### `dub freeze` / `dub unfreeze`
+
+Records a `frozen` flag on a tracked branch and surfaces it (🔒 in `dub log`, an informational notice in `dub doctor`). `dub unfreeze` clears the flag.
+
+> ⚠ This is the data-model + commands half of the feature. `dub restack` and `dub sync` do **not** yet skip frozen branches — that enforcement is tracked separately as DUB-82 and will land in a follow-up PR.
+
+```bash
+# freeze the current branch
+dub freeze
+
+# freeze a specific branch and its ancestors toward trunk
+dub freeze feat/auth-login --downstack
+
+# freeze a branch and all its descendants
+dub freeze feat/auth-base --upstack
+
+# clear the flag
+dub unfreeze feat/auth-login
+```
+
+`dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice.
+
 ### `dub undo`
 
-Undo the last `dub create`, `dub restack`, or `dub move` operation.
+Undo the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, `dub freeze`, or `dub unfreeze` operation.
 
 ```bash
 dub undo
@@ -739,6 +781,36 @@ dub config ai-provider openai
 
 # return to backward-compatible auto selection
 dub config ai-provider auto
+```
+
+### `dub config ai-prompts [auto|on|off]`
+
+Manage AI choices inside interactive sync/restack/post-merge prompts.
+
+```bash
+# inspect current prompt mode
+dub config ai-prompts
+
+# show AI choices whenever the repo AI assistant is enabled
+dub config ai-prompts auto
+
+# hide AI choices in interactive prompts
+dub config ai-prompts off
+```
+
+### `dub config ai-prompts-auto-accept [off|high]`
+
+Manage whether prompt recommendations can skip the confirmation prompt.
+
+```bash
+# inspect current auto-accept behavior
+dub config ai-prompts-auto-accept
+
+# apply high-confidence prompt recommendations immediately
+dub config ai-prompts-auto-accept high
+
+# always confirm recommendations before applying
+dub config ai-prompts-auto-accept off
 ```
 
 ### `dub config ai-model [model] --provider <provider>`

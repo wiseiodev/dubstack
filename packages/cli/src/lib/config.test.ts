@@ -30,6 +30,10 @@ describe('readConfig', () => {
           submitDescription: false,
           flow: false,
         },
+        prompts: {
+          mode: 'auto',
+          autoAccept: 'off',
+        },
         provider: {
           selected: 'auto',
           models: {
@@ -78,6 +82,10 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
+    });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
       models: {
@@ -109,6 +117,10 @@ describe('writeConfig', () => {
       createMetadata: true,
       submitDescription: false,
       flow: false,
+    });
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
     });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
@@ -149,6 +161,27 @@ describe('writeConfig', () => {
     });
   });
 
+  it('persists ai prompt settings', async () => {
+    await writeConfig(
+      {
+        ai: {
+          prompts: {
+            mode: 'on',
+            autoAccept: 'high',
+          },
+        },
+      },
+      dir,
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.ai.prompts).toEqual({
+      mode: 'on',
+      autoAccept: 'high',
+    });
+  });
+
   it('normalizes invalid provider settings back to defaults', async () => {
     const dubDir = path.join(dir, '.git', 'dubstack');
     fs.mkdirSync(dubDir, { recursive: true });
@@ -156,6 +189,10 @@ describe('writeConfig', () => {
       path.join(dubDir, 'config.json'),
       JSON.stringify({
         ai: {
+          prompts: {
+            mode: 'sometimes',
+            autoAccept: 'medium',
+          },
           provider: {
             selected: 'unknown',
             models: {
@@ -171,6 +208,10 @@ describe('writeConfig', () => {
 
     const config = await readConfig(dir);
 
+    expect(config.ai.prompts).toEqual({
+      mode: 'auto',
+      autoAccept: 'off',
+    });
     expect(config.ai.provider).toEqual({
       selected: 'auto',
       models: {

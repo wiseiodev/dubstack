@@ -22,6 +22,16 @@ export interface ConfigMcpModeResult {
   changed: boolean;
 }
 
+export interface ConfigAiPromptsResult {
+  mode: 'auto' | 'on' | 'off';
+  changed: boolean;
+}
+
+export interface ConfigAiPromptsAutoAcceptResult {
+  autoAccept: 'off' | 'high';
+  changed: boolean;
+}
+
 export type AiDefaultTarget = 'create' | 'submit' | 'flow';
 export type AiProvider = 'auto' | 'gemini' | 'gateway' | 'bedrock' | 'openai';
 export type AiModelProvider = Exclude<AiProvider, 'auto'>;
@@ -91,6 +101,78 @@ export async function configAiDefaults(
 
   return {
     enabled: parsed,
+    changed,
+  };
+}
+
+export async function configAiPrompts(
+  cwd: string,
+  mode?: string,
+): Promise<ConfigAiPromptsResult> {
+  const config = await readConfig(cwd);
+  if (mode == null) {
+    return {
+      mode: config.ai.prompts.mode,
+      changed: false,
+    };
+  }
+
+  const parsed = parseAiPromptMode(mode);
+  const changed = config.ai.prompts.mode !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        ai: {
+          ...config.ai,
+          prompts: {
+            ...config.ai.prompts,
+            mode: parsed,
+          },
+        },
+      },
+      cwd,
+    );
+  }
+
+  return {
+    mode: parsed,
+    changed,
+  };
+}
+
+export async function configAiPromptsAutoAccept(
+  cwd: string,
+  autoAccept?: string,
+): Promise<ConfigAiPromptsAutoAcceptResult> {
+  const config = await readConfig(cwd);
+  if (autoAccept == null) {
+    return {
+      autoAccept: config.ai.prompts.autoAccept,
+      changed: false,
+    };
+  }
+
+  const parsed = parseAiPromptAutoAccept(autoAccept);
+  const changed = config.ai.prompts.autoAccept !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        ai: {
+          ...config.ai,
+          prompts: {
+            ...config.ai.prompts,
+            autoAccept: parsed,
+          },
+        },
+      },
+      cwd,
+    );
+  }
+
+  return {
+    autoAccept: parsed,
     changed,
   };
 }
@@ -224,6 +306,23 @@ function parseAiAssistantState(value: string): boolean {
   if (value === 'off') return false;
   throw new DubError("Value must be either 'on' or 'off'.", [
     "Pass 'on' to enable or 'off' to disable.",
+  ]);
+}
+
+function parseAiPromptMode(value: string): 'auto' | 'on' | 'off' {
+  if (value === 'auto' || value === 'on' || value === 'off') return value;
+  throw new DubError("AI prompts must be one of 'auto', 'on', or 'off'.", [
+    "Pass 'auto' to show AI prompt choices when the AI assistant is enabled.",
+    "Pass 'on' to keep AI prompt choices enabled while the AI assistant is enabled.",
+    "Pass 'off' to hide AI prompt choices.",
+  ]);
+}
+
+function parseAiPromptAutoAccept(value: string): 'off' | 'high' {
+  if (value === 'off' || value === 'high') return value;
+  throw new DubError("AI prompt auto-accept must be either 'off' or 'high'.", [
+    "Pass 'high' to apply high-confidence AI prompt recommendations without a confirmation prompt.",
+    "Pass 'off' to always confirm AI prompt recommendations.",
   ]);
 }
 

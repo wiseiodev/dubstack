@@ -12,6 +12,12 @@ interface StoredCheckoutEntry extends CheckoutEntry {
   transient?: boolean;
 }
 
+export interface PopCheckoutHistoryResult {
+  target: CheckoutEntry | null;
+  skipped: CheckoutEntry[];
+  popped: CheckoutEntry[];
+}
+
 const MAX_SIZE = 20;
 const DEFAULT_READ_LIMIT = MAX_SIZE;
 
@@ -125,6 +131,85 @@ export async function readCheckoutHistory(
     .slice(-limit)
     .reverse()
     .map(({ branch, at, via }) => ({ branch, at, via }));
+}
+
+/**
+ * Pops visible checkout-history entries until `steps` existing branches have
+ * been consumed, then checks out the final target and persists the shortened
+ * history. The current branch can appear as the newest visit because history
+ * records destinations; leading current-branch entries are discarded before
+ * counting back.
+ */
+export async function popCheckoutHistory(
+  cwd: string,
+  steps: number,
+  opts: {
+    currentBranch?: string | null;
+    branchExists: (branch: string) => Promise<boolean>;
+    checkoutBranch: (branch: string) => Promise<void>;
+  },
+): Promise<PopCheckoutHistoryResult> {
+  if (steps <= 0) {
+    return { target: null, skipped: [], popped: [] };
+  }
+
+  const entries = await readStored(cwd);
+  const removeIndexes = new Set<number>();
+  const skipped: CheckoutEntry[] = [];
+  const popped: CheckoutEntry[] = [];
+  const cleanupIndexes = new Set<number>();
+  let remainingSteps = steps;
+  let target: CheckoutEntry | null = null;
+  let onlySeenLeadingCurrent = true;
+
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry.transient) continue;
+
+    if (
+      onlySeenLeadingCurrent &&
+      opts.currentBranch &&
+      entry.branch === opts.currentBranch
+    ) {
+      removeIndexes.add(index);
+      cleanupIndexes.add(index);
+      continue;
+    }
+
+    onlySeenLeadingCurrent = false;
+    removeIndexes.add(index);
+
+    if (!(await opts.branchExists(entry.branch))) {
+      skipped.push(entry);
+      cleanupIndexes.add(index);
+      continue;
+    }
+
+    popped.push(entry);
+    remainingSteps--;
+    if (remainingSteps === 0) {
+      target = entry;
+      break;
+    }
+  }
+
+  if (!target) {
+    if (cleanupIndexes.size > 0) {
+      await writeStored(
+        cwd,
+        entries.filter((_, index) => !cleanupIndexes.has(index)),
+      );
+    }
+    return { target: null, skipped, popped };
+  }
+
+  await opts.checkoutBranch(target.branch);
+  await writeStored(
+    cwd,
+    entries.filter((_, index) => !removeIndexes.has(index)),
+  );
+
+  return { target, skipped, popped };
 }
 
 export async function clearCheckoutHistory(cwd: string): Promise<void> {
