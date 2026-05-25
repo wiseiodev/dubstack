@@ -26,6 +26,7 @@ import {
   writeState,
 } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
 export interface MoveOptions {
@@ -195,6 +196,11 @@ export async function move(
       noOpReason: reason,
     };
   }
+  await assertBranchesNotCheckedOutElsewhere(
+    cwd,
+    [branch, target, ...reparents.map((reparent) => reparent.branch)],
+    'dub move',
+  );
 
   // Validate the planned mutation is acyclic on a clone before touching disk.
   const probeStack: Stack = structuredClone(stack);

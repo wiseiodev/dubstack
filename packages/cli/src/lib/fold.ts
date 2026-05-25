@@ -3,13 +3,11 @@ import {
   checkoutBranch,
   deleteLocalBranch,
   fastForwardBranchToRef,
-  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCommitSubjectsBetween,
   getCurrentBranch,
   getMergeBase,
   isWorkingTreeClean,
-  listWorktreeCheckouts,
   mergeSquashAndCommit,
 } from './git';
 import { assertStateInvariants } from './invariants';
@@ -21,6 +19,7 @@ import {
   type Stack,
   writeState,
 } from './state';
+import { assertBranchesNotCheckedOutElsewhere } from './worktree-guards';
 
 export interface FoldPreview {
   branch: string;
@@ -201,35 +200,11 @@ export async function foldBranch(
     parent: parentName,
   } = await resolveFoldTarget(cwd, options.branch);
 
-  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
-  const branchWorktree = worktreeCheckouts.get(branchName);
-  if (branchWorktree) {
-    throw new DubError(
-      `Cannot fold '${branchName}': it is checked out in another worktree.`,
-      [
-        formatWorktreeCheckoutSkipMessage(
-          branchName,
-          branchWorktree,
-          'dub fold',
-        ),
-        `Close the worktree at '${branchWorktree}' or fold from that worktree instead.`,
-      ],
-    );
-  }
-  const parentWorktree = worktreeCheckouts.get(parentName);
-  if (parentWorktree) {
-    throw new DubError(
-      `Cannot fold into '${parentName}': it is checked out in another worktree.`,
-      [
-        formatWorktreeCheckoutSkipMessage(
-          parentName,
-          parentWorktree,
-          'dub fold',
-        ),
-        `Close the worktree at '${parentWorktree}' or run 'dub fold' from that worktree.`,
-      ],
-    );
-  }
+  await assertBranchesNotCheckedOutElsewhere(
+    cwd,
+    [branchName, parentName],
+    'dub fold',
+  );
 
   const parentTip = await getBranchTip(parentName, cwd);
   const branchTip = await getBranchTip(branchName, cwd);
