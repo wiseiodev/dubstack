@@ -49,6 +49,9 @@ If any rebase pauses on a conflict, you'll see the standard recovery hints:
   conflict, then continues automatically.
 - `dub abort` — rolls back the absorb and clears the in-progress state.
 
+When two AI providers are configured, `dub continue --ai` adjudicates with
+both providers. Add `--no-adjudicate` to force the single-provider path.
+
 `dub undo` rolls back the entire stack to its pre-absorb tips when you've
 already completed the absorb but decided you don't want it.
 

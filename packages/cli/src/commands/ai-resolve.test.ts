@@ -57,8 +57,14 @@ function createMockDeps(overrides?: Partial<AiResolveDeps>): AiResolveDeps {
   return {
     streamText: vi.fn().mockReturnValue(aiResponse(defaultResolution)),
     createGoogleGenerativeAI: vi.fn().mockReturnValue(googleModel),
+    createAnthropic: vi
+      .fn()
+      .mockReturnValue(vi.fn().mockReturnValue('anthropic-model')),
     createGateway: vi.fn(),
     createAmazonBedrock: vi.fn().mockReturnValue(vi.fn()),
+    createOpenAI: vi
+      .fn()
+      .mockReturnValue(vi.fn().mockReturnValue('openai-model')),
     fromIni: vi.fn().mockReturnValue('ini-credentials'),
     fromNodeProviderChain: vi.fn().mockReturnValue('default-chain'),
     readConfig: vi.fn().mockResolvedValue({
@@ -100,7 +106,12 @@ function createMockDeps(overrides?: Partial<AiResolveDeps>): AiResolveDeps {
     renderBatchPreview: vi.fn(),
     promptBatchAction: vi.fn().mockResolvedValue('apply-all'),
     promptFileAction: vi.fn().mockResolvedValue('apply'),
+    promptAdjudicationChoice: vi.fn().mockResolvedValue('first'),
     applyResolution: vi.fn().mockResolvedValue(undefined),
+    runNearbyTestsForFile: vi.fn().mockResolvedValue({
+      status: 'none',
+      files: [],
+    }),
     showScopeWarning: vi.fn().mockResolvedValue(true),
     validateResolutionPaths: vi.fn(),
     continueCommand: vi.fn().mockResolvedValue({ continued: 'rebase' }),
@@ -113,6 +124,11 @@ let envSnapshot: NodeJS.ProcessEnv;
 
 beforeEach(() => {
   envSnapshot = { ...process.env };
+  delete process.env.DUBSTACK_ANTHROPIC_API_KEY;
+  delete process.env.DUBSTACK_AI_GATEWAY_API_KEY;
+  delete process.env.DUBSTACK_BEDROCK_AWS_REGION;
+  delete process.env.DUBSTACK_BEDROCK_MODEL;
+  delete process.env.DUBSTACK_OPENAI_API_KEY;
   process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
   vi.clearAllMocks();
 });
@@ -149,6 +165,130 @@ describe('aiResolve', () => {
 
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('Dry run');
+
+    logSpy.mockRestore();
+  });
+
+  it('single-provider mode skips adjudication when multiple providers are configured', async () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    const deps = createMockDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', { adjudicate: false }, deps);
+
+    expect(deps.streamText).toHaveBeenCalledTimes(1);
+    expect(deps.promptAdjudicationChoice).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
+  it('adjudicates agreeing providers as high confidence', async () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    const deps = createMockDeps();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', { adjudicate: true }, deps);
+
+    expect(deps.streamText).toHaveBeenCalledTimes(2);
+    expect(deps.promptAdjudicationChoice).not.toHaveBeenCalled();
+    expect(deps.applyResolution).toHaveBeenCalledWith(
+      'src/file.ts',
+      'resolved content',
+      '/tmp/test',
+    );
+    expect(deps.renderBatchPreview).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        confidence: 'high',
+        explanation: expect.stringContaining('agreed'),
+      }),
+    ]);
+
+    logSpy.mockRestore();
+  });
+
+  it('surfaces adjudication disagreements and applies the selected option', async () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    const deps = createMockDeps({
+      streamText: vi
+        .fn()
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-a',
+              confidence: 'medium',
+              explanation: 'first answer',
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-b',
+              confidence: 'medium',
+              explanation: 'second answer',
+            },
+          ]),
+        ),
+      promptAdjudicationChoice: vi.fn().mockResolvedValue('second'),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', { adjudicate: true }, deps);
+
+    expect(deps.promptAdjudicationChoice).toHaveBeenCalledWith({
+      file: 'src/file.ts',
+      firstProvider: 'google:gemini-3-flash-preview',
+      secondProvider: 'openai:gpt-5.5',
+    });
+    expect(deps.applyResolution).toHaveBeenCalledWith(
+      'src/file.ts',
+      'provider-b',
+      '/tmp/test',
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('dry-run adjudication disagreements do not prompt or apply', async () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    const deps = createMockDeps({
+      streamText: vi
+        .fn()
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-a',
+              confidence: 'medium',
+              explanation: 'first answer',
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-b',
+              confidence: 'medium',
+              explanation: 'second answer',
+            },
+          ]),
+        ),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', { adjudicate: true, dryRun: true }, deps);
+
+    expect(deps.promptAdjudicationChoice).not.toHaveBeenCalled();
+    expect(deps.applyResolution).not.toHaveBeenCalled();
+    expect(deps.renderBatchPreview).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        resolvedContent: 'provider-a',
+        explanation: expect.stringContaining('dry-run'),
+      }),
+    ]);
 
     logSpy.mockRestore();
   });
@@ -198,11 +338,56 @@ describe('aiResolve', () => {
 
     expect(deps.applyResolution).toHaveBeenCalledTimes(2);
     expect(deps.applyResolution).toHaveBeenCalledWith(
-      'a.ts',
-      'resolved-a',
+      'b.ts',
+      'resolved-b',
       '/tmp/test',
     );
     expect(deps.applyResolution).toHaveBeenCalledWith(
+      'b.ts',
+      'resolved-b',
+      '/tmp/test',
+    );
+
+    logSpy.mockRestore();
+  });
+
+  it('sorts low-confidence resolutions first for batch preview and apply-all', async () => {
+    const context = createMockContext({
+      conflictedFiles: ['a.ts', 'b.ts'],
+      conflictMarkers: {
+        'a.ts': '<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>>',
+        'b.ts': '<<<<<<< HEAD\nours2\n=======\ntheirs2\n>>>>>>>',
+      },
+    });
+    const deps = createMockDeps({
+      gatherConflictContext: vi.fn().mockResolvedValue(context),
+      streamText: vi.fn().mockReturnValue(
+        aiResponse([
+          {
+            path: 'a.ts',
+            resolvedContent: 'resolved-a',
+            confidence: 'high',
+            explanation: 'safe',
+          },
+          {
+            path: 'b.ts',
+            resolvedContent: 'resolved-b',
+            confidence: 'low',
+            explanation: 'risky',
+          },
+        ]),
+      ),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', {}, deps);
+
+    expect(deps.renderBatchPreview).toHaveBeenCalledWith([
+      expect.objectContaining({ path: 'b.ts' }),
+      expect.objectContaining({ path: 'a.ts' }),
+    ]);
+    expect(deps.applyResolution).toHaveBeenNthCalledWith(
+      1,
       'b.ts',
       'resolved-b',
       '/tmp/test',
@@ -287,8 +472,8 @@ describe('aiResolve', () => {
 
     expect(deps.applyResolution).toHaveBeenCalledTimes(1);
     expect(deps.applyResolution).toHaveBeenCalledWith(
-      'a.ts',
-      'resolved-a',
+      'b.ts',
+      'resolved-b',
       '/tmp/test',
     );
 
@@ -347,6 +532,85 @@ describe('aiResolve', () => {
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('AI could not fully resolve the conflicts');
     expect(output).toContain('dub continue');
+
+    logSpy.mockRestore();
+  });
+
+  it('boosts confidence when nearby tests pass', async () => {
+    const deps = createMockDeps({
+      runNearbyTestsForFile: vi.fn().mockResolvedValue({
+        status: 'passed',
+        files: ['src/file.test.ts'],
+      }),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', {}, deps);
+
+    expect(deps.runNearbyTestsForFile).toHaveBeenCalledWith(
+      'src/file.ts',
+      '/tmp/test',
+    );
+    const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(output).toContain('Nearby tests passed');
+
+    logSpy.mockRestore();
+  });
+
+  it('retries with test feedback when nearby tests fail', async () => {
+    const deps = createMockDeps({
+      streamText: vi
+        .fn()
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'first try',
+              confidence: 'medium',
+              explanation: 'initial',
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'second try',
+              confidence: 'medium',
+              explanation: 'with test feedback',
+            },
+          ]),
+        ),
+      runNearbyTestsForFile: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          files: ['src/file.test.ts'],
+          output: 'expected true to be false',
+        })
+        .mockResolvedValueOnce({
+          status: 'passed',
+          files: ['src/file.test.ts'],
+        }),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', {}, deps);
+
+    expect(deps.streamText).toHaveBeenCalledTimes(2);
+    expect(deps.applyResolution).toHaveBeenNthCalledWith(
+      1,
+      'src/file.ts',
+      'first try',
+      '/tmp/test',
+    );
+    expect(deps.applyResolution).toHaveBeenNthCalledWith(
+      2,
+      'src/file.ts',
+      'second try',
+      '/tmp/test',
+    );
+    expect(deps.validateResolutionPaths).toHaveBeenCalledTimes(2);
 
     logSpy.mockRestore();
   });

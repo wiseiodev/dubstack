@@ -16,7 +16,7 @@ interface ContinueCommandResult {
 
 export async function continueCommand(
   cwd: string,
-  options?: { ai?: boolean },
+  options?: { ai?: boolean; adjudicate?: boolean },
 ): Promise<ContinueCommandResult> {
   if (options?.ai) {
     try {
@@ -31,7 +31,7 @@ export async function continueCommand(
         .filter(Boolean);
 
       if (conflicted.length > 0) {
-        await aiResolve(cwd, {});
+        await aiResolve(cwd, { adjudicate: options.adjudicate });
         return { continued: 'ai-resolve' };
       }
     } catch {

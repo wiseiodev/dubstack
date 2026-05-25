@@ -538,6 +538,11 @@ If sync hits a real conflict, prefer:
 dub continue --ai
 ```
 
+When two AI providers are configured, `dub continue --ai` and
+`dub ai resolve` ask both providers and rank lower-confidence files first.
+Use `--no-adjudicate` for the single-provider path, or `--adjudicate` to
+require two providers.
+
 ### `dub doctor`
 
 Run health checks for stack metadata and submit readiness.

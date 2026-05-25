@@ -1140,8 +1140,16 @@ program
   .command('continue')
   .description('Continue the active restack or git rebase operation')
   .option('--ai', 'Use AI to resolve conflicts before continuing')
-  .action(async (options: { ai?: boolean }) => {
-    const result = await continueCommand(process.cwd(), { ai: options.ai });
+  .option('--adjudicate', 'Resolve conflicts with two configured AI providers')
+  .option(
+    '--no-adjudicate',
+    'Use one configured AI provider for conflict resolution',
+  )
+  .action(async (options: { ai?: boolean; adjudicate?: boolean }) => {
+    const result = await continueCommand(process.cwd(), {
+      ai: options.ai,
+      adjudicate: options.adjudicate,
+    });
     if (result.continued === 'ai-resolve') {
       return;
     }
@@ -2088,13 +2096,25 @@ program
       )
       .option('--dry-run', 'Show proposed resolutions without applying')
       .option('--abort', 'Abort the active rebase/restack operation')
-      .action(async (options: { dryRun?: boolean; abort?: boolean }) => {
-        const { aiResolve } = await import('./commands/ai-resolve');
-        await aiResolve(process.cwd(), {
-          dryRun: options.dryRun,
-          abort: options.abort,
-        });
-      }),
+      .option(
+        '--adjudicate',
+        'Resolve conflicts with two configured AI providers',
+      )
+      .option('--no-adjudicate', 'Use one configured AI provider')
+      .action(
+        async (options: {
+          dryRun?: boolean;
+          abort?: boolean;
+          adjudicate?: boolean;
+        }) => {
+          const { aiResolve } = await import('./commands/ai-resolve');
+          await aiResolve(process.cwd(), {
+            dryRun: options.dryRun,
+            abort: options.abort,
+            adjudicate: options.adjudicate,
+          });
+        },
+      ),
   );
 
 program
