@@ -2,7 +2,9 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import { DubError } from '../lib/errors';
 import { branchExists, getCurrentBranch } from '../lib/git';
+import { readState } from '../lib/state';
 import { type TrackBranchResult, trackBranch } from '../lib/track';
+import { saveUndoEntry } from '../lib/undo-log';
 
 interface TrackOptions {
   parent?: string;
@@ -80,5 +82,21 @@ export async function track(
     ]);
   }
 
-  return trackBranch(cwd, { branch, parent });
+  const previousState = await readState(cwd).catch(() => null);
+  const result = await trackBranch(cwd, { branch, parent });
+  if (previousState && result.status !== 'unchanged') {
+    await saveUndoEntry(
+      {
+        operation: 'track',
+        timestamp: new Date().toISOString(),
+        previousBranch: currentBranch,
+        previousState: structuredClone(previousState),
+        branchTips: {},
+        createdBranches: [],
+        summary: `track ${branch} → ${parent}`,
+      },
+      cwd,
+    );
+  }
+  return result;
 }

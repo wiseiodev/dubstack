@@ -60,6 +60,7 @@ import {
   readState,
   writeState,
 } from '../lib/state';
+import { saveUndoEntry } from '../lib/undo-log';
 import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
@@ -196,6 +197,32 @@ export async function split(
   const parentTip = await getBranchTip(parentBranch, cwd);
   const sourceTipBefore = await getBranchTip(sourceBranch, cwd);
   const existingPrNumber = sourceMeta.pr_number ?? null;
+
+  const splitBranchTipsBefore: Record<string, string> = {};
+  for (const branch of stack.branches) {
+    if (await branchExists(branch.name, cwd)) {
+      try {
+        splitBranchTipsBefore[branch.name] = await getBranchTip(
+          branch.name,
+          cwd,
+        );
+      } catch {
+        // Branch tip unreadable; skip.
+      }
+    }
+  }
+  await saveUndoEntry(
+    {
+      operation: 'split',
+      timestamp: new Date().toISOString(),
+      previousBranch: sourceBranch,
+      previousState: structuredClone(state),
+      branchTips: splitBranchTipsBefore,
+      createdBranches: [],
+      summary: `split ${sourceBranch}`,
+    },
+    cwd,
+  );
 
   const created: SplitNewBranchResult[] = [];
   let aiProposal: AiSplitProposal[] | undefined;

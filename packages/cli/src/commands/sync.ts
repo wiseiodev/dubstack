@@ -24,6 +24,7 @@ import {
   fastForwardBranchToRef,
   fetchBranches,
   formatWorktreeCheckoutSkipMessage,
+  getBranchTip,
   getCurrentBranch,
   getRefSha,
   hardResetBranchToRef,
@@ -51,6 +52,7 @@ import {
 import { rollbackRestack } from '../lib/restack-rollback';
 import {
   type Branch,
+  type DubState,
   findStackForBranch,
   getConfiguredTrunks,
   getStackTrunk,
@@ -71,6 +73,7 @@ import type {
   SyncOptions,
   SyncResult,
 } from '../lib/sync/types';
+import { saveUndoEntry } from '../lib/undo-log';
 import { aiResolve } from './ai-resolve';
 import { restack } from './restack';
 import {
@@ -101,6 +104,41 @@ class SyncAbortError extends DubError {
     ]);
     this.name = 'SyncAbortError';
   }
+}
+
+async function recordSyncUndo(
+  cwd: string,
+  state: DubState,
+  originalBranch: string,
+): Promise<void> {
+  const branchTips: Record<string, string> = {};
+  const names = new Set<string>();
+  for (const stack of state.stacks) {
+    for (const branch of stack.branches) {
+      names.add(branch.name);
+    }
+  }
+  for (const name of names) {
+    if (await branchExists(name, cwd)) {
+      try {
+        branchTips[name] = await getBranchTip(name, cwd);
+      } catch {
+        // Branch tip unreadable; skip.
+      }
+    }
+  }
+  await saveUndoEntry(
+    {
+      operation: 'sync',
+      timestamp: new Date().toISOString(),
+      previousBranch: originalBranch,
+      previousState: structuredClone(state),
+      branchTips,
+      createdBranches: [],
+      summary: `sync ${state.stacks.length} stack(s)`,
+    },
+    cwd,
+  );
 }
 
 function isInteractiveShell(): boolean {
@@ -551,6 +589,10 @@ export async function sync(
         ...partition.mustFetch.filter((branch) => !frozenBranches.has(branch)),
       ]),
     ];
+    // Record the undo snapshot just before the first remote/git mutation
+    // (here, the fetch). Earlier sites would have polluted the undo ring
+    // if scope validation threw without making any changes.
+    await recordSyncUndo(cwd, state, originalBranch);
     if (toFetch.length > 0) {
       progress.start('🌲 Fetching branches', toFetch.length);
       await fetchBranches(toFetch, cwd, 'origin', {

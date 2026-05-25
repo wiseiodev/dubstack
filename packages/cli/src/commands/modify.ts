@@ -1,6 +1,7 @@
 import { DubError } from '../lib/errors';
 import {
   amendCommit,
+  branchExists,
   commit,
   getBranchTip,
   getCurrentBranch,
@@ -11,7 +12,9 @@ import {
   stageAll,
   stageUpdate,
 } from '../lib/git';
-import { getParent, readState } from '../lib/state';
+import { getDescendants } from '../lib/graph';
+import { findStackForBranch, getParent, readState } from '../lib/state';
+import { saveUndoEntry } from '../lib/undo-log';
 import { restack } from './restack';
 
 /**
@@ -70,6 +73,7 @@ export async function modify(
     const parentTip = await getBranchTip(parent, cwd);
 
     console.log(`Starting interactive rebase on top of '${parent}'...`);
+    await recordModifyUndo(cwd, state, currentBranch);
     await interactiveRebase(parentTip, cwd);
 
     await restackChildren(cwd);
@@ -98,13 +102,51 @@ export async function modify(
         'Rerun \'dub modify -ac -m "<message>"\' to stage all changes and commit.',
       ]);
     }
+    await recordModifyUndo(cwd, state, currentBranch);
     await commit(cwd, { message, noEdit: !options.edit });
   } else {
     // When amending, git commit --amend handles empty staged changes by allowing rewording
+    await recordModifyUndo(cwd, state, currentBranch);
     await amendCommit(cwd, { message, noEdit });
   }
 
   await restackChildren(cwd);
+}
+
+async function recordModifyUndo(
+  cwd: string,
+  state: import('../lib/state').DubState,
+  currentBranch: string,
+): Promise<void> {
+  const branchTips: Record<string, string> = {};
+  const stack = findStackForBranch(state, currentBranch);
+  const branchesToSnapshot = new Set<string>([currentBranch]);
+  if (stack) {
+    for (const name of getDescendants(stack, currentBranch)) {
+      branchesToSnapshot.add(name);
+    }
+  }
+  for (const name of branchesToSnapshot) {
+    if (await branchExists(name, cwd)) {
+      try {
+        branchTips[name] = await getBranchTip(name, cwd);
+      } catch {
+        // Branch tip unreadable; skip.
+      }
+    }
+  }
+  await saveUndoEntry(
+    {
+      operation: 'modify',
+      timestamp: new Date().toISOString(),
+      previousBranch: currentBranch,
+      previousState: structuredClone(state),
+      branchTips,
+      createdBranches: [],
+      summary: `modify ${currentBranch}`,
+    },
+    cwd,
+  );
 }
 
 function normalizeMessage(message?: string | string[]): string | undefined {

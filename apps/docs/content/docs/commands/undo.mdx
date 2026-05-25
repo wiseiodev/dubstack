@@ -27,11 +27,66 @@ dub continue
 
 ## Undo
 
-Undo the last `dub create` or `dub restack` operation:
+Reverse the most recent mutating `dub` command. Backed by a 20-entry ring
+buffer at `.git/dubstack/undo-log.json` — older entries are dropped silently.
 
 ```bash
+# Undo the most recent op
 dub undo
+
+# Roll back the last N operations in sequence
+dub undo --steps 3
+
+# Show what's on the ring (newest first)
+dub undo --list
+
+# Wipe both the undo and redo logs
+dub undo --clear
 ```
 
-- Supports one level of undo
-- Intended for reverting the most recent create or restack
+### Operations covered
+
+| Command | Reversal |
+| --- | --- |
+| `create` | Deletes the created branch, restores state, checks out previous branch |
+| `restack`, `move`, `reorder`, `absorb`, `unlink` | Resets every rebased branch tip, restores state |
+| `rename` | Renames branch back, reverses last-pushed ref migration, restores state |
+| `pop` | Hard-resets the popped branch to its pre-pop tip |
+| `modify` | Restores the modified branch + descendants to their pre-modify tips |
+| `freeze`, `unfreeze`, `track`, `untrack` | Restores prior `state.json` (no git refs touched) |
+| `delete` | Restores stack metadata; surfaces a hint to recreate the local branch manually |
+| `sync` | Best-effort reset of every tracked branch to its pre-sync tip |
+| `split` | Restores state + branch tips |
+| `submit` | Restores prior PR body via `gh pr edit`; PR retargeting is **not** reverted |
+
+### Partial-success surface
+
+If an undo can't fully succeed (a branch was force-pushed externally, the
+remote rejected a PR body update, etc.) the command undoes what it can and
+prints `⚠ …` warnings explaining what was skipped and how to clean up
+manually.
+
+### Limitations
+
+- `dub undo` does not unpush branches or close PRs created by `dub submit`.
+- PR base/target retargeting is **not** reverted — re-run `dub submit` or
+  `gh pr edit <pr> --base <branch>` to fix bases manually.
+- For `dub delete`, the local git branch is **not** auto-recreated. The
+  warning includes a `git branch <name> <sha>` recovery command using the
+  SHA recorded at delete time.
+
+## Redo
+
+`dub redo` replays the most recently undone operation by restoring the
+state and branch tips captured at undo time.
+
+```bash
+dub redo
+```
+
+- A new mutating command **clears** the redo log — only undone operations
+  can be redone.
+- Multiple `dub undo` ↔ `dub redo` cycles are supported; each `redo` makes
+  the entry undoable again immediately.
+- PR body updates from `dub submit` are **not** re-applied by `dub redo`.
+  Re-run `dub submit` if you want fresh PR bodies after redoing.

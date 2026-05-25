@@ -66,7 +66,7 @@ Use these commands from the repo root:
 - `create` auto-initializes state via `ensureState(...)`.
 - `restack` and `submit` require valid tracked stack state and should fail clearly when context is invalid.
 - `submit` defaults to downstack (current branch + ancestors); use `--upstack`, `--stack`, or `--branch <name>` for other scopes. Scope flags are mutually exclusive. Legacy `--path current|stack` still works in v1.x with a deprecation warning.
-- `undo` remains single-level.
+- `undo` is multi-level via a 20-entry ring buffer at `.git/dubstack/undo-log.json`; `dub redo` replays the most recently undone entry. Mutating commands save an entry before mutation; saves are best-effort (filesystem failures are swallowed).
 - Error text is part of UX and often asserted in tests; change carefully.
 
 ## 6) Testing Expectations

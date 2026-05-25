@@ -270,10 +270,12 @@ describe('rename', () => {
     await expect(rename(dir, 'feat/a-renamed')).rejects.toThrow('disk full');
 
     // Forward git rename already ran, so the branch is now feat/a-renamed.
-    // We just need the undo entry to be gone so the user isn't pointed at
-    // a half-completed rename.
+    // The failed rename's undo entry should be dropped so the user isn't
+    // pointed at a half-completed rename. The earlier `create` entry is
+    // unrelated and stays on the ring (multi-level undo).
     const { readUndoEntry } = await import('../lib/undo-log');
-    await expect(readUndoEntry(dir)).rejects.toThrow('Nothing to undo');
+    const top = await readUndoEntry(dir);
+    expect(top.operation).toBe('create');
 
     spy.mockRestore();
     // sanity: state.json was not corrupted by the failed write (still readable)
