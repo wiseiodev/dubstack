@@ -1,0 +1,33 @@
+[
+  {
+    "input": {
+      "name": "template-preserving PR",
+      "branch": "feat/ready-ai-gate",
+      "baseBranch": "main",
+      "commitMessage": "feat: add ready AI gate",
+      "prTemplate": "## Summary\n\n## Testing\n\n## Risks",
+      "diff": "diff --git a/packages/cli/src/commands/ready.ts b/packages/cli/src/commands/ready.ts\n@@\n+const readiness = await evaluateAiReadiness(cwd);\n+if (!readiness.ready) throw new DubError('AI review readiness failed.');\n"
+    },
+    "expected": {
+      "summary": "Preserves PR template headings while summarizing the ready AI gate.",
+      "templateHeadings": ["## Summary", "## Testing", "## Risks"],
+      "requiredKeywords": ["ready", "AI", "gate"],
+      "forbiddenKeywords": ["billing", "database"]
+    }
+  },
+  {
+    "input": {
+      "name": "no-template PR",
+      "branch": "fix/submit-branch-diff",
+      "baseBranch": "main",
+      "commitMessage": "fix: use branch diff for submit summaries",
+      "prTemplate": null,
+      "diff": "diff --git a/packages/cli/src/commands/submit.ts b/packages/cli/src/commands/submit.ts\n@@\n-return getDiff(cwd, false);\n+return getDiffBetween(baseBranch, branchName, cwd);\n"
+    },
+    "expected": {
+      "summary": "Summarizes a submit diff bug fix without inventing unrelated work.",
+      "requiredKeywords": ["submit", "diff", "branch"],
+      "forbiddenKeywords": ["auth", "billing"]
+    }
+  }
+]
