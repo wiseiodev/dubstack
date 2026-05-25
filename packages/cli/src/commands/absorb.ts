@@ -31,6 +31,7 @@ import {
   topologicalOrder,
 } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
 export type AbsorbMode = 'auto' | 'ai' | 'stack';
@@ -145,6 +146,14 @@ export async function absorb(
   }
 
   const mode: AbsorbMode = options.stack ? 'stack' : options.ai ? 'ai' : 'auto';
+
+  if (!options.dryRun && mode !== 'stack') {
+    await assertBranchesNotCheckedOutElsewhere(
+      cwd,
+      [originalBranch],
+      'dub absorb',
+    );
+  }
 
   await saveUndoEntry(
     {
@@ -384,6 +393,12 @@ async function runStackMode(
       conflict: false,
     };
   }
+
+  await assertBranchesNotCheckedOutElsewhere(
+    cwd,
+    crossFixups.flatMap((fixup) => [fixup.sourceBranch, fixup.targetBranch]),
+    'dub absorb --stack',
+  );
 
   await writeAbsorbProgress(cwd, {
     mode: 'stack',

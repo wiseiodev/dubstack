@@ -57,6 +57,7 @@ import {
   writeState,
 } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 
 /** @deprecated Use SubmitScope. Retained for the v1 `--path` deprecation window. */
 export type SubmitPathMode = 'current' | 'stack';
@@ -179,6 +180,13 @@ export async function submit(
   }
 
   const plan = await getSubmitPlan(cwd, options);
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(
+      cwd,
+      plan.branches.map((branch) => branch.name),
+      'dub submit',
+    );
+  }
   const config = await readConfig(cwd);
   const lifecycle = await resolveSubmitLifecycle(
     cwd,

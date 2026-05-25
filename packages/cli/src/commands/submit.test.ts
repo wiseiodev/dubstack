@@ -9,6 +9,7 @@ vi.mock('../lib/git.js', () => ({
   getDiff: vi.fn(),
   getDiffBetween: vi.fn(),
   getLastCommitMessage: vi.fn(),
+  listWorktreeCheckouts: vi.fn(),
   pushBranch: vi.fn(),
 }));
 
@@ -53,6 +54,7 @@ import {
   getDiff,
   getDiffBetween,
   getLastCommitMessage,
+  listWorktreeCheckouts,
   pushBranch,
 } from '../lib/git';
 import {
@@ -81,6 +83,9 @@ const mockGetBranchTip = getBranchTip as ReturnType<typeof vi.fn>;
 const mockGetDiff = getDiff as ReturnType<typeof vi.fn>;
 const mockGetDiffBetween = getDiffBetween as ReturnType<typeof vi.fn>;
 const mockGetLastCommitMessage = getLastCommitMessage as ReturnType<
+  typeof vi.fn
+>;
+const mockListWorktreeCheckouts = listWorktreeCheckouts as ReturnType<
   typeof vi.fn
 >;
 const mockPushBranch = pushBranch as ReturnType<typeof vi.fn>;
@@ -196,6 +201,7 @@ beforeEach(() => {
   mockGetDiff.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
+  mockListWorktreeCheckouts.mockResolvedValue(new Map());
   mockAddPrReviewers.mockResolvedValue(undefined);
   mockGetRepositoryWebUrl.mockResolvedValue('https://github.com/o/r');
   mockMarkPrReady.mockResolvedValue(undefined);

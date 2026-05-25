@@ -8,12 +8,10 @@ import chalk from 'chalk';
 import { DubError } from '../lib/errors';
 import { execa } from '../lib/exec';
 import {
-  formatWorktreeCheckoutSkipMessage,
   getBranchTip,
   getCurrentBranch,
   getMergeBase,
   isWorkingTreeClean,
-  listWorktreeCheckouts,
 } from '../lib/git';
 import {
   buildRebaseTodo,
@@ -27,6 +25,7 @@ import {
 import { rollbackRestack } from '../lib/restack-rollback';
 import { findStackForBranch, getParent, readState } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
 /**
@@ -175,27 +174,11 @@ export async function reorder(
     );
   }
 
-  // Defence in depth: refuse to reorder a branch git reports as also checked
-  // out in another worktree. In practice git enforces that the same branch
-  // can't be checked out twice (and `getCurrentBranch` already errored on
-  // detached HEAD above), so this branch is rarely reached — keeping it
-  // guards against forced/inconsistent setups (e.g. `worktree add --force`
-  // followed by a manual ref edit) before `git rebase -i` would otherwise
-  // fail with a confusing message (Tier 3 pattern §5).
-  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
-  const otherWorktree = worktreeCheckouts.get(currentBranch);
-  if (otherWorktree) {
-    throw new DubError(
-      `Cannot reorder '${currentBranch}': branch is checked out in another worktree.`,
-      [
-        formatWorktreeCheckoutSkipMessage(
-          currentBranch,
-          otherWorktree,
-          'dub reorder',
-        ),
-      ],
-    );
-  }
+  await assertBranchesNotCheckedOutElsewhere(
+    cwd,
+    [currentBranch],
+    'dub reorder',
+  );
 
   const parent = getParent(state, currentBranch);
   if (!parent) {

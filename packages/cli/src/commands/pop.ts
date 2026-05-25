@@ -8,6 +8,7 @@ import {
 } from '../lib/git';
 import { getParent, readState } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 
 interface PopOptions {
   /** Number of commits to pop. Defaults to 1. */
@@ -63,6 +64,7 @@ export async function pop(
       "Run 'dub log' to inspect the stack and confirm tracking state.",
     ]);
   }
+  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub pop');
 
   const branchCommitCount = await countCommitsAhead(branch, parent, cwd);
   if (branchCommitCount === 0) {
