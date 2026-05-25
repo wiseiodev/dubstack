@@ -37,6 +37,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { fold } from './commands/fold';
+import { freeze } from './commands/freeze';
 import { init } from './commands/init';
 import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
@@ -67,6 +68,7 @@ import { sync } from './commands/sync';
 import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
+import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
 import { watch } from './commands/watch';
@@ -1148,7 +1150,7 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, dub restack, dub rename, dub move, dub pop, or dub reorder operation',
+    'Undo the last dub create, restack, rename, move, pop, reorder, freeze, unfreeze, absorb, or unlink operation',
   )
   .addHelpText(
     'after',
@@ -1405,18 +1407,25 @@ program
       console.log(
         chalk.green(`✔ No issues found for '${result.checkedBranch}'.`),
       );
-      return;
+    } else {
+      console.log(
+        chalk.yellow(
+          `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
+        ),
+      );
+      for (const issue of result.issues) {
+        console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
+        console.log(chalk.dim(`  ${issue.details}`));
+        for (const fix of issue.fixes) {
+          console.log(chalk.dim(`  ↳ ${fix}`));
+        }
+      }
     }
-    console.log(
-      chalk.yellow(
-        `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
-      ),
-    );
-    for (const issue of result.issues) {
-      console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
-      console.log(chalk.dim(`  ${issue.details}`));
-      for (const fix of issue.fixes) {
-        console.log(chalk.dim(`  ↳ ${fix}`));
+    for (const notice of result.notices) {
+      console.log(chalk.blue(`ℹ [${notice.code}] ${notice.summary}`));
+      console.log(chalk.dim(`  ${notice.details}`));
+      for (const branch of notice.branches) {
+        console.log(chalk.dim(`  ↳ ${branch}`));
       }
     }
   });
@@ -2216,6 +2225,58 @@ program
   });
 
 program
+  .command('freeze')
+  .argument('[branch]', 'Branch to freeze (defaults to current branch)')
+  .option('--downstack', 'Also freeze ancestors toward trunk')
+  .option('--upstack', 'Also freeze descendants')
+  .description(
+    "Set the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub freeze                       Freeze the current branch
+  $ dub freeze feat/auth-login       Freeze a specific tracked branch
+  $ dub freeze feat/auth-login --downstack   Freeze the branch and its ancestors
+  $ dub freeze --upstack             Freeze the current branch and its descendants`,
+  )
+  .action(
+    async (
+      branch: string | undefined,
+      options: { downstack?: boolean; upstack?: boolean },
+    ) => {
+      const result = await freeze(process.cwd(), branch, options);
+      printFreezeResult(result, 'frozen');
+    },
+  );
+
+program
+  .command('unfreeze')
+  .argument('[branch]', 'Branch to unfreeze (defaults to current branch)')
+  .option('--downstack', 'Also unfreeze ancestors toward trunk')
+  .option('--upstack', 'Also unfreeze descendants')
+  .description(
+    "Clear the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub unfreeze                     Unfreeze the current branch
+  $ dub unfreeze feat/auth-login --upstack    Unfreeze a branch and its descendants`,
+  )
+  .action(
+    async (
+      branch: string | undefined,
+      options: { downstack?: boolean; upstack?: boolean },
+    ) => {
+      const result = await unfreeze(process.cwd(), branch, options);
+      printFreezeResult(result, 'unfrozen');
+    },
+  );
+
+program
   .command('rename')
   .argument('<firstName>', 'New name (current branch) or old name')
   .argument('[secondName]', 'New name when renaming a specific tracked branch')
@@ -2683,6 +2744,56 @@ function parseSubmitPath(value: string): SubmitPathMode {
     "Pass '--downstack' (replaces '--path current').",
     "Pass '--stack' (replaces '--path stack').",
   ]);
+}
+
+function printFreezeResult(
+  result: {
+    changed: string[];
+    unchanged: string[];
+    skipped: Array<{ branch: string; worktree: string }>;
+  },
+  pastTense: 'frozen' | 'unfrozen',
+): void {
+  if (result.changed.length === 0) {
+    if (result.unchanged.length === 0 && result.skipped.length === 0) {
+      console.log(chalk.yellow('⚠ No tracked branches were updated.'));
+      return;
+    }
+    if (result.unchanged.length > 0) {
+      console.log(
+        chalk.yellow(`⚠ Already ${pastTense}: ${result.unchanged.join(', ')}`),
+      );
+    } else {
+      console.log(
+        chalk.yellow(
+          '⚠ No tracked branches were updated — every target was checked out in another worktree.',
+        ),
+      );
+    }
+  } else {
+    console.log(
+      chalk.green(
+        `✔ ${capitalize(pastTense)} ${result.changed.length} branch(es): ${result.changed.join(', ')}`,
+      ),
+    );
+    if (result.unchanged.length > 0) {
+      console.log(
+        chalk.dim(`  ↳ already ${pastTense}: ${result.unchanged.join(', ')}`),
+      );
+    }
+  }
+  if (result.skipped.length > 0) {
+    const skippedNames = result.skipped.map((s) => s.branch).join(', ');
+    console.log(
+      chalk.dim(
+        `  ↳ skipped (checked out in another worktree): ${skippedNames}`,
+      ),
+    );
+  }
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1);
 }
 
 function describeScopeLabel(scope: SubmitScope): string {

@@ -102,6 +102,8 @@ describe('mcp command', () => {
       'dubstack.sync',
       'dubstack.checkout',
       'dubstack.reorder',
+      'dubstack.freeze',
+      'dubstack.unfreeze',
       'dubstack.revert',
       'dubstack.absorb',
       'dubstack.unlink',

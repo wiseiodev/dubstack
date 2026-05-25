@@ -14,6 +14,7 @@ import { children } from './children';
 import { create } from './create';
 import { deleteCommand } from './delete';
 import { doctor } from './doctor';
+import { freeze } from './freeze';
 import { history } from './history';
 import { logJson } from './log';
 import { modify } from './modify';
@@ -25,6 +26,7 @@ import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
+import { unfreeze } from './unfreeze';
 import { unlink } from './unlink';
 
 type JsonValue =
@@ -106,6 +108,8 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
   'dubstack.stash-list': [],
+  'dubstack.freeze': ['branch', 'upstack', 'downstack'],
+  'dubstack.unfreeze': ['branch', 'upstack', 'downstack'],
   'dubstack.absorb': ['ai', 'stack', 'dryRun'],
 };
 
@@ -391,6 +395,54 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['entries'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.freeze',
+    description:
+      'Set the `frozen` flag on a tracked branch (stack-aware). Note: this is a passive marker only — `dub restack` and `dub sync` do NOT yet honor the flag. The enforcement wiring is tracked as DUB-82.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to freeze (defaults to the current branch).',
+        },
+        downstack: {
+          type: 'boolean',
+          description: 'Also freeze ancestors toward trunk.',
+        },
+        upstack: {
+          type: 'boolean',
+          description: 'Also freeze descendants.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.unfreeze',
+    description:
+      'Clear the `frozen` flag on a tracked branch (stack-aware). Note: the flag is a passive marker — `dub restack` and `dub sync` do NOT yet honor it, so clearing the flag has no effect on rebase behavior until DUB-82 lands.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to unfreeze (defaults to the current branch).',
+        },
+        downstack: {
+          type: 'boolean',
+          description: 'Also unfreeze ancestors toward trunk.',
+        },
+        upstack: {
+          type: 'boolean',
+          description: 'Also unfreeze descendants.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -997,6 +1049,20 @@ async function callTool(
       );
     case 'dubstack.stash-list':
       return jsonToolResult(await stashList(cwd));
+    case 'dubstack.freeze':
+      return mutatingToolResult(() =>
+        freeze(cwd, optionalString(args.branch), {
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+        }),
+      );
+    case 'dubstack.unfreeze':
+      return mutatingToolResult(() =>
+        unfreeze(cwd, optionalString(args.branch), {
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+        }),
+      );
     case 'dubstack.absorb':
       return mutatingToolResult(() =>
         absorb(cwd, {

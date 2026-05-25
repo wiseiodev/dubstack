@@ -26,6 +26,8 @@ interface UndoResult {
     | 'move'
     | 'pop'
     | 'reorder'
+    | 'freeze'
+    | 'unfreeze'
     | 'absorb'
     | 'unlink';
   details: string;
@@ -33,7 +35,8 @@ interface UndoResult {
 
 /**
  * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
- * `dub pop`, `dub reorder`, `dub absorb`, or `dub unlink` operation.
+ * `dub pop`, `dub reorder`, `dub freeze`, `dub unfreeze`, `dub absorb`,
+ * or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
@@ -47,6 +50,8 @@ interface UndoResult {
  *   remote may still carry the renamed branch; the result message surfaces a cleanup hint.
  * - **pop**: Hard-resets the popped branch to its pre-pop tip, discarding the staged
  *   changes left behind by the pop and restoring the popped commits.
+ * - **freeze** or **unfreeze**: Restores `previousState` — these operations only mutate
+ *   the `frozen` flag in state.json, so no git refs need to be rewound.
  * - **unlink**: Restores the previous stack split via `writeState` (no branch tips
  *   change). Additionally discards any pending cleanup journal so a subsequent
  *   `dub continue` doesn't fire a stale retarget against the now-restored stack.
@@ -171,6 +176,19 @@ export async function undo(cwd: string): Promise<UndoResult> {
     return {
       undone: 'rename',
       details: `Renamed '${renameTo}' back to '${renameFrom}'${remoteHint}`,
+    };
+  }
+
+  if (entry.operation === 'freeze' || entry.operation === 'unfreeze') {
+    // freeze/unfreeze only mutate state.json; nothing to reset in git, and
+    // we deliberately do NOT touch the checkout — the original command
+    // didn't switch branches, so undo shouldn't either.
+    await writeState(entry.previousState, cwd);
+    await clearUndoEntry(cwd);
+    const verb = entry.operation === 'freeze' ? 'freeze' : 'unfreeze';
+    return {
+      undone: entry.operation,
+      details: `Restored pre-${verb} frozen flags in DubStack state`,
     };
   }
 
