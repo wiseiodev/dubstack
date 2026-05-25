@@ -1,4 +1,5 @@
 import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type {
   fromIni,
@@ -8,10 +9,15 @@ import type { createGateway, LanguageModel } from 'ai';
 import type { DubConfig } from './config';
 import { DubError } from './errors';
 
-export type ResolvedAiProviderName = 'google' | 'gateway' | 'bedrock';
+export type ResolvedAiProviderName =
+  | 'google'
+  | 'anthropic'
+  | 'gateway'
+  | 'bedrock';
 
 export interface ResolveAiProviderDeps {
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   fromIni?: typeof fromIni;
@@ -35,6 +41,10 @@ export function resolveAiProvider(input: {
     return resolveGoogleProvider(input.deps, providerConfig);
   }
 
+  if (selected === 'anthropic') {
+    return resolveAnthropicProvider(input.deps, providerConfig);
+  }
+
   if (selected === 'gateway') {
     return resolveGatewayProvider(input.deps, providerConfig);
   }
@@ -46,6 +56,11 @@ export function resolveAiProvider(input: {
   const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
   if (geminiApiKey) {
     return resolveGoogleProvider(input.deps, providerConfig);
+  }
+
+  const anthropicApiKey = process.env.DUBSTACK_ANTHROPIC_API_KEY?.trim();
+  if (anthropicApiKey) {
+    return resolveAnthropicProvider(input.deps, providerConfig);
   }
 
   const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
@@ -62,6 +77,7 @@ export function resolveAiProvider(input: {
   throw new DubError('AI assistant has no configured provider.', [
     "Run 'dub ai setup' for an interactive guided setup.",
     "Run 'dub ai env --gemini-key <key>' to configure Gemini.",
+    "Run 'dub ai env --anthropic-key <key>' to configure Anthropic.",
     "Run 'dub ai env --gateway-key <key>' to configure the AI Gateway.",
     "Run 'dub ai env --bedrock-region <region> --bedrock-model <model>' to configure Bedrock.",
   ]);
@@ -98,6 +114,20 @@ export function buildAiProviderOptions(
     };
   }
 
+  if (
+    provider.provider === 'anthropic' &&
+    supportsAnthropicReasoning(provider.modelId)
+  ) {
+    return {
+      anthropic: {
+        thinking: {
+          type: 'enabled',
+          budgetTokens: 4096,
+        },
+      },
+    };
+  }
+
   return {};
 }
 
@@ -124,6 +154,40 @@ function resolveGoogleProvider(
     provider: 'google',
     model: google(geminiModel),
     modelId: geminiModel,
+  };
+}
+
+function resolveAnthropicProvider(
+  deps: ResolveAiProviderDeps,
+  providerConfig: DubConfig['ai']['provider'],
+): ResolvedAiProvider {
+  if (!deps.createAnthropic) {
+    throw new DubError('Anthropic support is unavailable in this build.', [
+      "Run 'dub config ai-provider gemini', 'gateway', or 'bedrock' to switch providers.",
+      'Reinstall DubStack from a build that includes Anthropic support if you need it.',
+    ]);
+  }
+
+  const anthropicApiKey = process.env.DUBSTACK_ANTHROPIC_API_KEY?.trim();
+  if (!anthropicApiKey) {
+    throw new DubError(
+      'Anthropic is selected but DUBSTACK_ANTHROPIC_API_KEY is not set.',
+      [
+        "Run 'dub ai setup' for guided provider setup.",
+        "Run 'dub ai env --anthropic-key <key>' to write the key to your shell profile.",
+      ],
+    );
+  }
+
+  const modelId =
+    getConfiguredModel('anthropic', providerConfig) ||
+    'claude-sonnet-4-20250514';
+  const anthropic = deps.createAnthropic({ apiKey: anthropicApiKey });
+
+  return {
+    provider: 'anthropic',
+    model: anthropic(modelId),
+    modelId,
   };
 }
 
@@ -224,6 +288,10 @@ function getConfiguredModel(
     return normalizeEnvModel(process.env.DUBSTACK_AI_GATEWAY_MODEL);
   }
 
+  if (provider === 'anthropic') {
+    return normalizeEnvModel(process.env.DUBSTACK_ANTHROPIC_MODEL);
+  }
+
   return normalizeEnvModel(process.env.DUBSTACK_BEDROCK_MODEL);
 }
 
@@ -234,4 +302,8 @@ function normalizeEnvModel(value: string | undefined): string | null {
 
 function supportsBedrockReasoning(modelId: string): boolean {
   return /claude-3-7|claude-(sonnet|opus|haiku)-4/.test(modelId);
+}
+
+function supportsAnthropicReasoning(modelId: string): boolean {
+  return /claude-3-7|claude-(sonnet|opus)-4/.test(modelId);
 }

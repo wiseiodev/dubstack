@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
@@ -88,6 +89,7 @@ interface FlowDependencies extends AiMetadataDependencies {
 const DEFAULT_DEPS: FlowDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   fromIni,

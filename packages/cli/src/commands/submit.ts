@@ -1,4 +1,5 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
@@ -87,6 +88,7 @@ type SubmitDependencies = AiMetadataDependencies;
 const DEFAULT_DEPS: SubmitDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   fromIni,

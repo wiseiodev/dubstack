@@ -34,6 +34,7 @@ describe('readConfig', () => {
           selected: 'auto',
           models: {
             gemini: null,
+            anthropic: null,
             gateway: null,
             bedrock: null,
           },
@@ -81,6 +82,7 @@ describe('writeConfig', () => {
       selected: 'auto',
       models: {
         gemini: null,
+        anthropic: null,
         gateway: null,
         bedrock: null,
       },
@@ -112,6 +114,7 @@ describe('writeConfig', () => {
       selected: 'auto',
       models: {
         gemini: null,
+        anthropic: null,
         gateway: null,
         bedrock: null,
       },
@@ -125,7 +128,7 @@ describe('writeConfig', () => {
           provider: {
             selected: 'bedrock',
             models: {
-              bedrock: 'us.anthropic.claude-sonnet-4-6',
+              anthropic: 'claude-sonnet-4-20250514',
             },
           },
         },
@@ -139,8 +142,9 @@ describe('writeConfig', () => {
       selected: 'bedrock',
       models: {
         gemini: null,
+        anthropic: 'claude-sonnet-4-20250514',
         gateway: null,
-        bedrock: 'us.anthropic.claude-sonnet-4-6',
+        bedrock: null,
       },
     });
   });
@@ -156,6 +160,7 @@ describe('writeConfig', () => {
             selected: 'unknown',
             models: {
               gemini: 123,
+              anthropic: 'claude-sonnet-4-20250514',
               gateway: '',
               bedrock: '   ',
             },
@@ -170,6 +175,7 @@ describe('writeConfig', () => {
       selected: 'auto',
       models: {
         gemini: null,
+        anthropic: 'claude-sonnet-4-20250514',
         gateway: null,
         bedrock: null,
       },

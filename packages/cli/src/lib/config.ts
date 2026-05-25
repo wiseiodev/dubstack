@@ -15,9 +15,10 @@ export interface DubConfig {
       flow: boolean;
     };
     provider: {
-      selected: 'auto' | 'gemini' | 'gateway' | 'bedrock';
+      selected: 'auto' | 'gemini' | 'anthropic' | 'gateway' | 'bedrock';
       models: {
         gemini: string | null;
+        anthropic: string | null;
         gateway: string | null;
         bedrock: string | null;
       };
@@ -60,6 +61,7 @@ const DEFAULT_CONFIG: DubConfig = {
       selected: 'auto',
       models: {
         gemini: null,
+        anthropic: null,
         gateway: null,
         bedrock: null,
       },
@@ -150,6 +152,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         selected: normalizeAiProviderSelection(provider?.selected),
         models: {
           gemini: normalizeAiProviderModel(provider?.models?.gemini),
+          anthropic: normalizeAiProviderModel(provider?.models?.anthropic),
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
         },
@@ -201,6 +204,7 @@ function normalizeAiProviderSelection(
   if (
     value === 'auto' ||
     value === 'gemini' ||
+    value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock'
   ) {

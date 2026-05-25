@@ -31,6 +31,18 @@ jobs:
       - name: Test affected
         run: pnpm turbo run test:coverage --affected
 
+      - name: AI evals (Anthropic)
+        env:
+          DUBSTACK_ANTHROPIC_API_KEY: ${{ secrets.DUBSTACK_ANTHROPIC_API_KEY }}
+          DUBSTACK_ANTHROPIC_MODEL: claude-sonnet-4-20250514
+        shell: bash
+        run: |
+          if [ -z "$DUBSTACK_ANTHROPIC_API_KEY" ]; then
+            echo "Skipping Anthropic evals because DUBSTACK_ANTHROPIC_API_KEY is not configured."
+            exit 0
+          fi
+          pnpm evals
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

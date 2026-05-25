@@ -20,6 +20,8 @@ You can then pin the provider for the current repository:
 ```bash
 dub config ai-provider gemini
 # or:
+dub config ai-provider anthropic
+# or:
 dub config ai-provider gateway
 # or:
 dub config ai-provider bedrock
@@ -47,6 +49,12 @@ dub config ai-defaults flow on
 - Optional global model default: `DUBSTACK_AI_GATEWAY_MODEL`
 - Good fit when your team standardizes on Vercel AI Gateway
 
+### Anthropic Claude
+
+- Auth: `DUBSTACK_ANTHROPIC_API_KEY`
+- Optional global model default: `DUBSTACK_ANTHROPIC_MODEL`
+- Good fit when you want direct Claude access without routing through AI Gateway
+
 ### Amazon Bedrock
 
 - Required: `DUBSTACK_BEDROCK_AWS_REGION`
@@ -63,7 +71,7 @@ DubStack resolves AI providers in this order:
 1. Repo-local provider selection from `dub config ai-provider ...`
 2. Repo-local provider-specific model override from `dub config ai-model ...`
 3. Global provider defaults from shell profile exports
-4. Auto fallback order: Gemini, then AI Gateway, then Bedrock
+4. Auto fallback order: Gemini, then Anthropic, then AI Gateway, then Bedrock
 
 Examples:
 
@@ -74,8 +82,14 @@ dub config ai-provider
 # Pin this repo to Bedrock
 dub config ai-provider bedrock
 
+# Pin this repo to Anthropic
+dub config ai-provider anthropic
+
 # Set a repo-local Bedrock model override
 dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
+
+# Set a repo-local Anthropic model override
+dub config ai-model "claude-opus-4-20250514" --provider anthropic
 
 # Clear the repo-local override and fall back to env defaults
 dub config ai-model --provider bedrock --clear
@@ -107,6 +121,10 @@ dub ai env --gemini-model "gemini-3-flash-preview"
 # AI Gateway
 dub ai env --gateway-key "<your-key>"
 dub ai env --gateway-model "google/gemini-3-flash"
+
+# Anthropic
+dub ai env --anthropic-key "<your-key>"
+dub ai env --anthropic-model "claude-sonnet-4-20250514"
 
 # Bedrock
 dub ai env \

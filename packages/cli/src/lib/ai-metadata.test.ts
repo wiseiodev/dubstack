@@ -23,6 +23,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
     selected: 'auto',
     models: {
       gemini: null,
+      anthropic: null,
       gateway: null,
       bedrock: null,
     },

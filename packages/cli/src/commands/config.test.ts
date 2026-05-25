@@ -97,16 +97,16 @@ describe('config ai-provider', () => {
   });
 
   it('writes selected provider when set', async () => {
-    const result = await configAiProvider(dir, 'bedrock');
+    const result = await configAiProvider(dir, 'anthropic');
     const config = await readConfig(dir);
 
-    expect(result).toEqual({ provider: 'bedrock', changed: true });
-    expect(config.ai.provider.selected).toBe('bedrock');
+    expect(result).toEqual({ provider: 'anthropic', changed: true });
+    expect(config.ai.provider.selected).toBe('anthropic');
   });
 
   it('throws for invalid provider names', async () => {
     await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
-      "AI provider must be one of 'auto', 'gemini', 'gateway', or 'bedrock'.",
+      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', or 'bedrock'.",
     );
   });
 });
@@ -121,17 +121,17 @@ describe('config ai-model', () => {
   it('writes a provider-specific model override', async () => {
     const result = await configAiModel(
       dir,
-      'bedrock',
-      'us.anthropic.claude-sonnet-4-6',
+      'anthropic',
+      'claude-sonnet-4-20250514',
     );
     const config = await readConfig(dir);
 
     expect(result).toEqual({
-      model: 'us.anthropic.claude-sonnet-4-6',
+      model: 'claude-sonnet-4-20250514',
       changed: true,
     });
-    expect(config.ai.provider.models.bedrock).toBe(
-      'us.anthropic.claude-sonnet-4-6',
+    expect(config.ai.provider.models.anthropic).toBe(
+      'claude-sonnet-4-20250514',
     );
   });
 

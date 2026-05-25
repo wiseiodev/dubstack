@@ -8,6 +8,7 @@ function createDeps() {
     inputCustomModel: vi.fn(),
     selectModelScope: vi.fn(),
     inputGeminiKey: vi.fn(),
+    inputAnthropicKey: vi.fn(),
     inputGatewayKey: vi.fn(),
     inputBedrockProfile: vi.fn(),
     inputBedrockRegion: vi.fn(),
@@ -83,6 +84,33 @@ describe('aiSetup', () => {
       'gemini-2.5-pro-preview',
     );
     expect(result.modelScope).toBe('repo');
+  });
+
+  it('writes Anthropic env defaults and selects the provider for the repo', async () => {
+    const deps = createDeps();
+    deps.selectProvider.mockResolvedValue('anthropic');
+    deps.selectModel.mockResolvedValue('claude-sonnet-4-20250514');
+    deps.selectModelScope.mockResolvedValue('global');
+    deps.inputAnthropicKey.mockResolvedValue('anthropic-key');
+
+    const result = await aiSetup('/repo', deps);
+
+    expect(deps.configureAiEnv).toHaveBeenCalledWith({
+      anthropicKey: 'anthropic-key',
+      anthropicModel: 'claude-sonnet-4-20250514',
+    });
+    expect(deps.configAiProvider).toHaveBeenCalledWith('/repo', 'anthropic');
+    expect(deps.configAiModel).toHaveBeenCalledWith(
+      '/repo',
+      'anthropic',
+      undefined,
+      {
+        clear: true,
+      },
+    );
+    expect(result.provider).toBe('anthropic');
+    expect(result.model).toBe('claude-sonnet-4-20250514');
+    expect(result.modelScope).toBe('global');
   });
 
   it('supports repo-only setup without shell profile edits', async () => {

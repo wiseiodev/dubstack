@@ -11,7 +11,7 @@ This guide gets you from zero to a working stacked PR flow fast.
 ## Optional: Enable AI Assistant
 
 ```bash
-# 1) guided setup for Gemini, AI Gateway, or Amazon Bedrock
+# 1) guided setup for Gemini, Anthropic, AI Gateway, or Amazon Bedrock
 dub ai setup
 
 # 2) reload your shell using the command DubStack prints
@@ -22,6 +22,8 @@ dub config ai-assistant on
 
 # 4) pin the provider for this repository
 dub config ai-provider gemini
+# or:
+dub config ai-provider anthropic
 # or:
 dub config ai-provider gateway
 # or:
@@ -48,6 +50,16 @@ dub ai env \
   --bedrock-model "us.anthropic.claude-sonnet-4-6"
 
 dub config ai-provider bedrock
+```
+
+For direct Anthropic API access:
+
+```bash
+dub ai env \
+  --anthropic-key "<your-key>" \
+  --anthropic-model "claude-sonnet-4-20250514"
+
+dub config ai-provider anthropic
 ```
 
 DubStack does not add or manage AWS secret key environment variables for Bedrock.

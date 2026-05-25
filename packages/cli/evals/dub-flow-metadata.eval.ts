@@ -1,3 +1,4 @@
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createGateway, generateText, type LanguageModel } from 'ai';
 import { createScorer, evalite } from 'evalite';
@@ -39,6 +40,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
     selected: 'auto',
     models: {
       gemini: null,
+      anthropic: null,
       gateway: null,
       bedrock: null,
     },
@@ -575,6 +577,7 @@ function createEvalDependencies(): AiMetadataDependencies {
   return {
     generateText,
     createGoogleGenerativeAI,
+    createAnthropic,
     createGateway,
   };
 }
@@ -588,6 +591,15 @@ function resolveEvalJudgeModel(): LanguageModel {
     return google(modelId);
   }
 
+  const anthropicApiKey = process.env.DUBSTACK_ANTHROPIC_API_KEY?.trim();
+  if (anthropicApiKey) {
+    const modelId =
+      process.env.DUBSTACK_ANTHROPIC_MODEL?.trim() ||
+      'claude-sonnet-4-20250514';
+    const anthropic = createAnthropic({ apiKey: anthropicApiKey });
+    return anthropic(modelId);
+  }
+
   const gatewayApiKey = process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim();
   if (gatewayApiKey) {
     const modelId =
@@ -597,7 +609,7 @@ function resolveEvalJudgeModel(): LanguageModel {
   }
 
   throw new Error(
-    'Evalite requires DUBSTACK_GEMINI_API_KEY or DUBSTACK_AI_GATEWAY_API_KEY.',
+    'Evalite requires DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, or DUBSTACK_AI_GATEWAY_API_KEY.',
   );
 }
 

@@ -8,7 +8,7 @@ export interface ConfigBooleanResult {
 }
 
 export interface ConfigProviderResult {
-  provider: 'auto' | 'gemini' | 'gateway' | 'bedrock';
+  provider: 'auto' | 'gemini' | 'anthropic' | 'gateway' | 'bedrock';
   changed: boolean;
 }
 
@@ -23,7 +23,12 @@ export interface ConfigMcpModeResult {
 }
 
 export type AiDefaultTarget = 'create' | 'submit' | 'flow';
-export type AiProvider = 'auto' | 'gemini' | 'gateway' | 'bedrock';
+export type AiProvider =
+  | 'auto'
+  | 'gemini'
+  | 'anthropic'
+  | 'gateway'
+  | 'bedrock';
 export type AiModelProvider = Exclude<AiProvider, 'auto'>;
 
 export async function configAiAssistant(
@@ -243,24 +248,32 @@ function parseAiProvider(value: string): AiProvider {
   if (
     value === 'auto' ||
     value === 'gemini' ||
+    value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock'
   ) {
     return value;
   }
   throw new DubError(
-    "AI provider must be one of 'auto', 'gemini', 'gateway', or 'bedrock'.",
-    ["Pass one of: 'auto', 'gemini', 'gateway', or 'bedrock'."],
+    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', or 'bedrock'.",
+    ["Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', or 'bedrock'."],
   );
 }
 
 function parseAiModelProvider(value: string): AiModelProvider {
-  if (value === 'gemini' || value === 'gateway' || value === 'bedrock') {
+  if (
+    value === 'gemini' ||
+    value === 'anthropic' ||
+    value === 'gateway' ||
+    value === 'bedrock'
+  ) {
     return value;
   }
   throw new DubError(
-    "AI model provider must be one of 'gemini', 'gateway', or 'bedrock'.",
-    ["Pass one of: 'gemini', 'gateway', or 'bedrock' as --provider."],
+    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', or 'bedrock'.",
+    [
+      "Pass one of: 'gemini', 'anthropic', 'gateway', or 'bedrock' as --provider.",
+    ],
   );
 }
 

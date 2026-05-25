@@ -36,6 +36,7 @@
   "license": "MIT",
   "dependencies": {
     "@ai-sdk/amazon-bedrock": "^4.0.77",
+    "@ai-sdk/anthropic": "^3.0.79",
     "@ai-sdk/google": "^3.0.30",
     "@aws-sdk/credential-providers": "^3.1004.0",
     "@inquirer/core": "^11.1.4",

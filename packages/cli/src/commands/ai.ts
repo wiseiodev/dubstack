@@ -1,4 +1,5 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, stepCountIs, streamText } from 'ai';
@@ -23,6 +24,7 @@ interface AskAiDependencies {
   streamText: typeof streamText;
   createBashTool: typeof createBashTool;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   fromIni?: typeof fromIni;
@@ -36,7 +38,7 @@ interface AskAiOptions {
 }
 
 interface AskAiResult {
-  provider: 'google' | 'gateway' | 'bedrock';
+  provider: 'google' | 'anthropic' | 'gateway' | 'bedrock';
   modelId: string;
   webBrowsingRequested: boolean;
   webBrowsingUsed: boolean;
@@ -46,6 +48,7 @@ const DEFAULT_DEPS: AskAiDependencies = {
   streamText,
   createBashTool,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   fromIni,

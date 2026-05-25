@@ -723,7 +723,7 @@ dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
 
-### `dub config ai-provider [auto|gemini|gateway|bedrock]`
+### `dub config ai-provider [auto|gemini|anthropic|gateway|bedrock]`
 
 Manage the repo-local AI provider selection.
 
@@ -733,6 +733,9 @@ dub config ai-provider
 
 # pin this repository to Bedrock
 dub config ai-provider bedrock
+
+# pin this repository to Anthropic
+dub config ai-provider anthropic
 
 # return to backward-compatible auto selection
 dub config ai-provider auto
@@ -748,6 +751,9 @@ dub config ai-model --provider bedrock
 
 # set a repo-local override
 dub config ai-model "us.anthropic.claude-sonnet-4-6" --provider bedrock
+
+# set a repo-local Anthropic override
+dub config ai-model "claude-sonnet-4-20250514" --provider anthropic
 
 # clear the repo-local override
 dub config ai-model --provider bedrock --clear
@@ -768,10 +774,11 @@ To inspect your repository, `dub ai ask` can invoke a constrained shell tool lim
 The assistant cannot execute arbitrary shell commands; requests outside this allow-list are rejected, and additional safety checks block destructive command patterns.
 
 Provider/model selection:
-- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `gateway`, or `bedrock`.
+- Repo config from `dub config ai-provider ...` wins when set to `gemini`, `anthropic`, `gateway`, or `bedrock`.
 - Repo-local model overrides from `dub config ai-model ...` win for that provider when present.
-- In `auto` mode, DubStack preserves the legacy fallback order: Gemini, then AI Gateway, then Bedrock.
+- In `auto` mode, DubStack uses Gemini, then Anthropic, then AI Gateway, then Bedrock.
 - Gemini uses `DUBSTACK_GEMINI_API_KEY` with optional `DUBSTACK_GEMINI_MODEL` override.
+- Anthropic uses `DUBSTACK_ANTHROPIC_API_KEY` with optional `DUBSTACK_ANTHROPIC_MODEL` override.
 - AI Gateway uses `DUBSTACK_AI_GATEWAY_API_KEY` with optional `DUBSTACK_AI_GATEWAY_MODEL` override.
 - Bedrock uses `DUBSTACK_BEDROCK_AWS_REGION`, `DUBSTACK_BEDROCK_MODEL`, and optional `DUBSTACK_BEDROCK_AWS_PROFILE`.
 - Bedrock support uses AWS credential-chain auth only. DubStack does not manage AWS secret key environment variables.
@@ -804,7 +811,7 @@ It mixes deterministic contract checks with an AI judge scorer so prompt changes
 
 ### `dub ai setup`
 
-Run the guided setup flow for Gemini, AI Gateway, or Amazon Bedrock.
+Run the guided setup flow for Gemini, Anthropic, AI Gateway, or Amazon Bedrock.
 
 ```bash
 dub ai setup
@@ -829,8 +836,14 @@ dub ai env --gemini-key "<your-key>"
 # write Gateway key
 dub ai env --gateway-key "<your-key>"
 
+# write Anthropic key
+dub ai env --anthropic-key "<your-key>"
+
 # write Gemini model override
 dub ai env --gemini-model "gemini-2.5-pro-preview"
+
+# write Anthropic model override
+dub ai env --anthropic-model "claude-sonnet-4-20250514"
 
 # write Gateway model override
 dub ai env --gateway-model "google/gemini-2.5-pro"

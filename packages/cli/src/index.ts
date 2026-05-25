@@ -1682,7 +1682,7 @@ program
     new Command('ai-provider')
       .argument(
         '[provider]',
-        'Set to auto/gemini/gateway/bedrock (omit to inspect current value)',
+        'Set to auto/gemini/anthropic/gateway/bedrock (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
       .action(async (provider?: string) => {
@@ -1739,7 +1739,7 @@ program
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
         '--provider <provider>',
-        'Provider name: gemini, gateway, or bedrock',
+        'Provider name: gemini, anthropic, gateway, or bedrock',
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
@@ -1846,8 +1846,10 @@ program
         'Write DubStack AI provider settings to your shell profile (macOS/Linux)',
       )
       .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
+      .option('--anthropic-key <key>', 'Set DUBSTACK_ANTHROPIC_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
+      .option('--anthropic-model <model>', 'Set DUBSTACK_ANTHROPIC_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
       .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
       .option('--bedrock-region <region>', 'Set DUBSTACK_BEDROCK_AWS_REGION')
@@ -1863,8 +1865,10 @@ program
       .action(
         async (options: {
           geminiKey?: string;
+          anthropicKey?: string;
           gatewayKey?: string;
           geminiModel?: string;
+          anthropicModel?: string;
           gatewayModel?: string;
           bedrockProfile?: string;
           bedrockRegion?: string;
@@ -1875,8 +1879,10 @@ program
           const { configureAiEnv } = await import('./commands/ai-env');
           const result = await configureAiEnv({
             geminiKey: options.geminiKey,
+            anthropicKey: options.anthropicKey,
             gatewayKey: options.gatewayKey,
             geminiModel: options.geminiModel,
+            anthropicModel: options.anthropicModel,
             gatewayModel: options.gatewayModel,
             bedrockProfile: options.bedrockProfile,
             bedrockRegion: options.bedrockRegion,

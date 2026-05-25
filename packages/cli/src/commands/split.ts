@@ -1,4 +1,5 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import input from '@inquirer/input';
@@ -122,6 +123,7 @@ type SplitDependencies = AiMetadataDependencies;
 const DEFAULT_DEPS: SplitDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   fromIni,

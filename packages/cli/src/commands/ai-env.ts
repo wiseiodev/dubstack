@@ -4,8 +4,10 @@ import * as path from 'node:path';
 import { DubError } from '../lib/errors';
 
 const GEMINI_KEY_NAME = 'DUBSTACK_GEMINI_API_KEY';
+const ANTHROPIC_KEY_NAME = 'DUBSTACK_ANTHROPIC_API_KEY';
 const GATEWAY_KEY_NAME = 'DUBSTACK_AI_GATEWAY_API_KEY';
 const GEMINI_MODEL_NAME = 'DUBSTACK_GEMINI_MODEL';
+const ANTHROPIC_MODEL_NAME = 'DUBSTACK_ANTHROPIC_MODEL';
 const GATEWAY_MODEL_NAME = 'DUBSTACK_AI_GATEWAY_MODEL';
 const BEDROCK_PROFILE_NAME = 'DUBSTACK_BEDROCK_AWS_PROFILE';
 const BEDROCK_REGION_NAME = 'DUBSTACK_BEDROCK_AWS_REGION';
@@ -13,8 +15,10 @@ const BEDROCK_MODEL_NAME = 'DUBSTACK_BEDROCK_MODEL';
 
 export interface ConfigureAiEnvOptions {
   geminiKey?: string;
+  anthropicKey?: string;
   gatewayKey?: string;
   geminiModel?: string;
+  anthropicModel?: string;
   gatewayModel?: string;
   bedrockProfile?: string;
   bedrockRegion?: string;
@@ -34,15 +38,17 @@ export async function configureAiEnv(
 ): Promise<ConfigureAiEnvResult> {
   if (
     !options.geminiKey &&
+    !options.anthropicKey &&
     !options.gatewayKey &&
     !options.geminiModel &&
+    !options.anthropicModel &&
     !options.gatewayModel &&
     !options.bedrockProfile &&
     !options.bedrockRegion &&
     !options.bedrockModel
   ) {
     throw new DubError('Provide at least one key, model, or Bedrock setting.', [
-      "Pass at least one of '--gemini-key', '--gateway-key', '--gemini-model', '--gateway-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
+      "Pass at least one of '--gemini-key', '--anthropic-key', '--gateway-key', '--gemini-model', '--anthropic-model', '--gateway-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
     ]);
   }
 
@@ -64,6 +70,12 @@ export async function configureAiEnv(
     appliedValues[GEMINI_KEY_NAME] = options.geminiKey;
   }
 
+  if (options.anthropicKey) {
+    content = upsertExport(content, ANTHROPIC_KEY_NAME, options.anthropicKey);
+    updated.push(ANTHROPIC_KEY_NAME);
+    appliedValues[ANTHROPIC_KEY_NAME] = options.anthropicKey;
+  }
+
   if (options.gatewayKey) {
     content = upsertExport(content, GATEWAY_KEY_NAME, options.gatewayKey);
     updated.push(GATEWAY_KEY_NAME);
@@ -75,6 +87,13 @@ export async function configureAiEnv(
     content = upsertExport(content, GEMINI_MODEL_NAME, model);
     updated.push(GEMINI_MODEL_NAME);
     appliedValues[GEMINI_MODEL_NAME] = model;
+  }
+
+  if (options.anthropicModel !== undefined) {
+    const model = normalizeAnthropicModel(options.anthropicModel);
+    content = upsertExport(content, ANTHROPIC_MODEL_NAME, model);
+    updated.push(ANTHROPIC_MODEL_NAME);
+    appliedValues[ANTHROPIC_MODEL_NAME] = model;
   }
 
   if (options.gatewayModel !== undefined) {
@@ -235,6 +254,21 @@ function normalizeGatewayModel(value: string): string {
   if (model.length === 0) {
     throw new DubError('Gateway model cannot be empty.', [
       'Pass a non-empty model identifier.',
+    ]);
+  }
+  return model;
+}
+
+function normalizeAnthropicModel(value: string): string {
+  const model = value.trim();
+  if (model.length === 0) {
+    throw new DubError('Anthropic model cannot be empty.', [
+      "Pass a non-empty model name (e.g. 'claude-sonnet-4-20250514').",
+    ]);
+  }
+  if (model.includes('/')) {
+    throw new DubError("Anthropic model should not include '/'.", [
+      "Pass the bare model name without provider prefix (e.g. 'claude-sonnet-4-20250514').",
     ]);
   }
   return model;
