@@ -437,11 +437,17 @@ async function defaultConflictPrompt(
   // prompt and default to `continue` so the existing "resolve + run dub
   // continue" recovery still works.
   const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-  return resolveRestackConflictDecision({
+  const decision = await resolveRestackConflictDecision({
     branch,
     interactive,
     promptChoice: (branchName) => restackConflictPrompt({ branch: branchName }),
   });
+  if (decision === 'ai') {
+    throw new DubError('AI conflict resolution is not supported by reorder.', [
+      'Resolve the conflict manually, then continue the operation.',
+    ]);
+  }
+  return decision;
 }
 
 /**
