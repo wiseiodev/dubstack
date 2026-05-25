@@ -98,6 +98,7 @@ import {
 import { rollbackRestack } from './lib/restack-rollback';
 import { parseScope, type ScopeMode } from './lib/scope';
 import { getStackOverviewBatch } from './lib/stack-overview';
+import { acquireStateLock, type StateLockHandle } from './lib/state-lock';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -3317,14 +3318,21 @@ let invocationMetadata: ShortcutMetadata & {
   webBrowsingRequested?: boolean;
   webBrowsingUsed?: boolean;
 } = {};
+let invocationStateLock: StateLockHandle | null = null;
 
-program.hook('preAction', () => {
+program.hook('preAction', async () => {
   setVerbose(Boolean(program.opts().verbose));
   beginHistoryCapture();
+  if (shouldAcquireInvocationStateLock()) {
+    invocationStateLock = await acquireStateLock(process.cwd(), {
+      commandName: `dub ${(historyArgsForCapture ?? process.argv.slice(2)).join(' ')}`,
+    });
+  }
 });
 
 program.hook('postAction', async () => {
   await finalizeHistoryCapture('success');
+  await releaseInvocationStateLock();
 });
 
 async function main() {
@@ -3359,6 +3367,7 @@ async function main() {
         console.error(line);
       }
       await finalizeHistoryCapture('error', error.message);
+      await releaseInvocationStateLock();
       process.exit(1);
     }
 
@@ -3366,8 +3375,81 @@ async function main() {
       'error',
       error instanceof Error ? error.message : 'Unknown error',
     );
+    await releaseInvocationStateLock();
     throw error;
   }
+}
+
+const STATE_MUTATING_COMMANDS = new Set([
+  'abort',
+  'absorb',
+  'ai-setup',
+  'back',
+  'bottom',
+  'config',
+  'continue',
+  'checkout',
+  'co',
+  'create',
+  'delete',
+  'down',
+  'f',
+  'flow',
+  'fold',
+  'freeze',
+  'init',
+  'land',
+  'merge-next',
+  'm',
+  'modify',
+  'move',
+  'pop',
+  'post-merge',
+  'prune',
+  'rename',
+  'reorder',
+  'restack',
+  'revert',
+  'split',
+  'squash',
+  'ss',
+  'stash',
+  'submit',
+  'sync',
+  'top',
+  'track',
+  'undo',
+  'unfreeze',
+  'unlink',
+  'untrack',
+  'up',
+]);
+
+function shouldAcquireInvocationStateLock(): boolean {
+  const args = historyArgsForCapture ?? process.argv.slice(2);
+  const command = firstCommandArg(args);
+  if (!command) return false;
+  // Keep the documented read-only/MCP bypasses explicit so future alias changes
+  // do not accidentally start locking commands that must remain non-blocking.
+  if (command === 'log') return false;
+  if (command === 'status' && args.includes('--json')) return false;
+  if (command === 'doctor' && args.includes('--no-fetch')) return false;
+  if (command === 'mcp') return false;
+  return STATE_MUTATING_COMMANDS.has(command);
+}
+
+function firstCommandArg(args: string[]): string | null {
+  for (const arg of args) {
+    if (!arg.startsWith('-')) return arg;
+  }
+  return null;
+}
+
+async function releaseInvocationStateLock(): Promise<void> {
+  if (!invocationStateLock) return;
+  const lock = invocationStateLock;
+  invocationStateLock = null;
+  await lock.release();
 }
 
 function beginHistoryCapture(): void {
