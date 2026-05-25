@@ -13,8 +13,10 @@ vi.mock('../lib/git.js', () => ({
 vi.mock('../lib/github.js', () => ({
   ensureGhInstalled: vi.fn(),
   checkGhAuth: vi.fn(),
+  validatePrReviewers: vi.fn(),
   getPr: vi.fn(),
   createPr: vi.fn(),
+  addPrReviewers: vi.fn(),
   updatePrBody: vi.fn(),
   isPrAutoMergeEnabled: vi.fn(),
   enablePrAutoMerge: vi.fn(),
@@ -47,6 +49,7 @@ import {
   pushBranch,
 } from '../lib/git';
 import {
+  addPrReviewers,
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
@@ -54,6 +57,7 @@ import {
   getPr,
   isPrAutoMergeEnabled,
   updatePrBody,
+  validatePrReviewers,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import type { DubState } from '../lib/state';
@@ -70,8 +74,10 @@ const mockGetLastCommitMessage = getLastCommitMessage as ReturnType<
 const mockPushBranch = pushBranch as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
+const mockValidatePrReviewers = validatePrReviewers as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
 const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
+const mockAddPrReviewers = addPrReviewers as ReturnType<typeof vi.fn>;
 const mockUpdatePrBody = updatePrBody as ReturnType<typeof vi.fn>;
 const mockIsPrAutoMergeEnabled = isPrAutoMergeEnabled as ReturnType<
   typeof vi.fn
@@ -87,9 +93,11 @@ const mockReadMetadataTemplates = readMetadataTemplates as ReturnType<
 function makeConfig(overrides?: {
   aiAssistantEnabled?: boolean;
   submitDescription?: boolean;
+  reviewers?: string[];
 }) {
   return {
     aiAssistantEnabled: overrides?.aiAssistantEnabled ?? false,
+    reviewers: overrides?.reviewers ?? [],
     ai: {
       defaults: {
         createMetadata: false,
@@ -155,6 +163,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
+  mockValidatePrReviewers.mockResolvedValue(undefined);
   mockReadConfig.mockResolvedValue(makeConfig());
   mockWriteState.mockResolvedValue(undefined);
   mockPushBranch.mockResolvedValue(undefined);
@@ -164,6 +173,7 @@ beforeEach(() => {
   mockGetDiff.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
+  mockAddPrReviewers.mockResolvedValue(undefined);
   mockUpdatePrBody.mockResolvedValue(undefined);
   mockIsPrAutoMergeEnabled.mockResolvedValue(false);
   mockEnablePrAutoMerge.mockResolvedValue({ method: 'squash' });
@@ -424,6 +434,7 @@ describe('submit', () => {
       'feat: exact squash title',
       expect.any(String),
       '/repo',
+      { reviewers: [] },
     );
   });
 
@@ -434,6 +445,17 @@ describe('submit', () => {
         noAi: true,
       }),
     ).rejects.toThrow("'--ai' cannot be combined with '--no-ai'.");
+  });
+
+  it('rejects combining --reviewers and --no-reviewers', async () => {
+    await expect(
+      submit('/repo', false, {
+        reviewers: 'alice',
+        noReviewers: true,
+      }),
+    ).rejects.toThrow(
+      "'--reviewers' cannot be combined with '--no-reviewers'.",
+    );
   });
 
   it('rejects --method without --merge-when-ready', async () => {
@@ -587,6 +609,170 @@ describe('submit', () => {
     expect(mockCreatePr).not.toHaveBeenCalled();
     expect(mockUpdatePrBody).toHaveBeenCalled();
     expect(mockGetLastCommitMessage).not.toHaveBeenCalled();
+  });
+
+  it('creates new PRs with explicit reviewers after validating them', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage.mockResolvedValue('feat: new feature');
+    mockCreatePr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: new feature',
+      body: '',
+    });
+
+    await submit('/repo', false, { reviewers: 'alice,bob,@org/team' });
+
+    expect(mockValidatePrReviewers).toHaveBeenCalledWith(
+      ['alice', 'bob', '@org/team'],
+      '/repo',
+    );
+    expect(mockCreatePr).toHaveBeenCalledWith(
+      'feat/a',
+      'main',
+      'feat: new feature',
+      expect.any(String),
+      '/repo',
+      { reviewers: ['alice', 'bob', '@org/team'] },
+    );
+  });
+
+  it('adds explicit reviewers to existing PRs', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+    });
+
+    await submit('/repo', false, { reviewers: 'alice,bob' });
+
+    expect(mockAddPrReviewers).toHaveBeenCalledWith(
+      42,
+      ['alice', 'bob'],
+      '/repo',
+    );
+  });
+
+  it('uses repo-default reviewers across multi-branch submits', async () => {
+    mockReadConfig.mockResolvedValue(makeConfig({ reviewers: ['alice'] }));
+    mockGetCurrentBranch.mockResolvedValue('feat/b');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetPr.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+    mockCreatePr
+      .mockResolvedValueOnce({
+        number: 10,
+        url: 'https://github.com/o/r/pull/10',
+        title: 'feat: existing title',
+        body: '',
+      })
+      .mockResolvedValueOnce({
+        number: 11,
+        url: 'https://github.com/o/r/pull/11',
+        title: 'feat: existing title',
+        body: '',
+      });
+
+    await submit('/repo', false);
+
+    expect(mockValidatePrReviewers).toHaveBeenCalledWith(['alice'], '/repo');
+    expect(mockCreatePr).toHaveBeenNthCalledWith(
+      1,
+      'feat/a',
+      'main',
+      'feat: existing title',
+      expect.any(String),
+      '/repo',
+      { reviewers: ['alice'] },
+    );
+    expect(mockCreatePr).toHaveBeenNthCalledWith(
+      2,
+      'feat/b',
+      'feat/a',
+      'feat: existing title',
+      expect.any(String),
+      '/repo',
+      { reviewers: ['alice'] },
+    );
+  });
+
+  it('allows --no-reviewers to skip repo-default reviewers', async () => {
+    mockReadConfig.mockResolvedValue(makeConfig({ reviewers: ['alice'] }));
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+    });
+
+    await submit('/repo', false, { noReviewers: true });
+
+    expect(mockValidatePrReviewers).not.toHaveBeenCalled();
+    expect(mockAddPrReviewers).not.toHaveBeenCalled();
+  });
+
+  it('re-validates repo-default reviewer config before submitting', async () => {
+    mockReadConfig.mockResolvedValue(
+      makeConfig({ reviewers: ['alice', 'not a login'] }),
+    );
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+
+    await expect(submit('/repo', false)).rejects.toThrow(
+      "Invalid reviewer 'not a login'.",
+    );
+    expect(mockValidatePrReviewers).not.toHaveBeenCalled();
+    expect(mockPushBranch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces invalid reviewer validation before pushing', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockValidatePrReviewers.mockRejectedValueOnce(
+      new Error("Reviewer 'ghost' is not a collaborator"),
+    );
+
+    await expect(
+      submit('/repo', false, { reviewers: 'ghost' }),
+    ).rejects.toThrow("Reviewer 'ghost' is not a collaborator");
+    expect(mockPushBranch).not.toHaveBeenCalled();
   });
 
   it('enables auto-merge on every PR in the submit scope', async () => {

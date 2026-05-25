@@ -30,6 +30,9 @@ dub submit --branch feat/api
 # Queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
+
+# Request reviewers on every submitted PR
+dub submit --reviewers alice,bob,@org/team
 ```
 
 ## Flags
@@ -46,6 +49,8 @@ dub submit --merge-when-ready --method rebase
 | `--branch <name>` | Only the specified branch |
 | `--merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
 | `--method <method>` | Auto-merge strategy: `squash` (default), `merge`, or `rebase` |
+| `--reviewers <list>` | Request comma-separated GitHub users or teams on every submitted PR |
+| `--no-reviewers` | Skip repo-default reviewers for this submit |
 | `--path <mode>` | _[deprecated]_ `current` maps to `--downstack`; `stack` maps to `--stack`. Removed in v2. |
 | `--fix` | _[deprecated]_ No-op alias retained for script compatibility |
 
@@ -74,6 +79,24 @@ When AI submit defaults are enabled for the repository, `--no-ai` lets you force
 Configure the provider with `dub ai setup` or `dub ai env`, then enable the assistant with `dub config ai-assistant on`.
 
 If your repository includes a GitHub pull request template, DubStack asks AI to preserve that template structure when generating the PR description body. Supported locations include `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, and `pull_request_template.md`.
+
+## Reviewers
+
+Use `--reviewers` to request the same reviewers on every PR in the submit scope:
+
+```bash
+dub submit --reviewers alice,bob,@org/team
+```
+
+Set repo-default reviewers with `dub config reviewers`:
+
+```bash
+dub config reviewers alice,bob,@org/team
+dub config reviewers
+dub config reviewers --clear
+```
+
+`dub submit` applies configured defaults unless you pass `--reviewers` for a one-run override or `--no-reviewers` to skip reviewer requests. DubStack validates user reviewers against repository collaborators and team reviewers against organization team slugs before it pushes branches or mutates PRs, so invalid handles fail early with a DubStack error.
 
 ## Auto-Merge Queue
 

@@ -8,6 +8,7 @@ export type McpMode = 'read-only' | 'interactive' | 'trusted';
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   mcpMode: McpMode;
+  reviewers: string[];
   ai: {
     defaults: {
       createMetadata: boolean;
@@ -62,6 +63,7 @@ type DeepPartial<T> =
 const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   mcpMode: 'interactive',
+  reviewers: [],
   ai: {
     defaults: {
       createMetadata: false,
@@ -150,6 +152,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         ? config.aiAssistantEnabled
         : DEFAULT_CONFIG.aiAssistantEnabled,
     mcpMode: normalizeMcpMode(config.mcpMode),
+    reviewers: normalizeReviewers(config.reviewers),
     ai: {
       defaults: {
         createMetadata:
@@ -218,6 +221,13 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
       },
     },
   };
+}
+
+function normalizeReviewers(value: unknown): string[] {
+  if (!Array.isArray(value)) return DEFAULT_CONFIG.reviewers;
+  return value.filter((entry): entry is string => {
+    return typeof entry === 'string' && entry.trim().length > 0;
+  });
 }
 
 function normalizeAiPromptMode(

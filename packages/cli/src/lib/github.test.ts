@@ -14,6 +14,7 @@ vi.mock('execa', () => ({
 import { execa } from 'execa';
 import {
   __setGhRetryOptionsForTesting,
+  addPrReviewers,
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
@@ -32,6 +33,7 @@ import {
   openPrInBrowser,
   retargetPrBase,
   updatePrBody,
+  validatePrReviewers,
 } from './github';
 
 const mockExeca = execa as unknown as MockInstance;
@@ -634,6 +636,35 @@ describe('createPr', () => {
     expect(result.url).toBe('https://github.com/o/r/pull/99');
   });
 
+  it('passes reviewers to gh pr create', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: 'https://github.com/o/r/pull/99\n',
+    });
+
+    await createPr('feat/x', 'main', 'title', '/tmp/body.md', '/repo', {
+      reviewers: ['alice', '@org/team'],
+    });
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      [
+        'pr',
+        'create',
+        '--head',
+        'feat/x',
+        '--base',
+        'main',
+        '--title',
+        'title',
+        '--body-file',
+        '/tmp/body.md',
+        '--reviewer',
+        'alice,org/team',
+      ],
+      { cwd: '/repo' },
+    );
+  });
+
   it('throws descriptive error on 403', async () => {
     mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
 
@@ -669,6 +700,49 @@ describe('updatePrBody', () => {
 
     await expect(updatePrBody(42, '/tmp/body.md', '/repo')).rejects.toThrow(
       'permissions',
+    );
+  });
+});
+
+describe('addPrReviewers', () => {
+  it('calls gh pr edit with reviewer handles', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await addPrReviewers(42, ['alice', '@org/team'], '/repo');
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'alice,org/team'],
+      { cwd: '/repo' },
+    );
+  });
+});
+
+describe('validatePrReviewers', () => {
+  it('validates users against repo collaborators and teams against org team slugs', async () => {
+    mockExeca.mockResolvedValue({ stdout: '' });
+
+    await validatePrReviewers(['alice', '@org/team'], '/repo');
+
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['api', 'repos/{owner}/{repo}/collaborators/alice', '--silent'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['api', 'orgs/org/teams/team', '--silent'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('surfaces invalid collaborators with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(validatePrReviewers(['ghost'], '/repo')).rejects.toThrow(
+      "Reviewer 'ghost' is not a collaborator",
     );
   });
 });

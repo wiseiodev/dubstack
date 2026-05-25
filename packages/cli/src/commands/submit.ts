@@ -18,6 +18,7 @@ import {
   pushBranch,
 } from '../lib/git';
 import {
+  addPrReviewers,
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
@@ -27,6 +28,7 @@ import {
   type MergeMethod,
   type PrInfo,
   updatePrBody,
+  validatePrReviewers,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import {
@@ -36,6 +38,7 @@ import {
   composePrBody,
 } from '../lib/pr-body';
 import { createProgress } from '../lib/progress';
+import { formatReviewers, parseReviewerList } from '../lib/reviewers';
 import {
   type Branch,
   type DubState,
@@ -69,6 +72,8 @@ export interface SubmitOptions {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: MergeMethod;
+  reviewers?: string;
+  noReviewers?: boolean;
   summaryOverrides?: Map<string, string>;
 }
 
@@ -129,6 +134,15 @@ export async function submit(
       "Omit '--method' when submitting without GitHub auto-merge.",
     ]);
   }
+  if (options.reviewers != null && options.noReviewers === true) {
+    throw new DubError(
+      "'--reviewers' cannot be combined with '--no-reviewers'.",
+      [
+        "Pass '--reviewers alice,bob' to request reviewers for this run.",
+        "Pass '--no-reviewers' to skip repo-default reviewers for this run.",
+      ],
+    );
+  }
 
   if (options.fix) {
     console.log(
@@ -152,14 +166,23 @@ export async function submit(
     ]);
   }
   const templates = useAi ? await readMetadataTemplates(cwd) : null;
+  const reviewers = resolveReviewers(config.reviewers, options);
 
   await ensureGhInstalled();
   await checkGhAuth();
+  if (!dryRun && reviewers.length > 0) {
+    await validatePrReviewers(reviewers, cwd);
+  }
 
   const scopeLabel = describeScope(plan.scope, plan.currentBranch);
   console.log(
     `Submitting ${plan.branches.length} branch(es) in ${scopeLabel} onto trunk '${plan.rootBranch}'.`,
   );
+  if (reviewers.length > 0) {
+    console.log(
+      `${dryRun ? '[dry-run] would request' : 'Requesting'} reviewers: ${formatReviewers(reviewers)}`,
+    );
+  }
   if (dryRun) {
     console.log('[dry-run] no branches will be pushed or mutated.');
   }
@@ -223,13 +246,18 @@ export async function submit(
       if (existing) {
         prMap.set(branch.name, existing);
         result.updated.push(branch.name);
+        if (reviewers.length > 0) {
+          await addPrReviewers(existing.number, reviewers, cwd);
+        }
       } else {
         const title = await getLastCommitMessage(branch.name, cwd);
         const created = await withTempMarkdownFile(
           'pr-body',
           '',
           async (tmpFile) => {
-            return createPr(branch.name, base, title, tmpFile, cwd);
+            return createPr(branch.name, base, title, tmpFile, cwd, {
+              reviewers,
+            });
           },
         );
         prMap.set(branch.name, created);
@@ -324,6 +352,16 @@ export async function submit(
   } finally {
     progress.stop();
   }
+}
+
+function resolveReviewers(
+  defaultReviewers: string[],
+  options: SubmitOptions,
+): string[] {
+  if (options.noReviewers === true) return [];
+  if (options.reviewers != null) return parseReviewerList(options.reviewers);
+  if (defaultReviewers.length === 0) return [];
+  return parseReviewerList(defaultReviewers.join(','));
 }
 
 export async function getSubmitPlan(

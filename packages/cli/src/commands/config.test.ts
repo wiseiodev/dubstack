@@ -9,6 +9,7 @@ import {
   configAiPromptsAutoAccept,
   configAiProvider,
   configMcpMode,
+  configReviewers,
 } from './config';
 
 let dir: string;
@@ -251,5 +252,46 @@ describe('config mcp-mode', () => {
     await expect(configMcpMode(dir, 'wide-open')).rejects.toThrow(
       "MCP mode must be one of 'read-only', 'interactive', or 'trusted'.",
     );
+  });
+});
+
+describe('config reviewers', () => {
+  it('returns current reviewers when list is omitted', async () => {
+    const result = await configReviewers(dir);
+
+    expect(result).toEqual({ reviewers: [], changed: false });
+  });
+
+  it('writes default reviewers from a comma-separated list', async () => {
+    const result = await configReviewers(dir, 'alice,bob,@org/team');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      reviewers: ['alice', 'bob', '@org/team'],
+      changed: true,
+    });
+    expect(config.reviewers).toEqual(['alice', 'bob', '@org/team']);
+  });
+
+  it('clears default reviewers', async () => {
+    await configReviewers(dir, 'alice,bob');
+
+    const result = await configReviewers(dir, undefined, { clear: true });
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ reviewers: [], changed: true });
+    expect(config.reviewers).toEqual([]);
+  });
+
+  it('rejects invalid reviewer lists', async () => {
+    await expect(configReviewers(dir, 'alice,not a login')).rejects.toThrow(
+      "Invalid reviewer 'not a login'.",
+    );
+  });
+
+  it('rejects combining --clear with a list', async () => {
+    await expect(
+      configReviewers(dir, 'alice', { clear: true }),
+    ).rejects.toThrow("'--clear' cannot be combined with a reviewer list.");
   });
 });

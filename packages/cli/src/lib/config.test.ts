@@ -24,6 +24,7 @@ describe('readConfig', () => {
     expect(config).toEqual({
       aiAssistantEnabled: false,
       mcpMode: 'interactive',
+      reviewers: [],
       ai: {
         defaults: {
           createMetadata: false,
@@ -83,6 +84,7 @@ describe('writeConfig', () => {
       submitDescription: false,
       flow: false,
     });
+    expect(config.reviewers).toEqual([]);
     expect(config.ai.prompts).toEqual({
       mode: 'auto',
       autoAccept: 'off',
@@ -186,6 +188,14 @@ describe('writeConfig', () => {
     });
   });
 
+  it('persists reviewer defaults', async () => {
+    await writeConfig({ reviewers: ['alice', '@org/team'] }, dir);
+
+    const config = await readConfig(dir);
+
+    expect(config.reviewers).toEqual(['alice', '@org/team']);
+  });
+
   it('normalizes invalid provider settings back to defaults', async () => {
     const dubDir = path.join(dir, '.git', 'dubstack');
     fs.mkdirSync(dubDir, { recursive: true });
@@ -208,11 +218,13 @@ describe('writeConfig', () => {
             },
           },
         },
+        reviewers: ['alice', '', 123],
       }),
     );
 
     const config = await readConfig(dir);
 
+    expect(config.reviewers).toEqual(['alice']);
     expect(config.ai.prompts).toEqual({
       mode: 'auto',
       autoAccept: 'off',

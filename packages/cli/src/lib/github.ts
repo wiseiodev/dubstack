@@ -968,6 +968,7 @@ export async function createPr(
   title: string,
   bodyFile: string,
   cwd: string,
+  options: { reviewers?: string[] } = {},
 ): Promise<PrInfo> {
   const args = [
     'pr',
@@ -981,6 +982,10 @@ export async function createPr(
     '--body-file',
     bodyFile,
   ];
+  const reviewers = normalizeReviewerArgs(options.reviewers ?? []);
+  if (reviewers.length > 0) {
+    args.push('--reviewer', reviewers.join(','));
+  }
 
   let attempt = 0;
   try {
@@ -1032,6 +1037,93 @@ export async function createPr(
       'Confirm the branch has been pushed to the remote, then retry.',
     ]);
   }
+}
+
+export async function addPrReviewers(
+  prNumber: number,
+  reviewers: string[],
+  cwd: string,
+): Promise<void> {
+  const normalized = normalizeReviewerArgs(reviewers);
+  if (normalized.length === 0) return;
+
+  try {
+    await runGh(
+      ['pr', 'edit', String(prNumber), '--add-reviewer', normalized.join(',')],
+      { cwd },
+    );
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to add reviewers to PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr edit ${prNumber} --add-reviewer ${normalized.join(',')}' manually to inspect the failure.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+}
+
+export async function validatePrReviewers(
+  reviewers: string[],
+  cwd: string,
+): Promise<void> {
+  for (const reviewer of reviewers) {
+    if (reviewer.includes('/')) {
+      await validateTeamReviewer(reviewer, cwd);
+    } else {
+      await validateUserReviewer(reviewer, cwd);
+    }
+  }
+}
+
+async function validateUserReviewer(
+  reviewer: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await runGh(
+      ['api', `repos/{owner}/{repo}/collaborators/${reviewer}`, '--silent'],
+      { cwd },
+    );
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Reviewer '${reviewer}' is not a collaborator on this repository.`,
+      [
+        `Run 'gh api repos/{owner}/{repo}/collaborators/${reviewer}' to inspect the failure.`,
+        `Remove '${reviewer}' from '--reviewers' or invite them to the repository.`,
+        `GitHub response: ${message}`,
+      ],
+    );
+  }
+}
+
+async function validateTeamReviewer(
+  reviewer: string,
+  cwd: string,
+): Promise<void> {
+  const normalized = reviewer.startsWith('@') ? reviewer.slice(1) : reviewer;
+  const [org, slug] = normalized.split('/');
+  try {
+    await runGh(['api', `orgs/${org}/teams/${slug}`, '--silent'], { cwd });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(`Team reviewer '${reviewer}' could not be found.`, [
+      `Run 'gh api orgs/${org}/teams/${slug}' to inspect the failure.`,
+      `Remove '${reviewer}' from '--reviewers' or fix the organization/team slug.`,
+      `GitHub response: ${message}`,
+    ]);
+  }
+}
+
+function normalizeReviewerArgs(reviewers: string[]): string[] {
+  return reviewers.map((reviewer) =>
+    reviewer.startsWith('@') ? reviewer.slice(1) : reviewer,
+  );
 }
 
 /**
