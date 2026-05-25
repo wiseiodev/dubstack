@@ -169,7 +169,9 @@ const RECONCILE_AI_CHOICES: Array<
   },
 ];
 
-const REMOTE_OR_LOCAL_AI_CHOICES: Array<AiPromptChoice<'remote' | 'local'>> = [
+const UNSUBMITTED_AI_CHOICES: Array<
+  AiPromptChoice<'remote' | 'local' | 'skip'>
+> = [
   {
     label: 'Overwrite the local copy with the remote version',
     value: 'remote',
@@ -177,6 +179,10 @@ const REMOTE_OR_LOCAL_AI_CHOICES: Array<AiPromptChoice<'remote' | 'local'>> = [
   {
     label: 'Keep the local branch',
     value: 'local',
+  },
+  {
+    label: 'Skip for now',
+    value: 'skip',
   },
 ];
 
@@ -203,8 +209,8 @@ async function resolveUnsubmittedDecision(input: {
   remoteRef: string;
   localParent: string | null;
   showAiPromptOptions: boolean;
-}): Promise<'remote' | 'local'> {
-  const manualPrompt = async (): Promise<'remote' | 'local'> => {
+}): Promise<'remote' | 'local' | 'skip'> {
+  const manualPrompt = async (): Promise<'remote' | 'local' | 'skip'> => {
     if (!input.showAiPromptOptions) {
       const takeRemote = await confirm(
         `Branch '${input.branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
@@ -220,8 +226,9 @@ async function resolveUnsubmittedDecision(input: {
           value: 'remote',
         },
         { label: 'Keep local branch', value: 'local' },
+        { label: 'Skip for now', value: 'skip' },
       ],
-    ) as Promise<'remote' | 'local'>;
+    ) as Promise<'remote' | 'local' | 'skip'>;
   };
 
   if (!input.showAiPromptOptions) return manualPrompt();
@@ -234,6 +241,7 @@ async function resolveUnsubmittedDecision(input: {
         value: 'remote',
       },
       { label: 'Keep local branch', value: 'local' },
+      { label: 'Skip for now', value: 'skip' },
       {
         label: 'Let AI decide (shows reasoning before applying)',
         value: 'ai',
@@ -241,13 +249,13 @@ async function resolveUnsubmittedDecision(input: {
     ],
     'local',
   );
-  if (firstChoice !== 'ai') return firstChoice as 'remote' | 'local';
+  if (firstChoice !== 'ai') return firstChoice as 'remote' | 'local' | 'skip';
 
-  return resolveAiPromptDecision<'remote' | 'local'>({
+  return resolveAiPromptDecision<'remote' | 'local' | 'skip'>({
     cwd: input.cwd,
     scenario: 'unsubmitted branch divergence',
     subject: input.branch,
-    choices: REMOTE_OR_LOCAL_AI_CHOICES,
+    choices: UNSUBMITTED_AI_CHOICES,
     context: await buildBranchAiPromptContext({
       cwd: input.cwd,
       branch: input.branch,
@@ -1061,7 +1069,7 @@ export async function sync(
                 baseBranch: localParent,
               });
               recordSource(result.reconcileSources, 'sync-adopt-remote-safe');
-            } else {
+            } else if (unsubmittedDecision === 'local') {
               outcome = {
                 branch,
                 status,
@@ -1070,6 +1078,15 @@ export async function sync(
                 reconcileSource: 'sync-keep-local',
               };
               recordSource(result.reconcileSources, 'sync-keep-local');
+            } else {
+              outcome = {
+                branch,
+                status,
+                action: 'skipped',
+                message: `⚠ Skipped unsubmitted branch '${branch}' by user choice.`,
+                reconcileSource: 'sync-skip',
+              };
+              recordSource(result.reconcileSources, 'sync-skip');
             }
           }
           result.branches.push(outcome);
