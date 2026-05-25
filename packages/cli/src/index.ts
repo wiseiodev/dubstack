@@ -2743,7 +2743,6 @@ async function runSubmit(options: {
   mergeWhenReady?: boolean;
   method?: 'merge' | 'squash' | 'rebase';
   reviewers?: string | false;
-  noReviewers?: boolean;
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
@@ -2758,7 +2757,7 @@ async function runSubmit(options: {
     method: options.method,
     reviewers:
       typeof options.reviewers === 'string' ? options.reviewers : undefined,
-    noReviewers: options.noReviewers ?? options.reviewers === false,
+    noReviewers: options.reviewers === false,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {

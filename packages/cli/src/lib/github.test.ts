@@ -746,11 +746,27 @@ describe('validatePrReviewers', () => {
     );
   });
 
+  it('surfaces auth failures while validating users with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 403: Forbidden'));
+
+    await expect(validatePrReviewers(['alice'], '/repo')).rejects.toThrow(
+      "Cannot validate reviewer 'alice' because GitHub denied access",
+    );
+  });
+
   it('surfaces team reviewers without repository access with a clean error', async () => {
     mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
 
     await expect(validatePrReviewers(['@org/team'], '/repo')).rejects.toThrow(
       "Team reviewer '@org/team' cannot review this repository",
+    );
+  });
+
+  it('surfaces auth failures while validating teams with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 401: Unauthorized'));
+
+    await expect(validatePrReviewers(['@org/team'], '/repo')).rejects.toThrow(
+      "Cannot validate team reviewer '@org/team' because GitHub denied access",
     );
   });
 });

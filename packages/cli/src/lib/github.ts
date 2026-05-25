@@ -91,6 +91,15 @@ function isPermanentGhError(err: unknown): boolean {
   return false;
 }
 
+function isGhAuthOrPermissionError(message: string): boolean {
+  return (
+    /\b(?:HTTP|status(?:\s+code)?)\s*:?\s*(?:401|403)\b/i.test(message) ||
+    /\b401\s+unauthorized\b/i.test(message) ||
+    /\b403\s+(?:forbidden|insufficient)\b/i.test(message) ||
+    message.toLowerCase().includes('insufficient')
+  );
+}
+
 /**
  * Runs `gh` with retry + exponential backoff. Permanent errors short-circuit
  * via {@link isPermanentGhError}; other errors retry up to the configured
@@ -1090,6 +1099,16 @@ async function validateUserReviewer(
   } catch (error) {
     const root = unwrapRetryError(error);
     const message = root instanceof Error ? root.message : String(root);
+    if (isGhAuthOrPermissionError(message)) {
+      throw new DubError(
+        `Cannot validate reviewer '${reviewer}' because GitHub denied access.`,
+        [
+          "Run 'gh auth status' to verify the active account and token scopes.",
+          "Run 'gh auth refresh -s repo' if the token is missing repository access.",
+          `GitHub response: ${message}`,
+        ],
+      );
+    }
     throw new DubError(
       `Reviewer '${reviewer}' is not a collaborator on this repository.`,
       [
@@ -1115,6 +1134,16 @@ async function validateTeamReviewer(
   } catch (error) {
     const root = unwrapRetryError(error);
     const message = root instanceof Error ? root.message : String(root);
+    if (isGhAuthOrPermissionError(message)) {
+      throw new DubError(
+        `Cannot validate team reviewer '${reviewer}' because GitHub denied access.`,
+        [
+          "Run 'gh auth status' to verify the active account and token scopes.",
+          "Run 'gh auth refresh -s repo -s read:org' if the token is missing repository or organization access.",
+          `GitHub response: ${message}`,
+        ],
+      );
+    }
     throw new DubError(
       `Team reviewer '${reviewer}' cannot review this repository.`,
       [
