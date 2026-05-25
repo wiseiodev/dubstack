@@ -2,6 +2,7 @@ import { openUrl } from './browser';
 import { DubError } from './errors';
 import { execa, type Options } from './exec';
 import { type RetryOptions, retry } from './retry';
+import { writeTempMarkdownFile } from './temp-text-file';
 
 /** Details of a GitHub Pull Request. */
 export interface PrInfo {
@@ -43,7 +44,22 @@ export interface EnableAutoMergeResult {
   method: MergeMethod;
 }
 
+export interface PrCreateWebInput {
+  branch: string;
+  base: string;
+  title: string;
+  body: string;
+}
+
+export interface PrCreateWebResult {
+  url: string;
+  bodyIncluded: boolean;
+  bodyFilePath: string | null;
+}
+
 let ghRetryOverrides: Partial<RetryOptions> = {};
+
+const WEB_PR_BODY_URL_LIMIT = 4000;
 
 /**
  * Test-only seam: overrides retry options applied to every `gh` call wrapped
@@ -1034,6 +1050,39 @@ export async function createPr(
   }
 }
 
+export function buildPrCreateWebUrl(
+  repoUrl: string,
+  input: PrCreateWebInput,
+  options: { includeBody?: boolean } = {},
+): string {
+  const normalizedRepoUrl = repoUrl.replace(/\/+$/, '');
+  const url = new URL(
+    `${normalizedRepoUrl}/compare/${encodeCompareRef(input.base)}...${encodeCompareRef(input.branch)}`,
+  );
+  url.searchParams.set('expand', '1');
+  url.searchParams.set('title', input.title);
+  if (options.includeBody ?? true) {
+    url.searchParams.set('body', input.body);
+  }
+  return url.toString();
+}
+
+export async function openPrCreateWebFlow(
+  input: PrCreateWebInput,
+  cwd: string,
+): Promise<PrCreateWebResult> {
+  const repoUrl = await getRepositoryWebUrl(cwd);
+  const bodyIncluded = input.body.length <= WEB_PR_BODY_URL_LIMIT;
+  const bodyFilePath = bodyIncluded
+    ? null
+    : writeTempMarkdownFile('pr-body', input.body);
+  const url = buildPrCreateWebUrl(repoUrl, input, {
+    includeBody: bodyIncluded,
+  });
+  await openUrl(url);
+  return { url, bodyIncluded, bodyFilePath };
+}
+
 /**
  * Updates a PR's body using a file.
  * @param prNumber - The PR number to update
@@ -1295,4 +1344,8 @@ function normalizeGitHubRepositoryUrl(remoteUrl: string): string {
       "Run 'git remote set-url origin <github-url>' to point the remote at GitHub.",
     ],
   );
+}
+
+function encodeCompareRef(ref: string): string {
+  return ref.split('/').map(encodeURIComponent).join('/');
 }

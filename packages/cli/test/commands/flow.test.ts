@@ -53,6 +53,7 @@ describe('flow integration', () => {
       pushed: ['feat/flow-real'],
       created: ['feat/flow-real'],
       updated: [],
+      webOpened: [],
       scope: { kind: 'downstack' },
       dryRun: false,
     });

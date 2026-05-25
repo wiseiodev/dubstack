@@ -26,6 +26,7 @@ import {
   getPr,
   isPrAutoMergeEnabled,
   type MergeMethod,
+  openPrCreateWebFlow,
   type PrInfo,
   updatePrBody,
 } from '../lib/github';
@@ -70,6 +71,7 @@ export interface SubmitOptions {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: MergeMethod;
+  web?: boolean;
   summaryOverrides?: Map<string, string>;
 }
 
@@ -86,6 +88,7 @@ export interface SubmitResult {
   pushed: string[];
   created: string[];
   updated: string[];
+  webOpened: string[];
   autoMergeEnabled: string[];
   autoMergeSkipped: string[];
   scope: SubmitScope;
@@ -170,6 +173,7 @@ export async function submit(
     pushed: [],
     created: [],
     updated: [],
+    webOpened: [],
     autoMergeEnabled: [],
     autoMergeSkipped: [],
     scope: plan.scope,
@@ -225,6 +229,36 @@ export async function submit(
       if (existing) {
         prMap.set(branch.name, existing);
         result.updated.push(branch.name);
+      } else if (options.web) {
+        const title = await getLastCommitMessage(branch.name, cwd);
+        const body = await buildWebCreatePrBody(
+          branch,
+          plan.stack.branches,
+          prMap,
+          cwd,
+          {
+            useAi,
+            deps,
+            summaryOverrides: options.summaryOverrides,
+            prTemplate: templates?.prTemplate ?? null,
+            providerConfig: config.ai.provider,
+          },
+        );
+        const opened = await openPrCreateWebFlow(
+          {
+            branch: branch.name,
+            base,
+            title,
+            body,
+          },
+          cwd,
+        );
+        if (!opened.bodyIncluded && opened.bodyFilePath) {
+          console.log(
+            `⚠ PR body for '${branch.name}' is too large for a GitHub create URL; copy it from ${opened.bodyFilePath} into the browser form.`,
+          );
+        }
+        result.webOpened.push(branch.name);
       } else {
         const title = await getLastCommitMessage(branch.name, cwd);
         const created = await withTempMarkdownFile(
@@ -315,6 +349,11 @@ export async function submit(
           result.autoMergeEnabled.push(branch.name);
         }
         progress.complete('🔁 Enabling auto-merge');
+        if (options.web && result.webOpened.length > 0) {
+          console.log(
+            `⚠ Skipped auto-merge for ${result.webOpened.length} PR(s) opened in the browser; rerun 'dub submit --merge-when-ready' after creating them.`,
+          );
+        }
       }
     } else if (dryRun && options.mergeWhenReady) {
       console.log(
@@ -326,6 +365,68 @@ export async function submit(
   } finally {
     progress.stop();
   }
+}
+
+async function buildWebCreatePrBody(
+  branch: Branch,
+  stackBranches: Branch[],
+  prMap: Map<string, PrInfo>,
+  cwd: string,
+  options: {
+    useAi: boolean;
+    deps: SubmitDependencies;
+    summaryOverrides?: Map<string, string>;
+    prTemplate: string | null;
+    providerConfig: NonNullable<
+      Awaited<ReturnType<typeof readConfig>>['ai']
+    >['provider'];
+  },
+): Promise<string> {
+  const tableEntries = new Map<string, { number: number; title: string }>();
+  for (const stackBranch of stackBranches) {
+    const pr = prMap.get(stackBranch.name);
+    if (pr) {
+      tableEntries.set(stackBranch.name, {
+        number: pr.number,
+        title: pr.title,
+      });
+    } else if (stackBranch.pr_number != null) {
+      tableEntries.set(stackBranch.name, {
+        number: stackBranch.pr_number,
+        title: stackBranch.name,
+      });
+    }
+  }
+
+  const aiSummaryOverride = options.summaryOverrides?.get(branch.name);
+  const aiSummary =
+    typeof aiSummaryOverride === 'string'
+      ? aiSummaryOverride
+      : options.useAi
+        ? await generatePrDescriptionSummary(
+            {
+              branch: branch.name,
+              baseBranch: branch.parent as string,
+              commitMessage: await getLastCommitMessage(branch.name, cwd),
+              diff: await getDiffForPrDescription(
+                branch.name,
+                branch.parent as string,
+                cwd,
+              ),
+            },
+            options.deps,
+            {
+              prTemplate: options.prTemplate,
+            },
+            options.providerConfig,
+          )
+        : '';
+  return composePrBody(
+    '',
+    aiSummary,
+    buildStackTable(stackBranches, tableEntries, branch.name),
+    '',
+  );
 }
 
 export async function getSubmitPlan(

@@ -185,6 +185,9 @@ dub ss --branch feat/api
 # AI-generate PR description body
 dub submit --ai
 
+# open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method squash
