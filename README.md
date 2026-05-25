@@ -445,6 +445,9 @@ dub submit --stack
 # submit only a single named branch
 dub submit --branch feat/api
 
+# open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
@@ -465,6 +468,7 @@ Scope flags (`--upstack`, `--downstack`, `--stack`, `--branch`) are mutually exc
 Notes:
 - `--no-ai` disables AI PR description generation for one invocation.
 - AI submit only writes the PR description body; the PR title still comes from the last commit message.
+- `--web` pushes branches and opens GitHub compare/create URLs for branches without open PRs, with the title and body prefilled. Existing PRs still update through `gh` as usual. If the generated body is longer than 4000 characters, DubStack writes it to a temp file and opens a title-only URL so you can paste the body manually.
 - `--rerequest-review` re-requests review on updated PRs only. New PRs are skipped because they have no existing reviewers.
 - `--rerequest-review-only <users>` limits re-requests to a comma-separated reviewer list.
 - `--merge-when-ready` queues GitHub auto-merge on every PR in the submit scope. The default strategy is `squash`; pass `--method merge`, `--method squash`, or `--method rebase` to choose another strategy. DubStack starts with the requested strategy and falls back across repository-allowed methods.

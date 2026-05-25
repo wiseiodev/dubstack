@@ -159,6 +159,7 @@ beforeEach(() => {
     pushed: [],
     created: [],
     updated: [],
+    webOpened: [],
     scope: { kind: 'stack' },
     dryRun: false,
   });
@@ -376,6 +377,7 @@ describe('postMerge — tree scenarios', () => {
       pushed: ['feat/a', 'feat/b'],
       created: [],
       updated: ['feat/a', 'feat/b'],
+      webOpened: [],
       scope: { kind: 'stack' },
       dryRun: false,
     });

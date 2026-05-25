@@ -33,6 +33,9 @@ dub submit --stack
 # Submit only a single named branch
 dub submit --branch feat/api
 
+# Open GitHub PR create forms in the browser for new PRs
+dub submit --web
+
 # Queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
@@ -56,6 +59,7 @@ dub submit --rerequest-review-only monalisa,hubot
 | `--upstack` | Current branch + all descendants |
 | `--stack` | Full tree from trunk |
 | `--branch <name>` | Only the specified branch |
+| `--web` | Open GitHub PR create forms in the browser for branches without open PRs |
 | `--merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
 | `--method <method>` | Auto-merge strategy: `squash` (default), `merge`, or `rebase` |
 | `--rerequest-review` | Re-request review from existing reviewers on updated PRs |
@@ -108,6 +112,12 @@ When AI submit defaults are enabled for the repository, `--no-ai` lets you force
 Configure the provider with `dub ai setup` or `dub ai env`, then enable the assistant with `dub config ai-assistant on`.
 
 If your repository includes a GitHub pull request template, DubStack asks AI to preserve that template structure when generating the PR description body. Supported locations include `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, `.github/PULL_REQUEST_TEMPLATE/*.md`, `docs/pull_request_template.md`, and `pull_request_template.md`.
+
+## Browser Create Flow
+
+`dub submit --web` pushes the submit scope, then opens the GitHub compare/create URL for each branch that does not already have an open PR. The browser form is prefilled with the commit-title PR title and the generated DubStack body. Existing PRs skip the browser create flow and are refreshed through `gh` just like a normal submit.
+
+When the generated body is longer than 4000 characters, DubStack writes it to a temp file, opens a title-only create URL, and prints the temp path so you can paste the body manually. After creating browser-opened PRs, rerun `dub submit` if you want DubStack to sync PR numbers and refresh hidden stack metadata.
 
 ## Auto-Merge Queue
 

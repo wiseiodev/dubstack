@@ -2,6 +2,7 @@ import { openUrl } from './browser';
 import { DubError } from './errors';
 import { execa, type Options } from './exec';
 import { type RetryOptions, retry } from './retry';
+import { writeTempMarkdownFile } from './temp-text-file';
 
 /** Details of a GitHub Pull Request. */
 export interface PrInfo {
@@ -53,11 +54,27 @@ export interface EnableAutoMergeResult {
   method: MergeMethod;
 }
 
+export interface PrCreateWebInput {
+  branch: string;
+  base: string;
+  title: string;
+  body: string;
+}
+
+export interface PrCreateWebResult {
+  url: string;
+  bodyIncluded: boolean;
+  bodyFilePath: string | null;
+  bodyFileError: string | null;
+}
+
 export interface BranchProtectionMergeQueueStatus {
   mergeQueueEnabled: boolean;
 }
 
 let ghRetryOverrides: Partial<RetryOptions> = {};
+
+const WEB_PR_BODY_URL_LIMIT = 4000;
 
 /**
  * Test-only seam: overrides retry options applied to every `gh` call wrapped
@@ -1325,6 +1342,55 @@ export async function createPr(
   }
 }
 
+export function buildPrCreateWebUrl(
+  repoUrl: string,
+  input: PrCreateWebInput,
+  options: { includeBody?: boolean } = {},
+): string {
+  const normalizedRepoUrl = repoUrl.replace(/\/+$/, '');
+  const url = new URL(
+    `${normalizedRepoUrl}/compare/${encodeCompareRef(input.base)}...${encodeCompareRef(input.branch)}`,
+  );
+  url.searchParams.set('expand', '1');
+  url.searchParams.set('title', input.title);
+  if (options.includeBody ?? true) {
+    url.searchParams.set('body', input.body);
+  }
+  return url.toString();
+}
+
+export async function openPrCreateWebFlow(
+  input: PrCreateWebInput,
+  cwd: string,
+  options: { repoUrl?: string } = {},
+): Promise<PrCreateWebResult> {
+  const repoUrl = options.repoUrl ?? (await getRepositoryWebUrl(cwd));
+  const bodyIncluded = input.body.length <= WEB_PR_BODY_URL_LIMIT;
+  let bodyFilePath: string | null = null;
+  let bodyFileError: string | null = null;
+  if (!bodyIncluded) {
+    try {
+      bodyFilePath = writeTempMarkdownFile('pr-body', input.body);
+    } catch (error) {
+      bodyFileError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const url = buildPrCreateWebUrl(repoUrl, input, {
+    includeBody: bodyIncluded,
+  });
+  try {
+    await openUrl(url);
+  } catch (error) {
+    if (!bodyFilePath) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DubError(message, [
+      `Copy the URL '${url}' into your browser manually.`,
+      `Copy the PR body from '${bodyFilePath}' into the browser form.`,
+    ]);
+  }
+  return { url, bodyIncluded, bodyFilePath, bodyFileError };
+}
+
 /**
  * Marks a draft PR as ready for review.
  * @param prNumber - The PR number to publish
@@ -1612,4 +1678,8 @@ function normalizeGitHubRepositoryUrl(remoteUrl: string): string {
       "Run 'git remote set-url origin <github-url>' to point the remote at GitHub.",
     ],
   );
+}
+
+function encodeCompareRef(ref: string): string {
+  return ref.split('/').map(encodeURIComponent).join('/');
 }

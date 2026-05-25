@@ -11,9 +11,15 @@ vi.mock('execa', () => ({
   execa: vi.fn(),
 }));
 
+vi.mock('./browser.js', () => ({
+  openUrl: vi.fn(),
+}));
+
 import { execa } from 'execa';
+import { openUrl } from './browser';
 import {
   __setGhRetryOptionsForTesting,
+  buildPrCreateWebUrl,
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
@@ -33,13 +39,16 @@ import {
   isPrAutoMergeEnabled,
   markPrReady,
   mergePr,
+  openPrCreateWebFlow,
   openPrInBrowser,
   rerequestPrReviewers,
   retargetPrBase,
   updatePrBody,
 } from './github';
+import { removeTempFile } from './temp-text-file';
 
 const mockExeca = execa as unknown as MockInstance;
+const mockOpenUrl = openUrl as unknown as MockInstance;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -764,6 +773,105 @@ describe('createPr', () => {
     await expect(
       createPr('feat/x', 'main', 'title', '/tmp/body.md', '/repo'),
     ).rejects.toThrow('Unexpected output');
+  });
+});
+
+describe('buildPrCreateWebUrl', () => {
+  it('constructs a GitHub compare URL with encoded title and body', () => {
+    const url = buildPrCreateWebUrl('https://github.com/o/r', {
+      base: 'main',
+      branch: 'feat/pr-flow',
+      title: 'feat: add submit web flow',
+      body: '## Summary\n\nAdds browser PR creation.',
+    });
+
+    expect(url).toBe(
+      'https://github.com/o/r/compare/main...feat/pr-flow?expand=1&title=feat%3A+add+submit+web+flow&body=%23%23+Summary%0A%0AAdds+browser+PR+creation.',
+    );
+  });
+
+  it('can omit the body for long PR descriptions', () => {
+    const url = buildPrCreateWebUrl(
+      'https://github.com/o/r',
+      {
+        base: 'main',
+        branch: 'feat/a',
+        title: 'feat: a',
+        body: 'x'.repeat(4001),
+      },
+      { includeBody: false },
+    );
+
+    expect(url).toBe(
+      'https://github.com/o/r/compare/main...feat/a?expand=1&title=feat%3A+a',
+    );
+  });
+});
+
+describe('openPrCreateWebFlow', () => {
+  it('writes a temp body file and opens a title-only URL when the body is large', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r.git',
+      });
+    mockOpenUrl.mockResolvedValueOnce(undefined);
+
+    const result = await openPrCreateWebFlow(
+      {
+        base: 'main',
+        branch: 'feat/a',
+        title: 'feat: a',
+        body: 'x'.repeat(4001),
+      },
+      '/repo',
+    );
+
+    expect(result.bodyIncluded).toBe(false);
+    expect(result.bodyFilePath).toContain('dubstack-pr-body-');
+    expect(mockOpenUrl).toHaveBeenCalledWith(
+      'https://github.com/o/r/compare/main...feat/a?expand=1&title=feat%3A+a',
+    );
+    if (result.bodyFilePath) {
+      removeTempFile(result.bodyFilePath);
+    }
+  });
+
+  it('preserves the temp body file path when browser opening fails', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r.git',
+      });
+    mockOpenUrl.mockRejectedValueOnce(new Error('Failed to open URL'));
+
+    let bodyFilePath: string | null = null;
+    try {
+      await openPrCreateWebFlow(
+        {
+          base: 'main',
+          branch: 'feat/a',
+          title: 'feat: a',
+          body: 'x'.repeat(4001),
+        },
+        '/repo',
+      );
+      throw new Error('Expected openPrCreateWebFlow to fail');
+    } catch (error) {
+      expect(error).toMatchObject({
+        recovery: expect.arrayContaining([
+          expect.stringContaining('dubstack-pr-body-'),
+        ]),
+      });
+      const recovery = (error as { recovery?: string[] }).recovery ?? [];
+      const fileHint = recovery.find((hint) =>
+        hint.includes('dubstack-pr-body-'),
+      );
+      bodyFilePath =
+        fileHint?.match(/'([^']*dubstack-pr-body-[^']+)'/)?.[1] ?? null;
+    } finally {
+      if (bodyFilePath) removeTempFile(bodyFilePath);
+    }
   });
 });
 

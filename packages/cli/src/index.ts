@@ -1246,6 +1246,7 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option('--web', 'Open GitHub PR create forms in the browser for new PRs')
   .option(
     '--merge-when-ready',
     'Queue GitHub auto-merge for every submitted PR',
@@ -1276,6 +1277,7 @@ Examples:
   $ dub submit --draft      Create new PRs as drafts
   $ dub submit --publish    Promote existing draft PRs to ready for review
   $ dub submit --ai         Generate a PR description before updating the PR body
+  $ dub submit --web        Open browser PR create forms for new PRs
   $ dub submit --merge-when-ready --method squash
                             Queue GitHub auto-merge for submitted PRs
   $ dub submit --rerequest-review
@@ -1307,6 +1309,7 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option('--web', 'Open GitHub PR create forms in the browser for new PRs')
   .option(
     '--merge-when-ready',
     'Queue GitHub auto-merge for every submitted PR',
@@ -2779,6 +2782,7 @@ async function runSubmit(options: {
   fix?: boolean;
   mergeWhenReady?: boolean;
   method?: 'merge' | 'squash' | 'rebase';
+  web?: boolean;
   rerequestReview?: boolean;
   rerequestReviewOnly?: string[];
 }) {
@@ -2795,14 +2799,16 @@ async function runSubmit(options: {
     fix: options.fix ?? false,
     mergeWhenReady: options.mergeWhenReady,
     method: options.method,
+    web: options.web,
     rerequestReview: options.rerequestReview,
     rerequestReviewOnly: options.rerequestReviewOnly,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
+    const prAction = options.web ? 'check/open' : 'check/create';
     console.log(
       chalk.green(
-        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
+        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and ${prAction} ${result.pushed.length} PR(s).`,
       ),
     );
     return;
@@ -2811,7 +2817,7 @@ async function runSubmit(options: {
   if (result.pushed.length > 0) {
     console.log(
       chalk.green(
-        `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s)`,
+        `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s), opened ${result.webOpened.length} PR form(s)`,
       ),
     );
     if (result.published.length > 0) {
@@ -2821,7 +2827,11 @@ async function runSubmit(options: {
         ),
       );
     }
-    for (const branch of [...result.created, ...result.updated]) {
+    for (const branch of [
+      ...result.created,
+      ...result.updated,
+      ...result.webOpened,
+    ]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
     if (result.autoMergeEnabled.length > 0) {

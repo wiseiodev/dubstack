@@ -16,12 +16,14 @@ vi.mock('../lib/github.js', () => ({
   ensureGhInstalled: vi.fn(),
   checkGhAuth: vi.fn(),
   getPr: vi.fn(),
+  getRepositoryWebUrl: vi.fn(),
   getPrReviewers: vi.fn(),
   createPr: vi.fn(),
   markPrReady: vi.fn(),
   updatePrBody: vi.fn(),
   isPrAutoMergeEnabled: vi.fn(),
   enablePrAutoMerge: vi.fn(),
+  openPrCreateWebFlow: vi.fn(),
   rerequestPrReviewers: vi.fn(),
 }));
 
@@ -58,8 +60,10 @@ import {
   ensureGhInstalled,
   getPr,
   getPrReviewers,
+  getRepositoryWebUrl,
   isPrAutoMergeEnabled,
   markPrReady,
+  openPrCreateWebFlow,
   rerequestPrReviewers,
   updatePrBody,
 } from '../lib/github';
@@ -79,6 +83,7 @@ const mockPushBranch = pushBranch as ReturnType<typeof vi.fn>;
 const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
+const mockGetRepositoryWebUrl = getRepositoryWebUrl as ReturnType<typeof vi.fn>;
 const mockGetPrReviewers = getPrReviewers as ReturnType<typeof vi.fn>;
 const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
 const mockMarkPrReady = markPrReady as ReturnType<typeof vi.fn>;
@@ -87,6 +92,7 @@ const mockIsPrAutoMergeEnabled = isPrAutoMergeEnabled as ReturnType<
   typeof vi.fn
 >;
 const mockEnablePrAutoMerge = enablePrAutoMerge as ReturnType<typeof vi.fn>;
+const mockOpenPrCreateWebFlow = openPrCreateWebFlow as ReturnType<typeof vi.fn>;
 const mockRerequestPrReviewers = rerequestPrReviewers as ReturnType<
   typeof vi.fn
 >;
@@ -181,11 +187,18 @@ beforeEach(() => {
   mockGetDiff.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
+  mockGetRepositoryWebUrl.mockResolvedValue('https://github.com/o/r');
   mockMarkPrReady.mockResolvedValue(undefined);
   mockUpdatePrBody.mockResolvedValue(undefined);
   mockGetPrReviewers.mockResolvedValue({ requested: [], reviewed: [] });
   mockIsPrAutoMergeEnabled.mockResolvedValue(false);
   mockEnablePrAutoMerge.mockResolvedValue({ method: 'squash' });
+  mockOpenPrCreateWebFlow.mockResolvedValue({
+    url: 'https://github.com/o/r/compare/main...feat/a?expand=1',
+    bodyIncluded: true,
+    bodyFilePath: null,
+    bodyFileError: null,
+  });
   mockRerequestPrReviewers.mockResolvedValue([]);
   mockReadMetadataTemplates.mockResolvedValue({
     prTemplate: null,
@@ -562,6 +575,25 @@ describe('submit', () => {
     logSpy.mockRestore();
   });
 
+  it('describes browser PR forms in --web dry-run output', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+
+    await submit('/repo', true, { web: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('would check/open PR form'),
+    );
+    expect(mockGetRepositoryWebUrl).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
   it('creates new PRs for branches without existing PRs', async () => {
     mockGetCurrentBranch.mockResolvedValue('feat/a');
     mockReadState.mockResolvedValue(
@@ -761,6 +793,126 @@ describe('submit', () => {
     expect(mockCreatePr).not.toHaveBeenCalled();
     expect(mockUpdatePrBody).toHaveBeenCalled();
     expect(mockGetLastCommitMessage).not.toHaveBeenCalled();
+  });
+
+  it('opens GitHub PR create forms for new PRs with --web', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/b');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+        { name: 'feat/b', parent: 'feat/a' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage
+      .mockResolvedValueOnce('feat: a')
+      .mockResolvedValueOnce('feat: b');
+
+    const result = await submit('/repo', false, { web: true });
+
+    expect(result.webOpened).toEqual(['feat/a', 'feat/b']);
+    expect(result.created).toEqual([]);
+    expect(mockCreatePr).not.toHaveBeenCalled();
+    expect(mockOpenPrCreateWebFlow).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        branch: 'feat/a',
+        base: 'main',
+        title: 'feat: a',
+        body: expect.stringContaining('feat/a 👈'),
+      }),
+      '/repo',
+      { repoUrl: 'https://github.com/o/r' },
+    );
+    expect(mockOpenPrCreateWebFlow).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        branch: 'feat/b',
+        base: 'feat/a',
+        title: 'feat: b',
+        body: expect.stringContaining('feat/b 👈'),
+      }),
+      '/repo',
+      { repoUrl: 'https://github.com/o/r' },
+    );
+    expect(mockGetRepositoryWebUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the web create flow for existing PRs', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+    });
+
+    const result = await submit('/repo', false, { web: true });
+
+    expect(result.updated).toEqual(['feat/a']);
+    expect(result.webOpened).toEqual([]);
+    expect(mockOpenPrCreateWebFlow).not.toHaveBeenCalled();
+    expect(mockCreatePr).not.toHaveBeenCalled();
+    expect(mockGetRepositoryWebUrl).not.toHaveBeenCalled();
+    expect(mockUpdatePrBody).toHaveBeenCalled();
+  });
+
+  it('prints the temp-file fallback path when a web PR body is too large', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockOpenPrCreateWebFlow.mockResolvedValueOnce({
+      url: 'https://github.com/o/r/compare/main...feat/a?expand=1',
+      bodyIncluded: false,
+      bodyFilePath: '/tmp/dubstack-pr-body.md',
+      bodyFileError: null,
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+
+    await submit('/repo', false, {
+      web: true,
+      summaryOverrides: new Map([['feat/a', 'x'.repeat(4001)]]),
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/tmp/dubstack-pr-body.md'),
+    );
+    logSpy.mockRestore();
+  });
+
+  it('prints a warning when a large web PR body cannot be written to a temp file', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockOpenPrCreateWebFlow.mockResolvedValueOnce({
+      url: 'https://github.com/o/r/compare/main...feat/a?expand=1',
+      bodyIncluded: false,
+      bodyFilePath: null,
+      bodyFileError: 'EACCES',
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+
+    await submit('/repo', false, { web: true });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('EACCES'));
+    logSpy.mockRestore();
   });
 
   it('re-requests existing reviewers on updated PRs when requested', async () => {
