@@ -1,13 +1,16 @@
+import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createTestRepo } from '../../test/helpers';
+import { createTestRepo, gitInRepo } from '../../test/helpers';
+import { writeConfig } from './config';
 import { DubError } from './errors';
 import {
   addBranchToStack,
   type DubState,
   findStackForBranch,
   initState,
+  migrateStateRefsIfNeeded,
   readState,
   writeState,
 } from './state';
@@ -34,7 +37,11 @@ describe('readState', () => {
   it('reads valid state', async () => {
     await initState(dir);
     const state = await readState(dir);
-    expect(state).toEqual({ stacks: [] });
+    expect(state).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it('throws when state file is missing', async () => {
@@ -79,6 +86,9 @@ describe('readState', () => {
     );
 
     const state = await readState(dir);
+    expect(state.trunks).toEqual(['main']);
+    expect(state.defaultTrunk).toBe('main');
+    expect(state.stacks[0].trunk).toBe('main');
     expect(state.stacks[0].branches[0].last_submitted_version).toBeNull();
     expect(state.stacks[0].branches[0].last_synced_at).toBeNull();
     expect(state.stacks[0].branches[0].sync_source).toBeNull();
@@ -120,6 +130,7 @@ describe('writeState and readState roundtrip', () => {
     };
     await writeState(state, dir);
     const loaded = await readState(dir);
+    expect(loaded.stacks[0].trunk).toBe('main');
     expect(loaded.stacks[0].branches[0]).toMatchObject(
       state.stacks[0].branches[0],
     );
@@ -129,6 +140,17 @@ describe('writeState and readState roundtrip', () => {
     expect(loaded.stacks[0].branches[0].last_submitted_version).toBeNull();
     expect(loaded.stacks[0].branches[0].last_synced_at).toBeNull();
     expect(loaded.stacks[0].branches[0].sync_source).toBeNull();
+
+    const diskState = JSON.parse(
+      fs.readFileSync(
+        path.join(dir, '.git', 'dubstack', 'state.json'),
+        'utf-8',
+      ),
+    ) as DubState;
+    expect(diskState.stacks[0].branches[0].last_submitted_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_reconciled_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_synced_at).toBeNull();
+    expect(diskState.stacks[0].branches[0].sync_source).toBeNull();
   });
 
   it('roundtrips parent_revision correctly', async () => {
@@ -251,7 +273,341 @@ describe('writeState and readState roundtrip', () => {
     const state: DubState = { stacks: [] };
     await writeState(state, dir);
     const loaded = await readState(dir);
-    expect(loaded).toEqual(state);
+    expect(loaded).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
+  });
+
+  it('mirrors state to git refs after writing JSON', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          ],
+        },
+      ],
+    };
+
+    await writeState(state, dir);
+
+    const stateRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/state',
+    ]);
+    const branchRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/branches/feat/a',
+    ]);
+    expect(JSON.parse(stateRef.stdout).stacks[0].id).toBe('test-id');
+    expect(JSON.parse(branchRef.stdout).name).toBe('feat/a');
+  });
+
+  it('mirrors state to git refs after writing SQLite', async () => {
+    await writeConfig({ storageBackend: 'sqlite' }, dir);
+    await initState(dir);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'sqlite-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          ],
+        },
+      ],
+    };
+
+    await writeState(state, dir);
+
+    const stateRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/state',
+    ]);
+    const branchRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/branches/feat/a',
+    ]);
+    expect(JSON.parse(stateRef.stdout).stacks[0].id).toBe('sqlite-id');
+    expect(JSON.parse(branchRef.stdout).name).toBe('feat/a');
+  });
+
+  it('prunes stale branch refs before writing new branch refs', async () => {
+    await writeState(
+      {
+        stacks: [
+          {
+            id: 'test-id',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              { name: 'feat', parent: 'main', pr_number: null, pr_link: null },
+            ],
+          },
+        ],
+      },
+      dir,
+    );
+
+    await writeState(
+      {
+        stacks: [
+          {
+            id: 'test-id',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      },
+      dir,
+    );
+
+    const branchRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/branches/feat/a',
+    ]);
+    expect(JSON.parse(branchRef.stdout).name).toBe('feat/a');
+    await expect(
+      gitInRepo(dir, ['show-ref', '--verify', 'refs/dubstack/branches/feat']),
+    ).rejects.toThrow();
+  });
+
+  it('falls back to refs when state JSON is missing', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    fs.rmSync(path.join(dir, '.git', 'dubstack'), {
+      recursive: true,
+      force: true,
+    });
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+    expect(loaded.stacks[0].branches.map((branch) => branch.name)).toEqual([
+      'main',
+      'feat/a',
+    ]);
+  });
+
+  it('falls back to refs when state JSON is corrupt', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    fs.writeFileSync(
+      path.join(dir, '.git', 'dubstack', 'state.json'),
+      'not json{{{',
+    );
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+  });
+
+  it('keeps ref fallback consistent when branch refs are newer than state ref', async () => {
+    const oldState: DubState = {
+      stacks: [
+        {
+          id: 'old-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(oldState, dir);
+    const newerMain = {
+      name: 'main',
+      type: 'root',
+      parent: null,
+      pr_number: 123,
+      pr_link: 'https://example.test/pr/123',
+    };
+    const objectId = childProcess
+      .execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: dir,
+        input: `${JSON.stringify(newerMain, null, 2)}\n`,
+        encoding: 'utf-8',
+      })
+      .trim();
+    await gitInRepo(dir, [
+      'update-ref',
+      'refs/dubstack/branches/main',
+      objectId,
+    ]);
+    fs.rmSync(path.join(dir, '.git', 'dubstack'), {
+      recursive: true,
+      force: true,
+    });
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('old-id');
+    expect(loaded.stacks[0].branches[0].pr_number).toBeNull();
+  });
+
+  it('does not fail JSON writes when ref mirroring fails', async () => {
+    await gitInRepo(dir, ['update-ref', 'refs/dubstack/state/locked', 'HEAD']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    await writeState(state, dir);
+    const loaded = JSON.parse(
+      fs.readFileSync(
+        path.join(dir, '.git', 'dubstack', 'state.json'),
+        'utf-8',
+      ),
+    );
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mirror DubStack state to git refs'),
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('migrateStateRefsIfNeeded', () => {
+  it('returns false without warning outside a git repository', async () => {
+    const tmpDir = await fs.promises.mkdtemp('/tmp/dubstack-nongit-');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(migrateStateRefsIfNeeded(tmpDir)).resolves.toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates refs and a marker once for existing JSON state', async () => {
+    const dubDir = path.join(dir, '.git', 'dubstack');
+    fs.mkdirSync(dubDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dubDir, 'state.json'),
+      JSON.stringify(
+        {
+          stacks: [
+            {
+              id: 'test-id',
+              branches: [
+                {
+                  name: 'main',
+                  type: 'root',
+                  parent: null,
+                  pr_number: null,
+                  pr_link: null,
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    await expect(migrateStateRefsIfNeeded(dir)).resolves.toBe(true);
+    await expect(migrateStateRefsIfNeeded(dir)).resolves.toBe(false);
+
+    const stateRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/state',
+    ]);
+    expect(JSON.parse(stateRef.stdout).stacks[0].id).toBe('test-id');
+    expect(
+      fs.readFileSync(path.join(dubDir, 'refs-mirror-version'), 'utf-8'),
+    ).toBe('1\n');
   });
 });
 
@@ -434,7 +790,11 @@ describe('state lock', () => {
       onWait: () => {},
     });
 
-    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+    await expect(readState(dir)).resolves.toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
 
     await first.release();
   });
@@ -445,7 +805,11 @@ describe('initState', () => {
     const result = await initState(dir);
     expect(result).toBe('created');
     const state = await readState(dir);
-    expect(state).toEqual({ stacks: [] });
+    expect(state).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it("is idempotent — returns 'already_exists' on second call", async () => {
@@ -474,7 +838,96 @@ describe('initState', () => {
     expect(result).toBe('already_exists');
 
     const loaded = await readState(dir);
+    expect(loaded.trunks).toEqual(['main']);
+    expect(loaded.defaultTrunk).toBe('main');
     expect(loaded.stacks[0].id).toBe('keep-me');
+  });
+});
+
+describe('SQLite storage backend', () => {
+  it('initializes SQLite state when configured', async () => {
+    await writeConfig({ storageBackend: 'sqlite' }, dir);
+
+    const result = await initState(dir);
+
+    expect(result).toBe('created');
+    expect(
+      fs.existsSync(path.join(dir, '.git', 'dubstack', 'state.sqlite')),
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(dir, '.git', 'dubstack', 'state.json')),
+    ).toBe(false);
+    await expect(readState(dir)).resolves.toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
+  });
+
+  it('roundtrips full branch metadata through SQLite', async () => {
+    await writeConfig({ storageBackend: 'sqlite' }, dir);
+    await initState(dir);
+    const state: DubState = {
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [
+        {
+          id: 'stack-1',
+          trunk: 'main',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              detached_root: true,
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_reconciled_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              parent_revision: 'base-sha',
+              pr_number: 42,
+              pr_link: 'https://github.com/wiseiodev/dubstack/pull/42',
+              last_submitted_version: {
+                head_sha: 'head',
+                base_sha: 'base',
+                base_branch: 'main',
+                version_number: 3,
+                source: 'sync-adopt-remote-safe',
+              },
+              last_reconciled_version: {
+                head_sha: 'head',
+                base_sha: 'base',
+                base_branch: 'main',
+                source: 'sync-no-change',
+              },
+              last_synced_at: '2026-05-25T04:00:00.000Z',
+              sync_source: 'sync-no-change',
+              frozen: true,
+            },
+          ],
+        },
+      ],
+      last_sync: {
+        timestamp: '2026-05-25T04:01:00.000Z',
+        reconcile_sources: {
+          'sync-no-change': 1,
+          'sync-adopt-remote-safe': 0,
+          'sync-rebase-onto-remote': 0,
+          imported: 0,
+          submit: 0,
+        },
+      },
+    };
+
+    await writeState(state, dir);
+
+    expect(await readState(dir)).toEqual(state);
   });
 });
 
@@ -545,6 +998,9 @@ describe('addBranchToStack', () => {
     addBranchToStack(state, 'feat/a', 'main');
 
     expect(state.stacks).toHaveLength(1);
+    expect(state.trunks).toEqual(['main']);
+    expect(state.defaultTrunk).toBe('main');
+    expect(state.stacks[0].trunk).toBe('main');
     expect(state.stacks[0].branches).toHaveLength(2);
     expect(state.stacks[0].branches[0]).toMatchObject({
       name: 'main',
@@ -560,8 +1016,11 @@ describe('addBranchToStack', () => {
   it('stores parent_revision when provided', () => {
     const state: DubState = { stacks: [] };
 
-    addBranchToStack(state, 'feat/a', 'main', 'abc123');
+    addBranchToStack(state, 'feat/a', 'main', 'abc123', 'develop');
 
+    expect(state.trunks).toEqual(['develop']);
+    expect(state.defaultTrunk).toBe('develop');
+    expect(state.stacks[0].trunk).toBe('develop');
     expect(state.stacks[0].branches[1]).toMatchObject({
       name: 'feat/a',
       parent: 'main',

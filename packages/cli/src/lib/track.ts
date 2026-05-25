@@ -5,8 +5,10 @@ import { getDescendants } from './graph';
 import { assertStateInvariants } from './invariants';
 import {
   addBranchToStack,
+  ensureConfiguredTrunk,
   ensureState,
   findStackForBranch,
+  getStackTrunk,
   writeState,
 } from './state';
 
@@ -125,9 +127,12 @@ export async function trackBranch(
 
   if (destinationStack) {
     destinationStack.branches.push(...movingBranches);
+    destinationStack.trunk = getStackTrunk(destinationStack);
+    ensureConfiguredTrunk(state, destinationStack.trunk);
   } else {
     state.stacks.push({
       id: crypto.randomUUID(),
+      trunk: parent,
       branches: [
         {
           name: parent,
@@ -142,6 +147,7 @@ export async function trackBranch(
         ...movingBranches,
       ],
     });
+    ensureConfiguredTrunk(state, parent);
   }
 
   state.stacks = state.stacks.filter((stack) => stack.branches.length > 0);

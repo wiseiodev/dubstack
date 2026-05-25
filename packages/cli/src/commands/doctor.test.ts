@@ -165,6 +165,76 @@ describe('doctor', () => {
     expect(result.notices[0]?.branches).toEqual(['feat/a']);
   });
 
+  it('reports stacks whose trunk is no longer configured', async () => {
+    mockReadState.mockResolvedValue({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [
+        {
+          id: 'stack-develop',
+          trunk: 'develop',
+          branches: [
+            {
+              name: 'develop',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'develop',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await doctor('/repo');
+
+    const issue = result.issues.find(
+      (entry) => entry.code === 'orphaned-stack',
+    );
+    expect(issue?.summary).toContain(
+      "Stack 'stack-develop' is rooted at unconfigured trunk 'develop'",
+    );
+    expect(issue?.fixes).toContain('dub trunk add develop');
+    expect(result.healthy).toBe(false);
+  });
+
+  it('does not report legacy detached roots as orphaned trunks', async () => {
+    mockReadState.mockResolvedValue({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [
+        {
+          id: 'stack-detached',
+          branches: [
+            {
+              name: 'feat/unlinked',
+              type: 'root',
+              detached_root: true,
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/unlinked');
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await doctor('/repo');
+
+    expect(result.issues.some((entry) => entry.code === 'orphaned-stack')).toBe(
+      false,
+    );
+  });
+
   it('does not flag branching stacks as a doctor issue', async () => {
     mockReadState.mockResolvedValue(
       makeState([

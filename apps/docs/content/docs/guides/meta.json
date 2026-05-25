@@ -5,8 +5,10 @@
     "conflict-resolution",
     "ai-assistant",
     "mcp",
+    "sqlite-backend",
     "shell-integration",
     "json-output",
+    "multi-trunk",
     "github-action-retarget",
     "migration-from-graphite"
   ]

@@ -1,4 +1,10 @@
 {
   "title": "Concepts",
-  "pages": ["stacked-diffs", "state-management", "concurrency", "stack-graph"]
+  "pages": [
+    "stacked-diffs",
+    "state-management",
+    "concurrency",
+    "state",
+    "stack-graph"
+  ]
 }

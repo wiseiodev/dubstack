@@ -45,6 +45,7 @@ import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck, runMergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
+import { migrateStorage } from './commands/migrate';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
@@ -67,7 +68,13 @@ import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
 import { track } from './commands/track';
-import { trunk } from './commands/trunk';
+import {
+  addTrunk,
+  listTrunks,
+  removeTrunk,
+  setDefaultTrunk,
+  trunk,
+} from './commands/trunk';
 import { undo } from './commands/undo';
 import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
@@ -99,6 +106,7 @@ import {
 import { rollbackRestack } from './lib/restack-rollback';
 import { parseScope, type ScopeMode } from './lib/scope';
 import { getStackOverviewBatch } from './lib/stack-overview';
+import { migrateStateRefsIfNeeded } from './lib/state';
 import { acquireStateLock, type StateLockHandle } from './lib/state-lock';
 
 const require = createRequire(import.meta.url);
@@ -166,16 +174,25 @@ Examples:
 program
   .command('init')
   .description('Initialize DubStack in the current git repository')
+  .option(
+    '--restore-from-refs',
+    'Rebuild .git/dubstack/state.json from refs/dubstack/*',
+  )
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub init    Initialize DubStack, creating .git/dubstack/ and updating .gitignore`,
+  $ dub init                       Initialize DubStack, creating .git/dubstack/ and updating .gitignore
+  $ dub init --restore-from-refs   Restore state.json from refs/dubstack/*`,
   )
-  .action(async () => {
-    const result = await init(process.cwd());
+  .action(async (options: { restoreFromRefs?: boolean }) => {
+    const result = await init(process.cwd(), {
+      restoreFromRefs: options.restoreFromRefs,
+    });
     if (result.status === 'created') {
       console.log(chalk.green('✔ DubStack initialized'));
+    } else if (result.status === 'restored') {
+      console.log(chalk.green('✔ DubStack state restored from refs'));
     } else {
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
@@ -1040,11 +1057,20 @@ program
     }
   });
 
-program
+const trunkCommand = program
   .command('trunk')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .option('--json', 'Output trunk info as JSON')
-  .description('Show trunk/root branch for the active stack')
+  .description('Show or manage configured trunk branches')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk                         Show current stack trunk
+  $ dub trunk list                    List configured trunks
+  $ dub trunk add develop             Register another trunk
+  $ dub trunk set-default develop     Use develop for new untracked stacks`,
+  )
   .action(async (branch: string | undefined, options: { json?: boolean }) => {
     if (options.json) activateJsonMode();
     const result = await trunk(process.cwd(), branch);
@@ -1053,6 +1079,49 @@ program
       return;
     }
     console.log(result.trunk);
+  });
+
+trunkCommand
+  .command('list')
+  .description('List configured trunk branches')
+  .action(async () => {
+    const result = await listTrunks(process.cwd());
+    for (const entry of result.trunks) {
+      console.log(entry.default ? `${entry.name} (default)` : entry.name);
+    }
+  });
+
+trunkCommand
+  .command('add')
+  .argument('<name>', 'Trunk branch name to register')
+  .description('Register a trunk branch')
+  .action(async (name: string) => {
+    const result = await addTrunk(process.cwd(), name);
+    if (result.status === 'already-exists') {
+      console.log(
+        chalk.yellow(`⚠ Trunk '${result.trunk}' is already configured`),
+      );
+    } else {
+      console.log(chalk.green(`✔ Added trunk '${result.trunk}'`));
+    }
+  });
+
+trunkCommand
+  .command('remove')
+  .argument('<name>', 'Trunk branch name to remove')
+  .description('Remove a configured trunk branch')
+  .action(async (name: string) => {
+    const result = await removeTrunk(process.cwd(), name);
+    console.log(chalk.green(`✔ Removed trunk '${result.trunk}'`));
+  });
+
+trunkCommand
+  .command('set-default')
+  .argument('<name>', 'Configured trunk to use by default')
+  .description('Set the default trunk for new stacks')
+  .action(async (name: string) => {
+    const result = await setDefaultTrunk(process.cwd(), name);
+    console.log(chalk.green(`✔ Default trunk is now '${result.trunk}'`));
   });
 
 program
@@ -2111,6 +2180,37 @@ program
       ),
   )
   .addCommand(
+    new Command('storage-backend')
+      .argument(
+        '[backend]',
+        'Set to json/sqlite (omit to inspect current value)',
+      )
+      .description('Manage the repo-local state storage backend')
+      .action(async (backend?: string) => {
+        const { configStorageBackend } = await import('./commands/config');
+        const result = await configStorageBackend(process.cwd(), backend);
+
+        if (!backend) {
+          console.log(
+            chalk.blue(
+              `Storage backend is '${result.backend}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(`✔ Storage backend set to '${result.backend}'`),
+          );
+        } else {
+          console.log(
+            chalk.yellow(`⚠ Storage backend is already '${result.backend}'`),
+          );
+        }
+      }),
+  )
+  .addCommand(
     new Command('submit-default')
       .argument(
         '[mode]',
@@ -2196,6 +2296,40 @@ program
           }
         },
       ),
+  );
+
+program
+  .command('migrate')
+  .description('Migrate DubStack repo-local data between storage formats')
+  .addCommand(
+    new Command('storage')
+      .requiredOption('--to <backend>', 'Storage backend: json or sqlite')
+      .description('Copy DubStack state and switch the configured backend')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub migrate storage --to sqlite    Copy state.json into state.sqlite and opt in
+  $ dub migrate storage --to json      Copy state.sqlite back to state.json`,
+      )
+      .action(async (options: { to: string }) => {
+        const result = await migrateStorage(process.cwd(), options.to);
+        const summary = `${result.stackCount} stack${result.stackCount === 1 ? '' : 's'}, ${result.branchCount} branch${result.branchCount === 1 ? '' : 'es'}`;
+
+        if (result.changed) {
+          console.log(
+            chalk.green(
+              `✔ Migrated storage from '${result.from}' to '${result.to}' (${summary})`,
+            ),
+          );
+        } else {
+          console.log(
+            chalk.yellow(
+              `⚠ Storage backend is already '${result.to}' (${summary})`,
+            ),
+          );
+        }
+      }),
   );
 
 program
@@ -3408,7 +3542,7 @@ let invocationMetadata: ShortcutMetadata & {
 } = {};
 let invocationStateLock: StateLockHandle | null = null;
 
-program.hook('preAction', async () => {
+program.hook('preAction', async (_thisCommand, actionCommand) => {
   setVerbose(Boolean(program.opts().verbose));
   beginHistoryCapture();
   if (shouldAcquireInvocationStateLock()) {
@@ -3416,6 +3550,12 @@ program.hook('preAction', async () => {
       commandName: `dub ${(historyArgsForCapture ?? process.argv.slice(2)).join(' ')}`,
     });
   }
+
+  const isRestoreFromRefs =
+    actionCommand.name() === 'init' &&
+    Boolean(actionCommand.opts().restoreFromRefs);
+  if (isRestoreFromRefs) return;
+  await migrateStateRefsIfNeeded(process.cwd());
 });
 
 program.hook('postAction', async () => {

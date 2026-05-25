@@ -3,7 +3,7 @@ import { DubError } from '../lib/errors';
 import { branchExists, getCurrentBranch } from '../lib/git';
 import type { BranchOverview, StackOverview } from '../lib/stack-overview';
 import type { Branch, Stack } from '../lib/state';
-import { findStackForBranch, readState } from '../lib/state';
+import { findStackForBranch, getStackTrunk, readState } from '../lib/state';
 
 interface LogOptions {
   stack?: boolean;
@@ -53,6 +53,7 @@ export interface LogJsonBranch {
 
 export interface LogJsonStack {
   id: string;
+  trunk: string;
   root: LogJsonBranch | null;
 }
 
@@ -143,6 +144,7 @@ export async function logJson(
   for (const stack of stacksToRender) {
     stacks.push({
       id: stack.id,
+      trunk: getStackTrunk(stack),
       root: await renderStackJson(
         stack,
         currentBranch,
