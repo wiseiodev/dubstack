@@ -2,7 +2,8 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
-import { getRepoRoot } from './git';
+import { execa } from './exec';
+import { getRepoRoot, isGitRepo } from './git';
 import { withStateLock } from './state-lock';
 import {
   initSQLiteState,
@@ -18,6 +19,10 @@ import {
 
 const VALID_RECONCILE_SOURCES = new Set<string>(RECONCILE_SOURCES);
 type StorageBackend = 'json' | 'sqlite';
+const STATE_REF = 'refs/dubstack/state';
+const BRANCH_REF_PREFIX = 'refs/dubstack/branches/';
+const REFS_MIRROR_VERSION = '1';
+const REFS_MIRROR_VERSION_FILE = 'refs-mirror-version';
 
 /** A branch within a stack. */
 export interface Branch {
@@ -125,6 +130,8 @@ export async function readState(cwd: string): Promise<DubState> {
 export async function readJsonState(cwd: string): Promise<DubState> {
   const statePath = await getStatePath(cwd);
   if (!fs.existsSync(statePath)) {
+    const restored = await readStateFromRefs(cwd);
+    if (restored) return restored;
     throw new DubError('DubStack is not initialized.', [
       "Run 'dub init' in the repository to initialize DubStack state.",
     ]);
@@ -133,9 +140,12 @@ export async function readJsonState(cwd: string): Promise<DubState> {
     const raw = fs.readFileSync(statePath, 'utf-8');
     return normalizeState(JSON.parse(raw) as DubState);
   } catch {
+    const restored = await readStateFromRefs(cwd);
+    if (restored) return restored;
     throw new DubError('State file is corrupted.', [
       "Run 'rm -rf .git/dubstack' to remove the corrupted state.",
       "Run 'dub init' to re-initialize after removing the state directory.",
+      "Run 'dub init --restore-from-refs' to rebuild from the git refs mirror.",
     ]);
   }
 }
@@ -146,12 +156,15 @@ export async function readJsonState(cwd: string): Promise<DubState> {
  */
 export async function writeState(state: DubState, cwd: string): Promise<void> {
   await withStateLock(cwd, async () => {
+    const normalized = normalizeState(state);
     const backend = await readConfiguredStorageBackend(cwd);
     if (backend === 'sqlite') {
-      await writeSQLiteState(state, cwd);
+      await writeSQLiteState(normalized, cwd);
+      await mirrorStateRefs(normalized, cwd);
       return;
     }
-    await writeJsonStateUnlocked(state, cwd);
+    await writeJsonStateUnlocked(normalized, cwd);
+    await mirrorStateRefs(normalized, cwd);
   });
 }
 
@@ -159,7 +172,11 @@ export async function writeJsonState(
   state: DubState,
   cwd: string,
 ): Promise<void> {
-  await withStateLock(cwd, async () => writeJsonStateUnlocked(state, cwd));
+  await withStateLock(cwd, async () => {
+    const normalized = normalizeState(state);
+    await writeJsonStateUnlocked(normalized, cwd);
+    await mirrorStateRefs(normalized, cwd);
+  });
 }
 
 async function writeJsonStateUnlocked(
@@ -174,7 +191,7 @@ async function writeJsonStateUnlocked(
   // Write-temp-then-rename so a process kill mid-write can never leave a
   // partially-truncated state.json. fs.renameSync is atomic on the same
   // filesystem (.git/dubstack lives next to the temp file).
-  const payload = `${JSON.stringify(state, null, 2)}\n`;
+  const payload = `${JSON.stringify(normalizeState(state), null, 2)}\n`;
   const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpPath, payload);
   try {
@@ -205,6 +222,7 @@ export async function initState(
         return 'already_exists';
       }
       await initSQLiteState(cwd);
+      await mirrorStateRefs({ stacks: [] }, cwd);
       return 'created';
     }
 
@@ -218,6 +236,7 @@ export async function initState(
     fs.mkdirSync(dir, { recursive: true });
     const emptyState: DubState = { stacks: [] };
     fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
+    await mirrorStateRefs(emptyState, cwd);
     return 'created';
   });
 }
@@ -237,6 +256,65 @@ export async function readConfiguredStorageBackend(
       "Run 'rm .git/dubstack/config.json' to delete the corrupted file.",
       "Run 'dub config storage-backend json' to reset the storage backend after deleting it.",
     ]);
+  }
+}
+
+export async function mirrorStateRefs(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  try {
+    const normalized = normalizeState(state);
+    await mirrorStateToRefs(normalized, cwd);
+    writeRefsMirrorVersionMarker(await getDubDir(cwd));
+  } catch (error) {
+    warnRefsMirrorFailure(error);
+  }
+}
+
+/**
+ * Restores `.git/dubstack/state.json` from the git refs mirror.
+ * @throws {DubError} If no usable mirror exists.
+ */
+export async function restoreStateFromRefs(cwd: string): Promise<DubState> {
+  const restored = await readStateFromRefs(cwd);
+  if (!restored) {
+    throw new DubError('No DubStack refs mirror found.', [
+      "Run 'dub init' to initialize fresh state.",
+      "Run a DubStack command in a repo with existing '.git/dubstack/state.json' to create the mirror.",
+    ]);
+  }
+  await writeState(restored, cwd);
+  return restored;
+}
+
+/**
+ * Mirrors existing JSON state once for repos created before the refs mirror.
+ */
+export async function migrateStateRefsIfNeeded(cwd: string): Promise<boolean> {
+  if (!(await isGitRepo(cwd))) return false;
+
+  try {
+    const dubDir = await getDubDir(cwd);
+    const markerPath = path.join(dubDir, REFS_MIRROR_VERSION_FILE);
+    if (fs.existsSync(markerPath)) return false;
+
+    const statePath = await getStatePath(cwd);
+    if (!fs.existsSync(statePath)) return false;
+
+    let state: DubState;
+    try {
+      const raw = fs.readFileSync(statePath, 'utf-8');
+      state = normalizeState(JSON.parse(raw) as DubState);
+    } catch {
+      return false;
+    }
+    await mirrorStateToRefs(state, cwd);
+    writeRefsMirrorVersionMarker(dubDir);
+    return true;
+  } catch (error) {
+    warnRefsMirrorFailure(error);
+    return false;
   }
 }
 
@@ -404,6 +482,170 @@ function normalizeBranch(branch: Branch): Branch {
     last_synced_at: branch.last_synced_at ?? null,
     sync_source: migrateReconcileSource(branch.sync_source),
   };
+}
+
+async function mirrorStateToRefs(state: DubState, cwd: string): Promise<void> {
+  const branchPayloads = new Map<string, Branch>();
+  for (const stack of state.stacks) {
+    for (const branch of stack.branches) {
+      branchPayloads.set(branch.name, branch);
+    }
+  }
+
+  await pruneStaleBranchRefs(cwd, new Set(branchPayloads.keys()));
+
+  for (const [branchName, branch] of branchPayloads) {
+    const objectId = await writeBlob(
+      cwd,
+      `${JSON.stringify(branch, null, 2)}\n`,
+    );
+    await updateRef(cwd, `${BRANCH_REF_PREFIX}${branchName}`, objectId);
+  }
+
+  const stateObjectId = await writeBlob(
+    cwd,
+    `${JSON.stringify(state, null, 2)}\n`,
+  );
+  await updateRef(cwd, STATE_REF, stateObjectId);
+}
+
+async function pruneStaleBranchRefs(
+  cwd: string,
+  currentBranches: Set<string>,
+): Promise<void> {
+  const refs = await listBranchRefs(cwd);
+  for (const ref of refs) {
+    const branchName = ref.slice(BRANCH_REF_PREFIX.length);
+    if (!currentBranches.has(branchName)) {
+      await deleteRef(cwd, ref);
+    }
+  }
+}
+
+async function readStateFromRefs(cwd: string): Promise<DubState | null> {
+  const state = await readStateRef(cwd);
+  if (state) return state;
+  return await reconstructStateFromBranchRefs(cwd);
+}
+
+async function readStateRef(cwd: string): Promise<DubState | null> {
+  try {
+    const { stdout } = await execa('git', ['cat-file', 'blob', STATE_REF], {
+      cwd,
+    });
+    return normalizeState(JSON.parse(stdout) as DubState);
+  } catch {
+    return null;
+  }
+}
+
+async function reconstructStateFromBranchRefs(
+  cwd: string,
+): Promise<DubState | null> {
+  const branches = await readBranchRefs(cwd);
+  if (branches.length === 0) return null;
+
+  const branchByName = new Map(branches.map((branch) => [branch.name, branch]));
+  const roots = branches
+    .filter((branch) => branch.type === 'root' || branch.parent === null)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (roots.length === 0) return null;
+
+  const stacks: Stack[] = roots.map((root) => {
+    const stackBranches: Branch[] = [];
+    const queue = [root.name];
+    const seen = new Set<string>();
+
+    while (queue.length > 0) {
+      const name = queue.shift();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const branch = branchByName.get(name);
+      if (!branch) continue;
+      stackBranches.push(branch);
+      const children = branches
+        .filter((candidate) => candidate.parent === name)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      queue.push(...children.map((child) => child.name));
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      branches: stackBranches,
+    };
+  });
+
+  return normalizeState({ stacks });
+}
+
+async function readBranchRefs(cwd: string): Promise<Branch[]> {
+  const refs = await listBranchRefs(cwd);
+  const branches: Branch[] = [];
+  for (const ref of refs) {
+    try {
+      const { stdout: payload } = await execa(
+        'git',
+        ['cat-file', 'blob', ref],
+        {
+          cwd,
+        },
+      );
+      branches.push(normalizeBranch(JSON.parse(payload) as Branch));
+    } catch {
+      // Ignore individual corrupt branch refs; state ref is the primary mirror.
+    }
+  }
+  return branches;
+}
+
+async function listBranchRefs(cwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['for-each-ref', '--format=%(refname)', BRANCH_REF_PREFIX],
+      { cwd },
+    );
+    const refs = stdout
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return refs;
+  } catch {
+    return [];
+  }
+}
+
+async function writeBlob(cwd: string, payload: string): Promise<string> {
+  const { stdout } = await execa('git', ['hash-object', '-w', '--stdin'], {
+    cwd,
+    input: payload,
+  });
+  return stdout.trim();
+}
+
+async function updateRef(
+  cwd: string,
+  refName: string,
+  objectId: string,
+): Promise<void> {
+  await execa('git', ['update-ref', refName, objectId], { cwd });
+}
+
+async function deleteRef(cwd: string, refName: string): Promise<void> {
+  await execa('git', ['update-ref', '-d', refName], { cwd });
+}
+
+function writeRefsMirrorVersionMarker(dubDir: string): void {
+  fs.mkdirSync(dubDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dubDir, REFS_MIRROR_VERSION_FILE),
+    `${REFS_MIRROR_VERSION}\n`,
+  );
+}
+
+function warnRefsMirrorFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`⚠ Failed to mirror DubStack state to git refs: ${message}`);
 }
 
 /**

@@ -2,11 +2,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from '../lib/errors';
 import { getRepoRoot, isGitRepo } from '../lib/git';
-import { initState } from '../lib/state';
+import { initState, restoreStateFromRefs } from '../lib/state';
 
 interface InitResult {
-  status: 'created' | 'already_exists';
+  status: 'created' | 'already_exists' | 'restored';
   gitignoreUpdated: boolean;
+}
+
+interface InitOptions {
+  restoreFromRefs?: boolean;
 }
 
 /**
@@ -20,7 +24,10 @@ interface InitResult {
  * @returns Status indicating whether state was created or already existed
  * @throws {DubError} If not inside a git repository
  */
-export async function init(cwd: string): Promise<InitResult> {
+export async function init(
+  cwd: string,
+  options: InitOptions = {},
+): Promise<InitResult> {
   if (!(await isGitRepo(cwd))) {
     throw new DubError('Not a git repository.', [
       "Run 'git init' in the desired project directory.",
@@ -28,7 +35,11 @@ export async function init(cwd: string): Promise<InitResult> {
     ]);
   }
 
-  const status = await initState(cwd);
+  const status = options.restoreFromRefs ? 'restored' : await initState(cwd);
+  if (options.restoreFromRefs) {
+    await restoreStateFromRefs(cwd);
+  }
+
   const repoRoot = await getRepoRoot(cwd);
   const gitignorePath = path.join(repoRoot, '.gitignore');
   const entry = '.git/dubstack';

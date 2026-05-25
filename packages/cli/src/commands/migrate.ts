@@ -1,6 +1,11 @@
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
-import { type DubState, readJsonState, writeJsonState } from '../lib/state';
+import {
+  type DubState,
+  mirrorStateRefs,
+  readJsonState,
+  writeJsonState,
+} from '../lib/state';
 import { withStateLock } from '../lib/state-lock';
 import { readSQLiteState, writeSQLiteState } from '../lib/state-sqlite';
 
@@ -97,9 +102,11 @@ function writeStateForBackend(
   state: DubState,
   cwd: string,
 ): Promise<void> {
-  return backend === 'sqlite'
-    ? writeSQLiteState(state, cwd)
-    : writeJsonState(state, cwd);
+  if (backend === 'json') {
+    return writeJsonState(state, cwd);
+  }
+
+  return writeSQLiteState(state, cwd).then(() => mirrorStateRefs(state, cwd));
 }
 
 function oppositeBackend(
