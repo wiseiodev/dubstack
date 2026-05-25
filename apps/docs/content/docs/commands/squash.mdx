@@ -1,0 +1,54 @@
+---
+title: dub squash
+description: Collapse every commit on the current branch (since its tracked parent) into a single commit, then restack descendants automatically.
+---
+
+## Usage
+
+```bash
+# Squash with concatenated original messages (most recent first)
+dub squash
+
+# Squash with a custom commit message
+dub squash -m "feat: rewrite api"
+
+# Squash with an AI-generated Conventional Commit summary
+dub squash --ai
+```
+
+## Behavior
+
+`dub squash`:
+
+1. Counts the commits on the current branch above its tracked parent.
+2. If there are 0 or 1 commits → no-op with an informational line.
+3. Otherwise:
+   - `git reset --soft <parent>` so the staged tree matches the pre-squash branch tip.
+   - Commits with one of:
+     - `-m <msg>` — the message you supplied.
+     - `--ai` — an AI-generated Conventional Commit summary derived from the squashed commits.
+     - Default — the original commit messages concatenated, most recent first, separated by blank lines.
+4. Runs `dub restack` so descendant branches replay onto the new tip.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-m, --message <msg>` | Use the given message for the new commit. Mutually exclusive with `--ai`. |
+| `--ai` | Generate a Conventional Commit summary from the squashed commits. Requires `dub config ai-assistant on` and a configured provider. |
+
+## Errors
+
+| Condition | Behavior |
+|---|---|
+| Working tree has uncommitted changes | `DubError` — stash, commit, or revert first |
+| Current branch has no tracked parent | `DubError` pointing at `dub track --parent` |
+| `--ai` combined with `-m` | `DubError` — pick one |
+| `--ai` with AI assistant disabled | `DubError` pointing at `dub config ai-assistant on` |
+| Commit fails after the soft-reset | `DubError` with recovery hint: staged changes are preserved; `git reset --hard ORIG_HEAD` restores the original commits |
+
+## Notes
+
+- Descendant restacking runs after a successful squash. Conflicts surface the same `dub restack --continue` recovery path as `dub modify`.
+- The original commit subjects survive in the default squash message body, so `git log` history is still searchable.
+- Run `dub squash` only when the branch is checked out — the squash operates on `HEAD`.
