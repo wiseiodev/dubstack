@@ -135,13 +135,14 @@ describe('man', () => {
         continue;
       }
       expect(result.status, result.stderr).toBe(0);
-      // Strip backspace overstrike (used by formatters to bold/underline) so
-      // assertions match the rendered text regardless of formatter choice.
+      // Strip backspace overstrike (mandoc on macOS uses `N\bN` to mean
+      // "bold N") and ANSI escape sequences (groff on Linux emits SGR codes
+      // for bold/underline) so the assertions are robust across formatters.
+      const esc = String.fromCharCode(27);
       const backspace = String.fromCharCode(8);
-      const stripped = result.stdout.replace(
-        new RegExp(`.${backspace}`, 'g'),
-        '',
-      );
+      const stripped = result.stdout
+        .replace(new RegExp(`.${backspace}`, 'g'), '')
+        .replace(new RegExp(`${esc}\\[[0-9;]*[A-Za-z]`, 'g'), '');
       expect(stripped).toContain('DUB(1)');
       expect(stripped).toContain('NAME');
       expect(stripped).toContain('init');
