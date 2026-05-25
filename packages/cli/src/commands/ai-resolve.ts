@@ -16,7 +16,12 @@ import {
 import { readConfig } from '../lib/config';
 import type { ConflictContext } from '../lib/conflict-context';
 import { gatherConflictContext } from '../lib/conflict-context';
-import { runNearbyTestsForFile } from '../lib/conflict-tests';
+import {
+  type ConflictTestCache,
+  type ConflictTestResult,
+  createConflictTestCache,
+  runNearbyTestsForFile,
+} from '../lib/conflict-tests';
 import type { FileResolution } from '../lib/conflict-ui';
 import {
   applyResolution,
@@ -28,6 +33,7 @@ import {
   validateResolutionPaths,
 } from '../lib/conflict-ui';
 import { DubError } from '../lib/errors';
+import { execa } from '../lib/exec';
 import { abortCommand } from './abort';
 import { continueCommand } from './continue';
 
@@ -163,7 +169,15 @@ export async function aiResolve(
       return;
     }
 
-    await applyAndContinue(cwd, context, resolutions, resolved, deps, 0);
+    await applyAndContinue(
+      cwd,
+      context,
+      resolutions,
+      resolved,
+      deps,
+      0,
+      createConflictTestCache(),
+    );
   } finally {
     process.removeListener('SIGINT', sigintHandler);
   }
@@ -299,6 +313,7 @@ async function streamAdjudicatedResolutions(
 
   const chosen: FileResolution[] = [];
   const disagreements: AdjudicationDisagreement[] = [];
+  let skippedFile: string | null = null;
 
   for (const file of context.conflictedFiles) {
     const pair = byPath.get(file);
@@ -364,6 +379,11 @@ async function streamAdjudicatedResolutions(
       return null;
     }
 
+    if (choice === 'skip') {
+      skippedFile = file;
+      break;
+    }
+
     if (choice === 'first') {
       chosen.push({
         ...pair.first,
@@ -380,7 +400,16 @@ async function streamAdjudicatedResolutions(
   }
 
   if (!dryRun && disagreements.length > 0) {
-    logAdjudicationDisagreements(cwd, disagreements);
+    await logAdjudicationDisagreements(cwd, disagreements);
+  }
+
+  if (skippedFile) {
+    console.log(
+      chalk.yellow(
+        `Skipped AI resolution for ${skippedFile}. Conflict state preserved; resolve it manually, then run \`dub continue\`.`,
+      ),
+    );
+    return null;
   }
 
   return chosen;
@@ -449,6 +478,7 @@ async function applyAndContinue(
   resolved: ResolvedAiProvider,
   deps: AiResolveDeps,
   retryCount: number,
+  testCache: ConflictTestCache,
 ): Promise<void> {
   const ordered = sortByConfidence(resolutions);
   deps.renderBatchPreview(ordered);
@@ -463,7 +493,14 @@ async function applyAndContinue(
 
   if (action === 'apply-all') {
     for (const res of ordered) {
-      await applyResolutionWithTestRetry(cwd, context, res, resolved, deps);
+      await applyResolutionWithTestRetry(
+        cwd,
+        context,
+        res,
+        resolved,
+        deps,
+        testCache,
+      );
     }
   } else {
     for (const res of ordered) {
@@ -477,7 +514,14 @@ async function applyAndContinue(
       }
 
       if (fileAction === 'apply') {
-        await applyResolutionWithTestRetry(cwd, context, res, resolved, deps);
+        await applyResolutionWithTestRetry(
+          cwd,
+          context,
+          res,
+          resolved,
+          deps,
+          testCache,
+        );
       }
     }
   }
@@ -528,6 +572,7 @@ async function applyAndContinue(
         resolved,
         deps,
         retryCount + 1,
+        testCache,
       );
     } catch {
       console.log(
@@ -545,10 +590,15 @@ async function applyResolutionWithTestRetry(
   resolution: FileResolution,
   resolved: ResolvedAiProvider,
   deps: AiResolveDeps,
+  testCache: ConflictTestCache,
 ): Promise<void> {
   await deps.applyResolution(resolution.path, resolution.resolvedContent, cwd);
 
-  const testResult = await deps.runNearbyTestsForFile(resolution.path, cwd);
+  const testResult = await deps.runNearbyTestsForFile(
+    resolution.path,
+    cwd,
+    testCache,
+  );
   if (testResult.status === 'none') return;
 
   if (testResult.status === 'passed') {
@@ -579,7 +629,11 @@ async function applyResolutionWithTestRetry(
 
   retry.confidence = 'low';
   await deps.applyResolution(retry.path, retry.resolvedContent, cwd);
-  const retryTestResult = await deps.runNearbyTestsForFile(retry.path, cwd);
+  const retryTestResult = await deps.runNearbyTestsForFile(
+    retry.path,
+    cwd,
+    testCache,
+  );
   if (retryTestResult.status === 'passed') {
     retry.confidence = 'high';
     console.log(
@@ -592,7 +646,7 @@ async function applyResolutionWithTestRetry(
 
   if (retryTestResult.status === 'failed') {
     throw new DubError(`Nearby tests still fail for ${retry.path}.`, [
-      `Command: pnpm vitest run ${retryTestResult.files.join(' ')}`,
+      formatTestCommand(retryTestResult),
       retryTestResult.output
         ? `Output:\n${retryTestResult.output}`
         : 'Inspect the failing test output, adjust the resolution, then run `dub continue`.',
@@ -602,15 +656,24 @@ async function applyResolutionWithTestRetry(
 
 function buildTestFailureFeedback(
   file: string,
-  result: Awaited<ReturnType<typeof runNearbyTestsForFile>>,
+  result: ConflictTestResult,
 ): string {
   return [
     `Tests failed after applying the proposed resolution for ${file}.`,
-    `Command: pnpm vitest run ${result.files.join(' ')}`,
+    formatTestCommand(result),
     result.output ? `Output:\n${result.output}` : undefined,
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function formatTestCommand(result: ConflictTestResult): string {
+  if (!result.target)
+    return `Command: pnpm vitest run ${result.files.join(' ')}`;
+  return [
+    `Working directory: ${result.target.cwd}`,
+    `Command: pnpm vitest run ${result.target.files.join(' ')}`,
+  ].join('\n');
 }
 
 function sortByConfidence(resolutions: FileResolution[]): FileResolution[] {
@@ -632,11 +695,12 @@ interface AdjudicationDisagreement {
   second: FileResolution;
 }
 
-function logAdjudicationDisagreements(
+async function logAdjudicationDisagreements(
   cwd: string,
   disagreements: AdjudicationDisagreement[],
-): void {
-  const bankDir = path.join(cwd, '.git', 'dubstack', 'ai-eval-bank');
+): Promise<void> {
+  const gitDir = await resolveGitDir(cwd);
+  const bankDir = path.join(gitDir, 'dubstack', 'ai-eval-bank');
   fs.mkdirSync(bankDir, { recursive: true });
   const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
   fs.writeFileSync(
@@ -665,6 +729,16 @@ function logAdjudicationDisagreements(
     ),
     'utf-8',
   );
+}
+
+async function resolveGitDir(cwd: string): Promise<string> {
+  try {
+    const { stdout } = await execa('git', ['rev-parse', '--git-dir'], { cwd });
+    const gitDir = stdout.trim();
+    return path.isAbsolute(gitDir) ? gitDir : path.resolve(cwd, gitDir);
+  } catch {
+    return path.join(cwd, '.git');
+  }
 }
 
 function providerLabel(provider: ResolvedAiProvider): string {

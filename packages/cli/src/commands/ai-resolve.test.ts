@@ -251,6 +251,43 @@ describe('aiResolve', () => {
     logSpy.mockRestore();
   });
 
+  it('stops without continuing when adjudication choice is skipped', async () => {
+    process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
+    const deps = createMockDeps({
+      streamText: vi
+        .fn()
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-a',
+              confidence: 'medium',
+              explanation: 'first answer',
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'provider-b',
+              confidence: 'medium',
+              explanation: 'second answer',
+            },
+          ]),
+        ),
+      promptAdjudicationChoice: vi.fn().mockResolvedValue('skip'),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await aiResolve('/tmp/test', { adjudicate: true }, deps);
+
+    expect(deps.applyResolution).not.toHaveBeenCalled();
+    expect(deps.continueCommand).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
+
   it('dry-run adjudication disagreements do not prompt or apply', async () => {
     process.env.DUBSTACK_OPENAI_API_KEY = 'openai-key';
     const deps = createMockDeps({
@@ -338,8 +375,8 @@ describe('aiResolve', () => {
 
     expect(deps.applyResolution).toHaveBeenCalledTimes(2);
     expect(deps.applyResolution).toHaveBeenCalledWith(
-      'b.ts',
-      'resolved-b',
+      'a.ts',
+      'resolved-a',
       '/tmp/test',
     );
     expect(deps.applyResolution).toHaveBeenCalledWith(
@@ -550,6 +587,7 @@ describe('aiResolve', () => {
     expect(deps.runNearbyTestsForFile).toHaveBeenCalledWith(
       'src/file.ts',
       '/tmp/test',
+      expect.any(Object),
     );
     const output = logSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('Nearby tests passed');
@@ -586,6 +624,10 @@ describe('aiResolve', () => {
         .mockResolvedValueOnce({
           status: 'failed',
           files: ['src/file.test.ts'],
+          target: {
+            cwd: '/tmp/test/packages/cli',
+            files: ['src/file.test.ts'],
+          },
           output: 'expected true to be false',
         })
         .mockResolvedValueOnce({
@@ -598,6 +640,14 @@ describe('aiResolve', () => {
     await aiResolve('/tmp/test', {}, deps);
 
     expect(deps.streamText).toHaveBeenCalledTimes(2);
+    expect(deps.streamText).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Working directory: /tmp/test/packages/cli',
+        ),
+      }),
+    );
     expect(deps.applyResolution).toHaveBeenNthCalledWith(
       1,
       'src/file.ts',

@@ -5,12 +5,18 @@ import { execa } from 'execa';
 export interface ConflictTestResult {
   status: 'none' | 'passed' | 'failed';
   files: string[];
+  target?: VitestRunTarget;
   output?: string;
 }
 
 export interface VitestRunTarget {
   cwd: string;
   files: string[];
+}
+
+export interface ConflictTestCache {
+  testFiles?: string[];
+  testFileContents: Map<string, string | null>;
 }
 
 const TEST_FILE_RE = /\.(test|spec)\.[cm]?[tj]sx?$/;
@@ -23,11 +29,20 @@ const SKIP_DIRS = new Set([
   'node_modules',
 ]);
 
-export function findNearbyTests(file: string, cwd: string): string[] {
+export function createConflictTestCache(): ConflictTestCache {
+  return { testFileContents: new Map() };
+}
+
+export function findNearbyTests(
+  file: string,
+  cwd: string,
+  cache = createConflictTestCache(),
+): string[] {
   if (!SOURCE_FILE_RE.test(file)) return [];
 
-  const absoluteFile = path.resolve(cwd, file);
-  if (!absoluteFile.startsWith(cwd + path.sep)) return [];
+  const repoRoot = path.resolve(cwd);
+  const absoluteFile = path.resolve(repoRoot, file);
+  if (!absoluteFile.startsWith(repoRoot + path.sep)) return [];
 
   const dir = path.dirname(absoluteFile);
   const parsed = path.parse(absoluteFile);
@@ -39,20 +54,21 @@ export function findNearbyTests(file: string, cwd: string): string[] {
 
   for (const candidate of directCandidates) {
     if (fs.existsSync(candidate)) {
-      tests.add(path.relative(cwd, candidate));
+      tests.add(path.relative(repoRoot, candidate));
     }
   }
 
   const siblingTestsDir = path.join(dir, '__tests__');
   if (fs.existsSync(siblingTestsDir)) {
     for (const testFile of walkTestFiles(siblingTestsDir)) {
-      tests.add(path.relative(cwd, testFile));
+      tests.add(path.relative(repoRoot, testFile));
     }
   }
 
-  for (const testFile of walkTestFiles(cwd)) {
-    if (importsSourceFile(testFile, absoluteFile)) {
-      tests.add(path.relative(cwd, testFile));
+  cache.testFiles ??= walkTestFiles(repoRoot);
+  for (const testFile of cache.testFiles) {
+    if (importsSourceFile(testFile, absoluteFile, cache)) {
+      tests.add(path.relative(repoRoot, testFile));
     }
   }
 
@@ -62,8 +78,9 @@ export function findNearbyTests(file: string, cwd: string): string[] {
 export async function runNearbyTestsForFile(
   file: string,
   cwd: string,
+  cache?: ConflictTestCache,
 ): Promise<ConflictTestResult> {
-  const tests = findNearbyTests(file, cwd);
+  const tests = findNearbyTests(file, cwd, cache);
   if (tests.length === 0) return { status: 'none', files: [] };
   const target = resolveVitestRunTarget(file, tests, cwd);
 
@@ -72,7 +89,7 @@ export async function runNearbyTestsForFile(
       cwd: target.cwd,
       all: true,
     });
-    return { status: 'passed', files: tests };
+    return { status: 'passed', files: tests, target };
   } catch (err) {
     const output =
       typeof err === 'object' && err !== null && 'all' in err
@@ -80,7 +97,7 @@ export async function runNearbyTestsForFile(
         : err instanceof Error
           ? err.message
           : String(err);
-    return { status: 'failed', files: tests, output };
+    return { status: 'failed', files: tests, target, output };
   }
 }
 
@@ -122,9 +139,15 @@ function findNearestVitestPackageDir(
   absoluteFile: string,
   cwd: string,
 ): string | null {
-  let current = fs.statSync(absoluteFile).isDirectory()
-    ? absoluteFile
-    : path.dirname(absoluteFile);
+  let current: string;
+  try {
+    current = fs.statSync(absoluteFile).isDirectory()
+      ? absoluteFile
+      : path.dirname(absoluteFile);
+  } catch (err) {
+    if (isNodeError(err) && err.code === 'ENOENT') return null;
+    throw err;
+  }
 
   for (;;) {
     const packageJsonPath = path.join(current, 'package.json');
@@ -156,13 +179,21 @@ function packageUsesVitest(packageJsonPath: string): boolean {
   }
 }
 
-function importsSourceFile(testFile: string, sourceFile: string): boolean {
-  let content = '';
-  try {
-    content = fs.readFileSync(testFile, 'utf-8');
-  } catch {
-    return false;
+function importsSourceFile(
+  testFile: string,
+  sourceFile: string,
+  cache: ConflictTestCache,
+): boolean {
+  let content = cache.testFileContents.get(testFile);
+  if (content === undefined) {
+    try {
+      content = fs.readFileSync(testFile, 'utf-8');
+    } catch {
+      content = null;
+    }
+    cache.testFileContents.set(testFile, content);
   }
+  if (content === null) return false;
 
   const specifier = relativeImportSpecifier(path.dirname(testFile), sourceFile);
   return (
@@ -180,4 +211,8 @@ function relativeImportSpecifier(fromDir: string, toFile: string): string {
     .replaceAll(path.sep, '/');
   if (!relative.startsWith('.')) relative = `./${relative}`;
   return relative;
+}
+
+function isNodeError(err: unknown): err is NodeJS.ErrnoException {
+  return typeof err === 'object' && err !== null && 'code' in err;
 }

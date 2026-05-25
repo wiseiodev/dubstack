@@ -2,7 +2,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findNearbyTests, resolveVitestRunTarget } from './conflict-tests';
+import {
+  createConflictTestCache,
+  findNearbyTests,
+  resolveVitestRunTarget,
+} from './conflict-tests';
 
 let tmpDir: string;
 
@@ -38,6 +42,21 @@ describe('findNearbyTests', () => {
     ]);
   });
 
+  it('caches scanned test files and contents across lookups', () => {
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'test'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'src', 'thing.ts'), '');
+    const importingTest = path.join(tmpDir, 'test', 'thing-import.test.ts');
+    fs.writeFileSync(importingTest, "import { thing } from '../src/thing';");
+
+    const cache = createConflictTestCache();
+    const first = findNearbyTests('src/thing.ts', tmpDir, cache);
+    fs.unlinkSync(importingTest);
+
+    expect(findNearbyTests('src/thing.ts', tmpDir, cache)).toEqual(first);
+    expect(findNearbyTests('src/thing.ts', tmpDir)).toEqual([]);
+  });
+
   it('ignores non-TypeScript source files', () => {
     fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'src', 'readme.md'), '');
@@ -71,6 +90,19 @@ describe('findNearbyTests', () => {
     ).toEqual({
       cwd: path.join(tmpDir, 'packages', 'cli'),
       files: ['src/thing.test.ts'],
+    });
+  });
+
+  it('falls back to the repo root when the conflicted file is missing', () => {
+    expect(
+      resolveVitestRunTarget(
+        'packages/cli/src/missing.ts',
+        ['packages/cli/src/missing.test.ts'],
+        tmpDir,
+      ),
+    ).toEqual({
+      cwd: tmpDir,
+      files: ['packages/cli/src/missing.test.ts'],
     });
   });
 });
