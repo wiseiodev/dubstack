@@ -1,10 +1,4 @@
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import {
   type AiMetadataDependencies,
@@ -64,18 +58,6 @@ interface CreateResult {
 
 type CreateDependencies = AiMetadataDependencies;
 
-const DEFAULT_DEPS: CreateDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
-
 /**
  * Creates a new branch stacked on top of the current branch.
  *
@@ -93,7 +75,7 @@ export async function create(
   name: string | undefined,
   cwd: string,
   options?: CreateOptions,
-  deps: CreateDependencies = DEFAULT_DEPS,
+  deps?: CreateDependencies,
 ): Promise<CreateResult> {
   const normalizedOptions = options ?? {};
 
@@ -226,13 +208,14 @@ export async function create(
       getDiffNumStat(cwd, true),
     ]);
     const templates = await readMetadataTemplates(cwd);
+    const resolvedDeps = deps ?? (await loadAiDeps());
     const generated = await generateCreateMetadata(
       buildAiDiffContext({
         rawDiff: stagedDiff,
         filePaths: stagedFiles,
         diffStats: stagedDiffStats,
       }),
-      deps,
+      resolvedDeps,
       {
         commitTemplate: templates.commitTemplate,
       },

@@ -1,13 +1,8 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, streamText } from 'ai';
+import type { streamText } from 'ai';
 import chalk from 'chalk';
+import { loadAiDeps } from './ai-deps';
 import {
   buildAiProviderOptions,
   type ResolveAiProviderDeps,
@@ -37,20 +32,18 @@ export interface AiPromptDecisionDeps extends ResolveAiProviderDeps {
   writePreview: (text: string) => void;
 }
 
-const DEFAULT_DEPS: AiPromptDecisionDeps = {
+// Lightweight defaults that need no AI SDK — used by callers that only
+// inspect config (e.g. the program startup branch).
+const DEFAULT_NON_AI_DEPS = {
   readConfig,
-  streamText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
   confirmRecommendation,
   writePreview: (text: string) => process.stdout.write(text),
-};
+} as const;
+
+async function loadDefaultDeps(): Promise<AiPromptDecisionDeps> {
+  const ai = await loadAiDeps();
+  return { ...DEFAULT_NON_AI_DEPS, ...ai };
+}
 
 export function aiPromptOptionsEnabled(config: DubConfig): boolean {
   return config.aiAssistantEnabled && config.ai.prompts.mode !== 'off';
@@ -58,7 +51,7 @@ export function aiPromptOptionsEnabled(config: DubConfig): boolean {
 
 export async function isAiPromptOptionEnabled(
   cwd: string,
-  deps: Pick<AiPromptDecisionDeps, 'readConfig'> = DEFAULT_DEPS,
+  deps: Pick<AiPromptDecisionDeps, 'readConfig'> = DEFAULT_NON_AI_DEPS,
 ): Promise<boolean> {
   const config = await deps.readConfig(cwd);
   return aiPromptOptionsEnabled(config);
@@ -73,7 +66,7 @@ export async function resolveAiPromptDecision<T extends string>(input: {
   fallbackPrompt: () => Promise<T>;
   deps?: AiPromptDecisionDeps;
 }): Promise<T> {
-  const deps = input.deps ?? DEFAULT_DEPS;
+  const deps = input.deps ?? (await loadDefaultDeps());
   const config = await deps.readConfig(input.cwd);
   if (!aiPromptOptionsEnabled(config)) {
     return input.fallbackPrompt();

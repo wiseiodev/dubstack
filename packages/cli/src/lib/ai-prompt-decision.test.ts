@@ -13,6 +13,7 @@ const baseConfig: DubConfig = {
   reviewers: [],
   storageBackend: 'json',
   submitDefault: 'auto',
+  theme: 'auto',
   ai: {
     defaults: {
       createMetadata: false,

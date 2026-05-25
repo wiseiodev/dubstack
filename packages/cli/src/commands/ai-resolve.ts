@@ -1,13 +1,17 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, streamText } from 'ai';
+import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
+import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
+import type { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type {
+  fromIni,
+  fromNodeProviderChain,
+} from '@aws-sdk/credential-providers';
+import type { createGateway, streamText } from 'ai';
 import chalk from 'chalk';
+import { loadAiDeps } from '../lib/ai-deps';
 import {
   buildAiProviderOptions,
   type ResolvedAiProvider,
@@ -62,29 +66,23 @@ export interface AiResolveDeps {
   runNearbyTestsForFile: typeof runNearbyTestsForFile;
 }
 
-const DEFAULT_DEPS: AiResolveDeps = {
-  streamText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-  readConfig,
-  gatherConflictContext,
-  renderBatchPreview,
-  promptBatchAction,
-  promptFileAction,
-  applyResolution,
-  showScopeWarning,
-  validateResolutionPaths,
-  continueCommand,
-  abortCommand,
-  promptAdjudicationChoice,
-  runNearbyTestsForFile,
-};
+async function buildDefaultDeps(): Promise<AiResolveDeps> {
+  return {
+    ...(await loadAiDeps()),
+    readConfig,
+    gatherConflictContext,
+    renderBatchPreview,
+    promptBatchAction,
+    promptFileAction,
+    applyResolution,
+    showScopeWarning,
+    validateResolutionPaths,
+    continueCommand,
+    abortCommand,
+    promptAdjudicationChoice,
+    runNearbyTestsForFile,
+  };
+}
 
 interface AiResolveOptions {
   dryRun?: boolean;
@@ -95,8 +93,9 @@ interface AiResolveOptions {
 export async function aiResolve(
   cwd: string,
   options: AiResolveOptions,
-  deps: AiResolveDeps = DEFAULT_DEPS,
+  depsArg?: AiResolveDeps,
 ): Promise<void> {
+  const deps = depsArg ?? (await buildDefaultDeps());
   const sigintHandler = () => {
     console.log(
       '\nCancelled. Conflict state preserved — resolve manually or re-run `dub ai resolve`.',

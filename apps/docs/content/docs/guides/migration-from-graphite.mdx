@@ -1,38 +1,105 @@
 ---
-title: Graphite Migration
-description: Map Graphite commands to DubStack equivalents.
+title: Migrating from Graphite
+description: Map Graphite (`gt`) commands to DubStack equivalents and migrate an in-flight stack in under 30 minutes.
 ---
 
-If you have `gt` muscle memory, use this as a fast map. DubStack follows the same mental model.
+If you have `gt` muscle memory, this guide is the fast path to DubStack. The mental model is the same: branches stacked on branches, one PR per branch, automatic restack on rebase.
 
 ## Command Mapping
 
-| Graphite | DubStack |
-|---|---|
-| `gt create` | `dub create` |
-| `gt modify` | `dub modify` / `dub m` |
-| `gt submit` / `gt ss` | `dub submit` / `dub ss` |
-| `gt sync` | `dub sync` |
-| `gt checkout` / `gt co` | `dub checkout` / `dub co` |
-| `gt log` / `gt ls` | `dub log` / `dub ls` |
-| `gt up` / `gt down` | `dub up` / `dub down` |
-| `gt top` / `gt bottom` | `dub top` / `dub bottom` |
-| `gt info` | `dub info` |
-| `gt pr` | `dub pr` |
-| `gt restack` | `dub restack` |
-| `gt continue` | `dub continue` |
-| `gt abort` | `dub abort` |
-| `gt track --parent` | `dub track --parent` |
-| `gt untrack` | `dub untrack` |
-| `gt delete` | `dub delete` |
-| `gt parent` | `dub parent` |
-| `gt children` | `dub children` |
-| `gt trunk` | `dub trunk` |
-| `gt undo` | `dub undo` |
+| Graphite | DubStack | Notes |
+|---|---|---|
+| `gt create` | `dub create` | Same flags: `-a`, `-m`, `--ai` |
+| `gt modify` / `gt m` | `dub modify` / `dub m` | Amend current branch and restack descendants |
+| `gt submit` / `gt ss` | `dub submit` / `dub ss` | `--stack`, `--upstack`, `--downstack`, `--branch` |
+| `gt sync` | `dub sync` | `--all` syncs every tracked stack |
+| `gt checkout` / `gt co` | `dub checkout` / `dub co` | Interactive picker with no argument |
+| `gt log` / `gt ls` | `dub log` / `dub ls` | `--stack`, `--all`, `--json` |
+| `gt up` / `gt down` | `dub up` / `dub down` | Identical |
+| `gt top` / `gt bottom` | `dub top` / `dub bottom` | Identical |
+| `gt info` | `dub info` | `--json` machine-readable |
+| `gt pr` | `dub pr` | Opens the PR for the current branch |
+| `gt restack` | `dub restack` | Automatic when a parent changes |
+| `gt continue` | `dub continue` | Add `--ai` to resolve conflicts via LLM |
+| `gt abort` | `dub abort` | Rolls back restack/rebase |
+| `gt track --parent` | `dub track --parent` | Adopt an untracked branch |
+| `gt untrack` | `dub untrack` | Keep the branch, drop DubStack metadata |
+| `gt delete` | `dub delete` | `--upstack`, `--downstack`, `--force` |
+| `gt parent` / `gt children` | `dub parent` / `dub children` | `--json` outputs the relation |
+| `gt trunk` | `dub trunk` / `dub trunk add` / `dub trunk set-default` | Multi-trunk supported |
+| `gt undo` | `dub undo` | 20-entry ring buffer, supports `dub redo` |
+| `gt absorb` | `dub absorb` | `--ai` for ambiguous fixups |
+| `gt fold` | `dub fold` | Defaults to keeping commits; `--squash` to collapse |
+| `gt move --before/--after` | `dub move --before/--after` | Identical semantics |
+| `gt split` | `dub split` | Interactive or AI-assisted commit split |
 
-## Key Differences
+## Conceptual Differences
 
-- **Local-first** — DubStack stores all state locally in `.git/dubstack/`. Nothing is pushed to your remote from these files.
-- **AI features** — DubStack includes built-in AI for branch naming, commit messages, PR descriptions, `dub flow`, and stack-aware guidance via `dub ai ask`.
-- **Agent skills** — DubStack ships packaged skills for coding assistants via `dub skills add`.
-- **Safe merging** — `dub merge-next` handles retargeting child PRs before deleting merged branches.
+- **Local-first.** All state lives in `.git/dubstack/` and never leaves your machine. There is no DubStack account, no remote server, and no synchronization daemon. The downside is that team coordination happens through GitHub PRs alone.
+- **Stack metadata in git refs.** DubStack mirrors stack state into `refs/dubstack/*` so a wiped checkout can rebuild from `dub init --restore-from-refs`. Graphite stores the equivalent in `.graphite_cache_persist`.
+- **First-class AI.** `dub create --ai`, `dub submit --ai`, `dub flow`, and `dub absorb --ai` all use a provider you configure with `dub config ai-provider`. Set keys with `dub config ai-model --provider anthropic <model>`.
+- **Safer merges.** `dub merge-next` (alias `dub land`) refuses to merge a PR whose ancestors are not yet merged, and retargets every dependent PR atomically before deleting the local branch.
+- **Multi-trunk.** A single repository can have several trunks (e.g. `main` plus `release/24.x`). Configure with `dub trunk add` and `dub trunk set-default`.
+- **MCP server.** `dub mcp` exposes the local stack to AI coding agents via the Model Context Protocol, gated by `dub config mcp-mode`.
+
+## Common Pitfalls
+
+- **`gt submit --stack` defaulted to the whole tree; `dub submit` defaults to downstack.** Pass `--stack` explicitly when migrating CI scripts that assumed Graphite's old default.
+- **`gt sync --no-restack` does not exist in DubStack.** Use `dub sync` and then `dub restack --continue` if you wanted to defer restack.
+- **`.graphite_user_config` is not read.** Re-configure with `dub config ai-provider`, `dub config reviewers`, and friends.
+- **`gt downstack edit` has no direct equivalent.** Use `dub reorder` for interactive reordering, or `dub move --before/--after` for single-branch moves.
+
+## 30-Minute Migration Script
+
+The following walkthrough migrates an active Graphite stack in place without re-creating any branches or losing in-flight PRs.
+
+```bash
+# 1. Install DubStack (assumes pnpm/npm available)
+npm install -g dubstack
+
+# 2. From the repo root, initialize DubStack alongside Graphite
+cd path/to/repo
+dub init
+
+# 3. Adopt every Graphite-tracked branch into DubStack. DubStack walks the
+#    git ancestry to infer parent links — this is non-destructive.
+git switch main
+for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
+  if [ "$branch" != "main" ]; then
+    git switch "$branch"
+    dub track --no-interactive || true
+  fi
+done
+
+# 4. Verify the stack matches what Graphite showed
+dub log --all
+
+# 5. Optional: enable AI features. Pick one provider.
+dub config ai-assistant on
+dub config ai-provider anthropic
+dub config ai-model --provider anthropic claude-sonnet-4-7
+
+# 6. Optional: pre-fetch your default reviewers so `dub submit` requests them
+dub config reviewers alice,@org/backend
+
+# 7. Confirm restack works on the active stack
+dub restack
+
+# 8. Resync PR descriptions with the new metadata layout
+dub submit --downstack --no-ai
+
+# 9. (When you are confident) remove Graphite
+npm uninstall -g @withgraphite/graphite-cli
+rm -rf .graphite_cache_persist .graphite_repo_config .graphite_user_config
+
+# 10. Add an alias so muscle memory survives:
+#     alias gt=dub      # zsh/bash
+```
+
+If anything looks off after step 4, run `dub doctor` for a diagnostic report. The state is recoverable via `dub init --restore-from-refs`.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [Multi-trunk stacks](/docs/guides/multi-trunk)

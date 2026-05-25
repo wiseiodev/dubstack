@@ -1,17 +1,21 @@
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, stepCountIs, streamText } from 'ai';
-import { createBashTool } from 'bash-tool';
+import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
+import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
+import type { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type {
+  fromIni,
+  fromNodeProviderChain,
+} from '@aws-sdk/credential-providers';
+import type { createGateway, stepCountIs, streamText } from 'ai';
+import type { createBashTool } from 'bash-tool';
 import { createLocalBashSandbox } from '../lib/ai-bash-sandbox';
 import {
   buildAiSystemPrompt,
   buildAiUserPrompt,
   collectAiContext,
 } from '../lib/ai-context';
+import { loadAiDeps } from '../lib/ai-deps';
 import { buildAiProviderOptions, resolveAiProvider } from '../lib/ai-provider';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
@@ -24,6 +28,7 @@ interface WritableLike {
 
 interface AskAiDependencies {
   streamText: typeof streamText;
+  stepCountIs?: typeof stepCountIs;
   createBashTool: typeof createBashTool;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createAnthropic?: typeof createAnthropic;
@@ -54,19 +59,24 @@ interface AskAiResult {
   webBrowsingUsed: boolean;
 }
 
-const DEFAULT_DEPS: AskAiDependencies = {
-  streamText,
-  createBashTool,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-  collectAiContext,
-};
+async function defaultDeps(): Promise<AskAiDependencies> {
+  const ai = await loadAiDeps();
+  const { createBashTool } = await import('bash-tool');
+  return {
+    streamText: ai.streamText,
+    stepCountIs: ai.stepCountIs,
+    createBashTool,
+    createGoogleGenerativeAI: ai.createGoogleGenerativeAI,
+    createAnthropic: ai.createAnthropic,
+    createGateway: ai.createGateway,
+    createAmazonBedrock: ai.createAmazonBedrock,
+    createOpenAI: ai.createOpenAI,
+    createOpenAICompatible: ai.createOpenAICompatible,
+    fromIni: ai.fromIni,
+    fromNodeProviderChain: ai.fromNodeProviderChain,
+    collectAiContext,
+  };
+}
 
 export async function askAi(
   prompt: string,
@@ -88,7 +98,8 @@ export async function askAi(
   }
 
   const output = options.output ?? process.stdout;
-  const deps = options.deps ?? DEFAULT_DEPS;
+  const deps = options.deps ?? (await defaultDeps());
+  const stepCountIsFn = deps.stepCountIs ?? (await loadAiDeps()).stepCountIs;
   const resolved = resolveAiProvider({
     deps,
     providerConfig: config.ai.provider,
@@ -109,7 +120,7 @@ export async function askAi(
       model: resolved.model,
       system: buildAiSystemPrompt(),
       prompt: contextPrompt,
-      stopWhen: stepCountIs(6),
+      stopWhen: stepCountIsFn(6),
       tools: {
         bash: bashToolkit.tools.bash,
       },

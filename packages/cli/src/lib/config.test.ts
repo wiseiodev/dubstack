@@ -27,6 +27,7 @@ describe('readConfig', () => {
       reviewers: [],
       storageBackend: 'json',
       submitDefault: 'auto',
+      theme: 'auto',
       ai: {
         defaults: {
           createMetadata: false,
@@ -201,6 +202,23 @@ describe('writeConfig', () => {
     const config = await readConfig(dir);
 
     expect(config.reviewers).toEqual(['alice', '@org/team']);
+  });
+
+  it('persists theme settings', async () => {
+    await writeConfig({ theme: 'dark' }, dir);
+    expect((await readConfig(dir)).theme).toBe('dark');
+    await writeConfig({ theme: 'none' }, dir);
+    expect((await readConfig(dir)).theme).toBe('none');
+  });
+
+  it('normalizes invalid theme values back to auto', async () => {
+    const dubDir = path.join(dir, '.git', 'dubstack');
+    fs.mkdirSync(dubDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dubDir, 'config.json'),
+      JSON.stringify({ theme: 'sepia' }),
+    );
+    expect((await readConfig(dir)).theme).toBe('auto');
   });
 
   it('persists submit lifecycle defaults', async () => {
