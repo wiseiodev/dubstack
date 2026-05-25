@@ -71,6 +71,7 @@ describe('configureAiEnv', () => {
 
     const result = await configureAiEnv({
       geminiModel: 'gemini-2.5-flash',
+      anthropicModel: 'claude-sonnet-4-20250514',
       gatewayModel: 'google/gemini-3-flash',
       openaiModel: 'gpt-5.5',
       profile,
@@ -79,11 +80,15 @@ describe('configureAiEnv', () => {
 
     expect(result.updated).toEqual([
       'DUBSTACK_GEMINI_MODEL',
+      'DUBSTACK_ANTHROPIC_MODEL',
       'DUBSTACK_AI_GATEWAY_MODEL',
       'DUBSTACK_OPENAI_MODEL',
     ]);
     expect(updated).toContain(
       "export DUBSTACK_GEMINI_MODEL='gemini-2.5-flash'",
+    );
+    expect(updated).toContain(
+      "export DUBSTACK_ANTHROPIC_MODEL='claude-sonnet-4-20250514'",
     );
     expect(updated).toContain(
       "export DUBSTACK_AI_GATEWAY_MODEL='google/gemini-3-flash'",
@@ -110,6 +115,31 @@ describe('configureAiEnv', () => {
     expect(updated).toContain("export DUBSTACK_OPENAI_MODEL='gpt-5.5'");
     expect(process.env.DUBSTACK_OPENAI_API_KEY).toBe('openai-secret');
     expect(process.env.DUBSTACK_OPENAI_MODEL).toBe('gpt-5.5');
+  });
+
+  it('writes Anthropic key and model exports', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await fs.promises.writeFile(profile, '# existing\n');
+
+    const result = await configureAiEnv({
+      anthropicKey: 'anthropic-secret',
+      anthropicModel: 'claude-opus-4-20250514',
+      profile,
+    });
+    const updated = await fs.promises.readFile(profile, 'utf8');
+
+    expect(result.updated).toEqual([
+      'DUBSTACK_ANTHROPIC_API_KEY',
+      'DUBSTACK_ANTHROPIC_MODEL',
+    ]);
+    expect(updated).toContain(
+      "export DUBSTACK_ANTHROPIC_API_KEY='anthropic-secret'",
+    );
+    expect(updated).toContain(
+      "export DUBSTACK_ANTHROPIC_MODEL='claude-opus-4-20250514'",
+    );
+    expect(process.env.DUBSTACK_ANTHROPIC_API_KEY).toBe('anthropic-secret');
+    expect(process.env.DUBSTACK_ANTHROPIC_MODEL).toBe('claude-opus-4-20250514');
   });
 
   it('updates key and model exports together', async () => {
@@ -190,6 +220,16 @@ describe('configureAiEnv', () => {
         geminiModel: 'google/gemini-2.5-pro',
       }),
     ).rejects.toThrow("Gemini model should not include '/'");
+  });
+
+  it('rejects gateway-style Anthropic model names', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await expect(
+      configureAiEnv({
+        profile,
+        anthropicModel: 'anthropic/claude-sonnet-4-20250514',
+      }),
+    ).rejects.toThrow("Anthropic model should not include '/'");
   });
 
   it('rejects gateway-style OpenAI model names', async () => {

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
@@ -44,6 +45,7 @@ export interface AbsorbOptions {
 export interface AbsorbDependencies {
   generateText: typeof generateText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   createOpenAI?: typeof createOpenAI;
@@ -55,6 +57,7 @@ export interface AbsorbDependencies {
 const DEFAULT_DEPS: AbsorbDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   createOpenAI,

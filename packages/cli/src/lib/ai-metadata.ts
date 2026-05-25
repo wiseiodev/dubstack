@@ -1,4 +1,5 @@
 import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { createOpenAI } from '@ai-sdk/openai';
 import type {
@@ -18,6 +19,7 @@ import { DubError } from './errors';
 export interface AiMetadataDependencies {
   generateText: typeof generateText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   createOpenAI?: typeof createOpenAI;

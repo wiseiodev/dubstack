@@ -58,6 +58,7 @@ describe('history', () => {
       'env',
       '--gemini-key',
       'abc123',
+      '--anthropic-key=sk-ant-123',
       '--gateway-key=xyz',
     ]);
 
@@ -66,6 +67,7 @@ describe('history', () => {
       'env',
       '--gemini-key',
       '[REDACTED]',
+      '--anthropic-key=[REDACTED]',
       '--gateway-key=[REDACTED]',
     ]);
   });

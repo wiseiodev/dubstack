@@ -24,6 +24,7 @@ const baseConfig: DubConfig = {
       selected: 'gemini',
       models: {
         gemini: 'gemini-test',
+        anthropic: null,
         gateway: null,
         bedrock: null,
         openai: null,

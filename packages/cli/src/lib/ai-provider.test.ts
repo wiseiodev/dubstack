@@ -19,6 +19,7 @@ afterEach(() => {
 function createDeps(): ResolveAiProviderDeps {
   return {
     createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
+    createAnthropic: vi.fn().mockReturnValue(vi.fn()),
     createGateway: vi.fn().mockReturnValue(vi.fn()),
     createAmazonBedrock: vi.fn().mockReturnValue(vi.fn()),
     createOpenAI: vi.fn().mockReturnValue(vi.fn()),
@@ -35,6 +36,7 @@ function createConfig(
 ): DubConfig['ai']['provider'] {
   const models = {
     gemini: null,
+    anthropic: null,
     gateway: null,
     bedrock: null,
     openai: null,
@@ -182,8 +184,54 @@ describe('resolveAiProvider', () => {
     expect(resolved.modelId).toBe('gpt-5.5');
   });
 
-  it('preserves the existing auto fallback order of gemini, gateway, then bedrock', () => {
+  it('uses the explicitly selected Anthropic provider and repo model override', () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.DUBSTACK_ANTHROPIC_MODEL = 'env-anthropic-model';
+
+    const anthropicModel = vi.fn().mockReturnValue('anthropic-model');
+    const deps = createDeps();
+    deps.createAnthropic = vi.fn().mockReturnValue(anthropicModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig({
+        selected: 'anthropic',
+        models: {
+          anthropic: 'repo-anthropic-model',
+        },
+      }),
+    });
+
+    expect(deps.createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(deps.createAnthropic).toHaveBeenCalledWith({
+      apiKey: 'anthropic-key',
+    });
+    expect(anthropicModel).toHaveBeenCalledWith('repo-anthropic-model');
+    expect(resolved.provider).toBe('anthropic');
+    expect(resolved.modelId).toBe('repo-anthropic-model');
+  });
+
+  it('uses Anthropic default model when no model override is configured', () => {
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
+
+    const anthropicModel = vi.fn().mockReturnValue('anthropic-model');
+    const deps = createDeps();
+    deps.createAnthropic = vi.fn().mockReturnValue(anthropicModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig({ selected: 'anthropic' }),
+    });
+
+    expect(anthropicModel).toHaveBeenCalledWith('claude-sonnet-4-20250514');
+    expect(resolved.provider).toBe('anthropic');
+    expect(resolved.modelId).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('preserves the auto fallback order of gemini, anthropic, gateway, then bedrock', () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
     process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
     process.env.DUBSTACK_BEDROCK_AWS_REGION = 'us-east-1';
     process.env.DUBSTACK_BEDROCK_MODEL = 'bedrock-model';
@@ -201,7 +249,28 @@ describe('resolveAiProvider', () => {
     expect(deps.createGoogleGenerativeAI).toHaveBeenCalledWith({
       apiKey: 'gem-key',
     });
+    expect(deps.createAnthropic).not.toHaveBeenCalled();
     expect(resolved.provider).toBe('google');
+  });
+
+  it('auto-selects Anthropic before gateway when Gemini is not configured', () => {
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.DUBSTACK_AI_GATEWAY_API_KEY = 'gateway-key';
+
+    const deps = createDeps();
+    const anthropicModel = vi.fn().mockReturnValue('anthropic-model');
+    deps.createAnthropic = vi.fn().mockReturnValue(anthropicModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig(),
+    });
+
+    expect(deps.createAnthropic).toHaveBeenCalledWith({
+      apiKey: 'anthropic-key',
+    });
+    expect(deps.createGateway).not.toHaveBeenCalled();
+    expect(resolved.provider).toBe('anthropic');
   });
 
   it('throws when Bedrock is selected without a configured region', () => {
@@ -260,12 +329,23 @@ describe('buildAiProviderOptions', () => {
     });
   });
 
-  it('returns no provider options for gateway or non-reasoning Bedrock models', () => {
+  it('returns no provider options for gateway, anthropic, or non-reasoning Bedrock models', () => {
     expect(
       buildAiProviderOptions(
         {
           provider: 'gateway',
           modelId: 'google/gemini-3-flash',
+        },
+        {
+          withWebBrowsing: true,
+        },
+      ),
+    ).toEqual({});
+    expect(
+      buildAiProviderOptions(
+        {
+          provider: 'anthropic',
+          modelId: 'claude-sonnet-4-20250514',
         },
         {
           withWebBrowsing: true,

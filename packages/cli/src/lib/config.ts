@@ -19,9 +19,16 @@ export interface DubConfig {
       autoAccept: 'off' | 'high';
     };
     provider: {
-      selected: 'auto' | 'gemini' | 'gateway' | 'bedrock' | 'openai';
+      selected:
+        | 'auto'
+        | 'gemini'
+        | 'anthropic'
+        | 'gateway'
+        | 'bedrock'
+        | 'openai';
       models: {
         gemini: string | null;
+        anthropic: string | null;
         gateway: string | null;
         bedrock: string | null;
         openai: string | null;
@@ -69,6 +76,7 @@ const DEFAULT_CONFIG: DubConfig = {
       selected: 'auto',
       models: {
         gemini: null,
+        anthropic: null,
         gateway: null,
         bedrock: null,
         openai: null,
@@ -165,6 +173,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         selected: normalizeAiProviderSelection(provider?.selected),
         models: {
           gemini: normalizeAiProviderModel(provider?.models?.gemini),
+          anthropic: normalizeAiProviderModel(provider?.models?.anthropic),
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
           openai: normalizeAiProviderModel(provider?.models?.openai),
@@ -235,6 +244,7 @@ function normalizeAiProviderSelection(
   if (
     value === 'auto' ||
     value === 'gemini' ||
+    value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
     value === 'openai'

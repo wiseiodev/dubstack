@@ -23,6 +23,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
     selected: 'auto',
     models: {
       gemini: null,
+      anthropic: null,
       gateway: null,
       bedrock: null,
       openai: null,
@@ -94,6 +95,54 @@ describe('generateCreateMetadata', () => {
     expect(generateText).toHaveBeenCalledWith(
       expect.objectContaining({
         model: 'gateway-model',
+      }),
+    );
+  });
+
+  it('passes the configured Anthropic model into generateText', async () => {
+    process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';
+
+    const generateText = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/anthropic","message":"feat: anthropic"}',
+    });
+    const createGoogleGenerativeAI = vi.fn();
+    const anthropicModel = vi.fn().mockReturnValue('anthropic-model');
+    const createAnthropic = vi.fn().mockReturnValue(anthropicModel);
+    const createGateway = vi.fn();
+    const providerConfig = createProviderConfig();
+
+    const result = await generateCreateMetadata(
+      'diff --git a/file b/file',
+      {
+        generateText,
+        createGoogleGenerativeAI,
+        createAnthropic,
+        createGateway,
+      },
+      {},
+      {
+        ...providerConfig,
+        selected: 'anthropic',
+        models: {
+          ...providerConfig.models,
+          anthropic: 'claude-opus-4-20250514',
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      branch: 'feat/anthropic',
+      message: 'feat: anthropic',
+    });
+    expect(createGoogleGenerativeAI).not.toHaveBeenCalled();
+    expect(createAnthropic).toHaveBeenCalledWith({
+      apiKey: 'anthropic-key',
+    });
+    expect(anthropicModel).toHaveBeenCalledWith('claude-opus-4-20250514');
+    expect(createGateway).not.toHaveBeenCalled();
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: 'anthropic-model',
       }),
     );
   });

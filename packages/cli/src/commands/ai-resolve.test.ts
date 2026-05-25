@@ -73,6 +73,7 @@ function createMockDeps(overrides?: Partial<AiResolveDeps>): AiResolveDeps {
           selected: 'auto',
           models: {
             gemini: null,
+            anthropic: null,
             gateway: null,
             bedrock: null,
             openai: null,

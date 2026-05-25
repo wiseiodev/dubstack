@@ -1834,7 +1834,7 @@ program
     new Command('ai-provider')
       .argument(
         '[provider]',
-        'Set to auto/gemini/gateway/bedrock/openai (omit to inspect current value)',
+        'Set to auto/gemini/anthropic/gateway/bedrock/openai (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
       .action(async (provider?: string) => {
@@ -1891,7 +1891,7 @@ program
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
         '--provider <provider>',
-        'Provider name: gemini, gateway, bedrock, or openai',
+        'Provider name: gemini, anthropic, gateway, bedrock, or openai',
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
@@ -1998,9 +1998,11 @@ program
         'Write DubStack AI provider settings to your shell profile (macOS/Linux)',
       )
       .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
+      .option('--anthropic-key <key>', 'Set DUBSTACK_ANTHROPIC_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
       .option('--openai-key <key>', 'Set DUBSTACK_OPENAI_API_KEY')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
+      .option('--anthropic-model <model>', 'Set DUBSTACK_ANTHROPIC_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
       .option('--openai-model <model>', 'Set DUBSTACK_OPENAI_MODEL')
       .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
@@ -2017,9 +2019,11 @@ program
       .action(
         async (options: {
           geminiKey?: string;
+          anthropicKey?: string;
           gatewayKey?: string;
           openaiKey?: string;
           geminiModel?: string;
+          anthropicModel?: string;
           gatewayModel?: string;
           openaiModel?: string;
           bedrockProfile?: string;
@@ -2031,9 +2035,11 @@ program
           const { configureAiEnv } = await import('./commands/ai-env');
           const result = await configureAiEnv({
             geminiKey: options.geminiKey,
+            anthropicKey: options.anthropicKey,
             gatewayKey: options.gatewayKey,
             openaiKey: options.openaiKey,
             geminiModel: options.geminiModel,
+            anthropicModel: options.anthropicModel,
             gatewayModel: options.gatewayModel,
             openaiModel: options.openaiModel,
             bedrockProfile: options.bedrockProfile,

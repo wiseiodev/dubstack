@@ -92,6 +92,7 @@ function makeConfig(overrides?: {
         selected: 'auto' as const,
         models: {
           gemini: null,
+          anthropic: null,
           gateway: null,
           bedrock: null,
           openai: null,

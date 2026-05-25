@@ -31,6 +31,7 @@ interface AiSetupDeps {
   inputCustomModel: (provider: AiModelProvider) => Promise<string>;
   selectModelScope: () => Promise<ModelScope>;
   inputGeminiKey: () => Promise<string | undefined>;
+  inputAnthropicKey: () => Promise<string | undefined>;
   inputGatewayKey: () => Promise<string | undefined>;
   inputOpenAiKey: () => Promise<string | undefined>;
   inputBedrockProfile: () => Promise<string | undefined>;
@@ -48,6 +49,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
       message: 'Choose the AI provider for this repository',
       choices: [
         { name: 'Gemini', value: 'gemini' },
+        { name: 'Anthropic Claude', value: 'anthropic' },
         { name: 'AI Gateway', value: 'gateway' },
         { name: 'Amazon Bedrock', value: 'bedrock' },
         { name: 'OpenAI', value: 'openai' },
@@ -82,6 +84,8 @@ const DEFAULT_DEPS: AiSetupDeps = {
       ],
     }),
   inputGeminiKey: async () => optionalSecret('Enter DUBSTACK_GEMINI_API_KEY'),
+  inputAnthropicKey: async () =>
+    optionalSecret('Enter DUBSTACK_ANTHROPIC_API_KEY'),
   inputGatewayKey: async () =>
     optionalSecret('Enter DUBSTACK_AI_GATEWAY_API_KEY'),
   inputOpenAiKey: async () => optionalSecret('Enter DUBSTACK_OPENAI_API_KEY'),
@@ -158,6 +162,14 @@ async function buildEnvOptions(
     };
   }
 
+  if (provider === 'anthropic') {
+    const anthropicKey = await deps.inputAnthropicKey();
+    return {
+      anthropicKey,
+      anthropicModel: modelScope === 'global' ? model : undefined,
+    };
+  }
+
   if (provider === 'gateway') {
     const gatewayKey = await deps.inputGatewayKey();
     return {
@@ -214,6 +226,20 @@ function getModelChoices(provider: AiModelProvider): Array<{
     return [
       { label: 'Google Gemini 3 Flash', value: 'google/gemini-3-flash' },
       { label: 'Google Gemini 2.5 Pro', value: 'google/gemini-2.5-pro' },
+      { label: 'Custom model', value: CUSTOM_MODEL },
+    ];
+  }
+
+  if (provider === 'anthropic') {
+    return [
+      {
+        label: 'Claude Sonnet 4',
+        value: 'claude-sonnet-4-20250514',
+      },
+      {
+        label: 'Claude Opus 4',
+        value: 'claude-opus-4-20250514',
+      },
       { label: 'Custom model', value: CUSTOM_MODEL },
     ];
   }

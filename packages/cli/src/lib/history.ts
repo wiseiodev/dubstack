@@ -19,7 +19,11 @@ export interface DubHistoryEntry {
   };
 }
 
-const REDACTED_ARGS = new Set(['--gemini-key', '--gateway-key']);
+const REDACTED_ARGS = new Set([
+  '--gemini-key',
+  '--anthropic-key',
+  '--gateway-key',
+]);
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 
 export async function getHistoryPath(cwd: string): Promise<string> {
@@ -103,6 +107,12 @@ export function sanitizeCommandArgs(args: string[]): string[] {
 
     if (arg.startsWith('--gemini-key=')) {
       sanitized[sanitized.length - 1] = `--gemini-key=${REDACTED_PLACEHOLDER}`;
+      continue;
+    }
+
+    if (arg.startsWith('--anthropic-key=')) {
+      sanitized[sanitized.length - 1] =
+        `--anthropic-key=${REDACTED_PLACEHOLDER}`;
       continue;
     }
 

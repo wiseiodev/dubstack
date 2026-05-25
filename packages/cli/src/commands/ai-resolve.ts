@@ -1,4 +1,5 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
@@ -24,6 +25,7 @@ import { continueCommand } from './continue';
 export interface AiResolveDeps {
   streamText: typeof streamText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   createOpenAI?: typeof createOpenAI;
@@ -44,6 +46,7 @@ export interface AiResolveDeps {
 const DEFAULT_DEPS: AiResolveDeps = {
   streamText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
   createOpenAI,

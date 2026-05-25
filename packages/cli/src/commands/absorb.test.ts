@@ -428,6 +428,7 @@ function makeFakeAiDeps(input: {
           selected: 'gemini' as const,
           models: {
             gemini: 'gemini-test',
+            anthropic: null,
             gateway: null,
             bedrock: null,
             openai: null,

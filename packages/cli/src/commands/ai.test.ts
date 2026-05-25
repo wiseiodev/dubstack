@@ -257,6 +257,9 @@ describe('askAi', () => {
           provider: {
             selected: 'bedrock',
             models: {
+              gemini: null,
+              anthropic: null,
+              gateway: null,
               bedrock: 'repo-bedrock-model',
               openai: null,
             },

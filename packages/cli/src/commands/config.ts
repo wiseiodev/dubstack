@@ -8,7 +8,7 @@ export interface ConfigBooleanResult {
 }
 
 export interface ConfigProviderResult {
-  provider: 'auto' | 'gemini' | 'gateway' | 'bedrock' | 'openai';
+  provider: AiProvider;
   changed: boolean;
 }
 
@@ -33,7 +33,13 @@ export interface ConfigAiPromptsAutoAcceptResult {
 }
 
 export type AiDefaultTarget = 'create' | 'submit' | 'flow';
-export type AiProvider = 'auto' | 'gemini' | 'gateway' | 'bedrock' | 'openai';
+export type AiProvider =
+  | 'auto'
+  | 'gemini'
+  | 'anthropic'
+  | 'gateway'
+  | 'bedrock'
+  | 'openai';
 export type AiModelProvider = Exclude<AiProvider, 'auto'>;
 
 export async function configAiAssistant(
@@ -342,6 +348,7 @@ function parseAiProvider(value: string): AiProvider {
   if (
     value === 'auto' ||
     value === 'gemini' ||
+    value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
     value === 'openai'
@@ -349,14 +356,17 @@ function parseAiProvider(value: string): AiProvider {
     return value;
   }
   throw new DubError(
-    "AI provider must be one of 'auto', 'gemini', 'gateway', 'bedrock', or 'openai'.",
-    ["Pass one of: 'auto', 'gemini', 'gateway', 'bedrock', or 'openai'."],
+    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    [
+      "Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    ],
   );
 }
 
 function parseAiModelProvider(value: string): AiModelProvider {
   if (
     value === 'gemini' ||
+    value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
     value === 'openai'
@@ -364,8 +374,10 @@ function parseAiModelProvider(value: string): AiModelProvider {
     return value;
   }
   throw new DubError(
-    "AI model provider must be one of 'gemini', 'gateway', 'bedrock', or 'openai'.",
-    ["Pass one of: 'gemini', 'gateway', 'bedrock', or 'openai' as --provider."],
+    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    [
+      "Pass one of: 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai' as --provider.",
+    ],
   );
 }
 
