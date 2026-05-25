@@ -13,6 +13,11 @@ import {
   readState,
   writeState,
 } from './state';
+import {
+  acquireStateLock,
+  getStateLockPath,
+  withStateLock,
+} from './state-lock';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -81,6 +86,19 @@ describe('readState', () => {
     expect(state.stacks[0].branches[0].sync_source).toBeNull();
   });
 });
+
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 describe('writeState and readState roundtrip', () => {
   it('roundtrips correctly', async () => {
@@ -540,6 +558,191 @@ describe('migrateStateRefsIfNeeded', () => {
     expect(
       fs.readFileSync(path.join(dubDir, 'refs-mirror-version'), 'utf-8'),
     ).toBe('1\n');
+  });
+});
+
+describe('state lock', () => {
+  it('creates and clears the lockfile around write boundaries', async () => {
+    const lockPath = await getStateLockPath(dir);
+
+    await withStateLock(dir, () => {
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as {
+        pid: number;
+        startedAt: string;
+        command: string;
+      };
+      expect(lock.pid).toBe(process.pid);
+      expect(lock.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(lock.command).toContain('dub');
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('waits with feedback while another live process owns the lock', async () => {
+    const messages: string[] = [];
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: process.pid,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const second = acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 1_000,
+      onWait: (message) => messages.push(message),
+      allowReentrant: false,
+    });
+
+    await waitUntil(() => messages.length > 0);
+    expect(messages).toContain(
+      'Another dub command (PID ' +
+        `${process.pid} running \`dub sync\` since 2026-05-23T10:15:00.000Z) is currently writing state. Waiting...`,
+    );
+
+    fs.unlinkSync(lockPath);
+    const secondLock = await second;
+    await secondLock.release();
+  });
+
+  it('fails fast when a non-reentrant lock is requested in the same process', async () => {
+    const first = await acquireStateLock(dir, { commandName: 'dub sync' });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow('already held by this process');
+
+    await first.release();
+  });
+
+  it('removes a newly created lockfile when writing lock metadata fails', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const writeError = new Error('metadata write failed');
+    vi.resetModules();
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      const realWriteFileSync = actual.writeFileSync as (
+        file: fs.PathOrFileDescriptor,
+        data: string | NodeJS.ArrayBufferView,
+        options?: fs.WriteFileOptions,
+      ) => void;
+
+      return {
+        ...actual,
+        writeFileSync: (
+          file: fs.PathOrFileDescriptor,
+          data: string | NodeJS.ArrayBufferView,
+          options?: fs.WriteFileOptions,
+        ) => {
+          if (typeof file === 'number') throw writeError;
+          return realWriteFileSync(file, data, options);
+        },
+      };
+    });
+
+    try {
+      const { acquireStateLock: acquireStateLockWithWriteFailure } =
+        await import('./state-lock');
+      await expect(
+        acquireStateLockWithWriteFailure(dir, { commandName: 'dub sync' }),
+      ).rejects.toThrow(writeError);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('reclaims stale locks whose owner process is gone', async () => {
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: 2_147_483_647,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const lock = await acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 100,
+      onWait: () => {
+        throw new Error('stale lock should not wait');
+      },
+    });
+
+    expect(lock.info.command).toBe('dub create feat/a');
+    await lock.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('times out with a clean DubError when a live lock never clears', async () => {
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        retryMs: 5,
+        timeoutMs: 20,
+        onWait: () => {},
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow(DubError);
+
+    await first.release();
+  });
+
+  it('allows nested state locks in one invocation and releases after the outer lock', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const outer = await acquireStateLock(dir, { commandName: 'dub create' });
+    const inner = await acquireStateLock(dir, { commandName: 'dub create' });
+
+    await inner.release();
+    expect(fs.existsSync(lockPath)).toBe(true);
+
+    await outer.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('allows read-only state reads while a write lock is held', async () => {
+    await initState(dir);
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+
+    await first.release();
   });
 });
 
