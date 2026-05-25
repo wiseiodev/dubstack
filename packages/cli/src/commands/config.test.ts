@@ -159,9 +159,17 @@ describe('config ai-provider', () => {
     expect(config.ai.provider.selected).toBe('openai');
   });
 
+  it('writes Ollama as a selected provider', async () => {
+    const result = await configAiProvider(dir, 'ollama');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ provider: 'ollama', changed: true });
+    expect(config.ai.provider.selected).toBe('ollama');
+  });
+
   it('throws for invalid provider names', async () => {
     await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
-      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     );
   });
 });
@@ -199,6 +207,17 @@ describe('config ai-model', () => {
       changed: true,
     });
     expect(config.ai.provider.models.openai).toBe('gpt-5.5');
+  });
+
+  it('writes an Ollama model override', async () => {
+    const result = await configAiModel(dir, 'ollama', 'qwen2.5-coder');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      model: 'qwen2.5-coder',
+      changed: true,
+    });
+    expect(config.ai.provider.models.ollama).toBe('qwen2.5-coder');
   });
 
   it('clears a provider-specific model override', async () => {

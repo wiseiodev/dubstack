@@ -1,5 +1,8 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import { resolveAiProvider } from '../lib/ai-provider';
@@ -42,8 +45,11 @@ export interface SquashResult {
 interface SquashDependencies {
   generateText: typeof generateText;
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
+  createAnthropic?: typeof createAnthropic;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
+  createOpenAI?: typeof createOpenAI;
+  createOpenAICompatible?: typeof createOpenAICompatible;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
@@ -51,8 +57,11 @@ interface SquashDependencies {
 const DEFAULT_DEPS: SquashDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
+  createOpenAICompatible,
   fromIni,
   fromNodeProviderChain,
 };

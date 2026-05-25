@@ -40,6 +40,7 @@ describe('aiReviewBranch', () => {
           gateway: null,
           bedrock: null,
           openai: null,
+          ollama: null,
         },
       },
     );
@@ -83,6 +84,7 @@ describe('aiReviewBranch', () => {
             gateway: null,
             bedrock: null,
             openai: null,
+            ollama: null,
           },
         },
       ),
@@ -114,6 +116,7 @@ describe('aiReviewBranch', () => {
           gateway: null,
           bedrock: null,
           openai: null,
+          ollama: null,
         },
       },
     );

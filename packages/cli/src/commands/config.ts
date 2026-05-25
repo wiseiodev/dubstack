@@ -44,7 +44,8 @@ export type AiProvider =
   | 'anthropic'
   | 'gateway'
   | 'bedrock'
-  | 'openai';
+  | 'openai'
+  | 'ollama';
 export type AiModelProvider = Exclude<AiProvider, 'auto'>;
 
 export async function configAiAssistant(
@@ -400,14 +401,15 @@ function parseAiProvider(value: string): AiProvider {
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }
   throw new DubError(
-    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     [
-      "Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+      "Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     ],
   );
 }
@@ -418,14 +420,15 @@ function parseAiModelProvider(value: string): AiModelProvider {
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }
   throw new DubError(
-    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     [
-      "Pass one of: 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai' as --provider.",
+      "Pass one of: 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama' as --provider.",
     ],
   );
 }

@@ -262,6 +262,7 @@ describe('askAi', () => {
               gateway: null,
               bedrock: 'repo-bedrock-model',
               openai: null,
+              ollama: null,
             },
           },
         },

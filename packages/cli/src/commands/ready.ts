@@ -1,5 +1,8 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import {
@@ -46,8 +49,11 @@ export interface ReadyOptions {
 const DEFAULT_AI_DEPS: AiReadinessDependencies = {
   generateText,
   createGoogleGenerativeAI,
+  createAnthropic,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
+  createOpenAICompatible,
   fromIni,
   fromNodeProviderChain,
 };
