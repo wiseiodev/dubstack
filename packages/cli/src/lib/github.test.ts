@@ -26,6 +26,7 @@ import {
   getPr,
   getPrByNumber,
   getPrMergeStatusByNumber,
+  getPrReviewers,
   getPrStateByNumber,
   getRepositoryWebUrl,
   getStackOverviewPrBatch,
@@ -33,6 +34,7 @@ import {
   markPrReady,
   mergePr,
   openPrInBrowser,
+  rerequestPrReviewers,
   retargetPrBase,
   updatePrBody,
 } from './github';
@@ -126,6 +128,95 @@ describe('getPrByNumber', () => {
       new Error('GraphQL: Could not resolve to a PullRequest with the number'),
     );
     await expect(getPrByNumber(999999, '/repo')).resolves.toBeNull();
+  });
+});
+
+describe('getPrReviewers', () => {
+  it('returns pending reviewer requests and review authors', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        reviewRequests: [
+          { __typename: 'User', login: 'monalisa' },
+          {
+            __typename: 'Team',
+            slug: 'frontend',
+            organization: { login: 'octo-org' },
+          },
+        ],
+        reviews: [
+          { author: { login: 'hubot' } },
+          { author: { login: 'hubot' } },
+        ],
+      }),
+    });
+
+    await expect(getPrReviewers(42, '/repo')).resolves.toEqual({
+      requested: [{ login: 'monalisa' }, { login: 'octo-org/frontend' }],
+      reviewed: [{ login: 'hubot' }],
+    });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', '42', '--json', 'reviewRequests,reviews', '--jq', '.'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('throws a permission-focused error when reviewer lookup is forbidden', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('403 Forbidden'));
+
+    await expect(getPrReviewers(42, '/repo')).rejects.toThrow(
+      'GitHub token lacks required permissions',
+    );
+  });
+});
+
+describe('rerequestPrReviewers', () => {
+  it('removes and re-adds pending reviewers and adds prior reviewers', async () => {
+    mockExeca
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: '' })
+      .mockResolvedValueOnce({ stdout: '' });
+
+    const result = await rerequestPrReviewers(
+      42,
+      {
+        requested: [{ login: 'monalisa' }],
+        reviewed: [{ login: 'hubot' }, { login: 'monalisa' }],
+      },
+      '/repo',
+    );
+
+    expect(result).toEqual(['monalisa', 'hubot']);
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['pr', 'edit', '42', '--remove-reviewer', 'monalisa'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'monalisa'],
+      { cwd: '/repo' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      3,
+      'gh',
+      ['pr', 'edit', '42', '--add-reviewer', 'hubot'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('throws a permissions error when GitHub rejects reviewer edits', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('403 insufficient scope'));
+
+    await expect(
+      rerequestPrReviewers(
+        42,
+        { requested: [{ login: 'monalisa' }], reviewed: [] },
+        '/repo',
+      ),
+    ).rejects.toThrow('GitHub token lacks required permissions');
   });
 });
 
