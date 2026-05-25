@@ -614,4 +614,53 @@ describe('aiResolve', () => {
 
     logSpy.mockRestore();
   });
+
+  it('stops before continuing when retry tests still fail', async () => {
+    const deps = createMockDeps({
+      streamText: vi
+        .fn()
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'first try',
+              confidence: 'medium',
+              explanation: 'initial',
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          aiResponse([
+            {
+              path: 'src/file.ts',
+              resolvedContent: 'second try',
+              confidence: 'medium',
+              explanation: 'with test feedback',
+            },
+          ]),
+        ),
+      runNearbyTestsForFile: vi
+        .fn()
+        .mockResolvedValueOnce({
+          status: 'failed',
+          files: ['src/file.test.ts'],
+          output: 'first failure',
+        })
+        .mockResolvedValueOnce({
+          status: 'failed',
+          files: ['src/file.test.ts'],
+          output: 'second failure',
+        }),
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    await expect(aiResolve('/tmp/test', {}, deps)).rejects.toThrow(
+      'Nearby tests still fail for src/file.ts',
+    );
+
+    expect(deps.applyResolution).toHaveBeenCalledTimes(2);
+    expect(deps.continueCommand).not.toHaveBeenCalled();
+
+    logSpy.mockRestore();
+  });
 });

@@ -587,6 +587,16 @@ async function applyResolutionWithTestRetry(
         `✔ Nearby tests passed for ${retry.path}: ${retryTestResult.files.join(', ')}`,
       ),
     );
+    return;
+  }
+
+  if (retryTestResult.status === 'failed') {
+    throw new DubError(`Nearby tests still fail for ${retry.path}.`, [
+      `Command: pnpm vitest run ${retryTestResult.files.join(' ')}`,
+      retryTestResult.output
+        ? `Output:\n${retryTestResult.output}`
+        : 'Inspect the failing test output, adjust the resolution, then run `dub continue`.',
+    ]);
   }
 }
 
