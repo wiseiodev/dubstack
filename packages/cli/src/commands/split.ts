@@ -88,7 +88,7 @@ export interface SplitOptions {
   closeOldPr?: boolean;
   /** Skip the auto-restack after the split completes. */
   noRestack?: boolean;
-  /** AI mode only: print the proposal and exit without applying. */
+  /** Preview the planned split without mutating refs, state, or PRs. */
   dryRun?: boolean;
   /** AI mode only: skip the interactive approval prompt. */
   yes?: boolean;
@@ -120,6 +120,10 @@ export interface SplitResult {
   restacked: boolean;
   /** AI mode only: the proposal returned by the model (filled even on --dry-run). */
   aiProposal?: AiSplitProposal[];
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
+  /** Planned new-branch names for non-AI dry-run modes. */
+  plannedBranches?: string[];
 }
 
 type SplitDependencies = AiMetadataDependencies;
@@ -193,7 +197,14 @@ export async function split(
     ]);
   }
   const parentBranch = sourceMeta.parent;
-  await assertBranchesNotCheckedOutElsewhere(cwd, [sourceBranch], 'dub split');
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(
+      cwd,
+      [sourceBranch],
+      'dub split',
+    );
+  }
   const parentTip = await getBranchTip(parentBranch, cwd);
   const sourceTipBefore = await getBranchTip(sourceBranch, cwd);
   const existingPrNumber = sourceMeta.pr_number ?? null;
@@ -211,18 +222,45 @@ export async function split(
       }
     }
   }
-  await saveUndoEntry(
-    {
-      operation: 'split',
-      timestamp: new Date().toISOString(),
-      previousBranch: sourceBranch,
-      previousState: structuredClone(state),
-      branchTips: splitBranchTipsBefore,
-      createdBranches: [],
-      summary: `split ${sourceBranch}`,
-    },
-    cwd,
-  );
+  if (!dryRun) {
+    await saveUndoEntry(
+      {
+        operation: 'split',
+        timestamp: new Date().toISOString(),
+        previousBranch: sourceBranch,
+        previousState: structuredClone(state),
+        branchTips: splitBranchTipsBefore,
+        createdBranches: [],
+        summary: `split ${sourceBranch}`,
+      },
+      cwd,
+    );
+  }
+
+  // Non-AI dry-run: validate scope, emit a plan, and bail before any mutation.
+  // AI dry-run still falls through so the model proposal is included below.
+  if (dryRun && options.mode !== 'ai') {
+    let plannedBranches: string[] = [];
+    if (options.mode === 'by-file') {
+      plannedBranches = options.name ? [options.name] : [];
+    } else if (options.mode === 'by-commit') {
+      const commits = await listCommitsBetween(parentBranch, sourceBranch, cwd);
+      plannedBranches = commits.map((_, i) => `<split-${i + 1}>`);
+    } else if (options.mode === 'by-hunk') {
+      plannedBranches = ['<hunk-picker-output>'];
+    }
+    return {
+      sourceBranch,
+      parentBranch,
+      created: [],
+      sourceEmpty: false,
+      existingPrNumber,
+      prClosed: false,
+      restacked: false,
+      dryRun: true,
+      plannedBranches,
+    };
+  }
 
   const created: SplitNewBranchResult[] = [];
   let aiProposal: AiSplitProposal[] | undefined;
@@ -262,6 +300,7 @@ export async function split(
         prClosed: false,
         restacked: false,
         aiProposal,
+        dryRun: true,
       };
     }
     if (!options.yes && options.interactive !== false) {
@@ -482,6 +521,7 @@ export async function split(
     prClosed,
     restacked,
     aiProposal,
+    dryRun: false,
   };
 }
 

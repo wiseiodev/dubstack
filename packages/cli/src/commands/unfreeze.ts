@@ -3,6 +3,7 @@ import { applyFreezeFlag, type FreezeResult } from '../lib/freeze';
 export interface UnfreezeCommandOptions {
   upstack?: boolean;
   downstack?: boolean;
+  dryRun?: boolean;
 }
 
 /**
@@ -20,7 +21,12 @@ export async function unfreeze(
 ): Promise<FreezeResult> {
   return applyFreezeFlag({
     cwd,
-    options: { branch, upstack: options.upstack, downstack: options.downstack },
+    options: {
+      branch,
+      upstack: options.upstack,
+      downstack: options.downstack,
+      dryRun: options.dryRun,
+    },
     frozen: false,
     commandLabel: 'dub unfreeze',
     undoOperation: 'unfreeze',

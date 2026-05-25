@@ -182,6 +182,21 @@ describe('freeze', () => {
     }
   });
 
+  it('--dry-run reports a non-empty plan but does not mutate state or save undo', async () => {
+    await create('feat/a', dir);
+    await create('feat/b', dir);
+    const undoBefore = await readUndoEntry(dir);
+
+    const result = await freeze(dir, 'feat/a', { upstack: true, dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.changed.sort()).toEqual(['feat/a', 'feat/b']);
+    expect(await frozenSet()).toEqual(new Set());
+    const undoAfter = await readUndoEntry(dir);
+    expect(undoAfter.operation).toBe(undoBefore.operation);
+    expect(undoAfter.timestamp).toBe(undoBefore.timestamp);
+  });
+
   it('cascade with --downstack freezes safe branches while skipping a worktree-checked-out ancestor', async () => {
     await create('feat/a', dir);
     await create('feat/b', dir);

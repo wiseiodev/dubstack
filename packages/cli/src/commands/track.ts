@@ -9,6 +9,7 @@ import { saveUndoEntry } from '../lib/undo-log';
 interface TrackOptions {
   parent?: string;
   interactive?: boolean;
+  dryRun?: boolean;
 }
 
 function isInteractiveShell(): boolean {
@@ -82,9 +83,10 @@ export async function track(
     ]);
   }
 
+  const dryRun = options.dryRun ?? false;
   const previousState = await readState(cwd).catch(() => null);
-  const result = await trackBranch(cwd, { branch, parent });
-  if (previousState && result.status !== 'unchanged') {
+  const result = await trackBranch(cwd, { branch, parent, dryRun });
+  if (!dryRun && previousState && result.status !== 'unchanged') {
     await saveUndoEntry(
       {
         operation: 'track',

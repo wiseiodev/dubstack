@@ -6,11 +6,13 @@ import { findStackForBranch, readState, type Stack, writeState } from './state';
 export interface UntrackOptions {
   branch: string;
   downstack?: boolean;
+  dryRun?: boolean;
 }
 
 export interface UntrackResult {
   removed: string[];
   reparented: Array<{ branch: string; parent: string | null }>;
+  dryRun: boolean;
 }
 
 export interface UntrackContext {
@@ -97,10 +99,12 @@ export async function untrackBranch(
   );
 
   assertStateInvariants(state.stacks);
-  await writeState(state, cwd);
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) await writeState(state, cwd);
 
   return {
     removed: [options.branch, ...(options.downstack ? descendants : [])],
     reparented,
+    dryRun,
   };
 }

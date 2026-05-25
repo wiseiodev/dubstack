@@ -32,6 +32,7 @@ export interface UnlinkOptions {
    * original stack) instead of moving them with `<branch>` into the new stack.
    */
   orphanChildren?: boolean;
+  dryRun?: boolean;
 }
 
 export interface UnlinkResult {
@@ -53,6 +54,8 @@ export interface UnlinkResult {
   prNumber?: number;
   /** True when `--no-retarget` short-circuited a PR retarget; surface a warning. */
   retargetSkipped: boolean;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 /**
@@ -112,7 +115,10 @@ export async function unlink(
       `Run 'dub untrack ${branch}' to drop the root from tracking entirely.`,
     ]);
   }
-  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub unlink');
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub unlink');
+  }
 
   const previousParent = entry.parent;
   if (!previousParent) {
@@ -146,7 +152,7 @@ export async function unlink(
     newBase: string;
     prNumber: number;
   } | null = null;
-  if (!options.noRetarget && entry.pr_number != null) {
+  if (!dryRun && !options.noRetarget && entry.pr_number != null) {
     await ensureGhInstalled();
     await checkGhAuth();
     const info = await getBranchPrSyncInfo(branch, cwd);
@@ -157,6 +163,22 @@ export async function unlink(
         prNumber: entry.pr_number,
       };
     }
+  }
+
+  if (dryRun) {
+    const projectedNewStackId = crypto.randomUUID();
+    return {
+      branch,
+      previousParent,
+      newStackId: projectedNewStackId,
+      trunk: trunkName,
+      movedDescendants: options.orphanChildren ? [] : descendants,
+      orphanedChildren: options.orphanChildren ? directChildren : [],
+      retargeted: false,
+      ...(entry.pr_number != null ? { prNumber: entry.pr_number } : {}),
+      retargetSkipped: options.noRetarget === true && entry.pr_number != null,
+      dryRun: true,
+    };
   }
 
   const originalBranch = await getCurrentBranch(cwd);
@@ -271,5 +293,6 @@ export async function unlink(
     retargeted,
     ...(prNumber != null ? { prNumber } : {}),
     retargetSkipped,
+    dryRun: false,
   };
 }

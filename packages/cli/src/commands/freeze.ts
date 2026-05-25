@@ -3,6 +3,7 @@ import { applyFreezeFlag, type FreezeResult } from '../lib/freeze';
 export interface FreezeCommandOptions {
   upstack?: boolean;
   downstack?: boolean;
+  dryRun?: boolean;
 }
 
 /**
@@ -24,7 +25,12 @@ export async function freeze(
 ): Promise<FreezeResult> {
   return applyFreezeFlag({
     cwd,
-    options: { branch, upstack: options.upstack, downstack: options.downstack },
+    options: {
+      branch,
+      upstack: options.upstack,
+      downstack: options.downstack,
+      dryRun: options.dryRun,
+    },
     frozen: true,
     commandLabel: 'dub freeze',
     undoOperation: 'freeze',

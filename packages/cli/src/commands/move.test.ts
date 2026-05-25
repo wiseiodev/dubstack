@@ -102,7 +102,11 @@ beforeEach(() => {
   });
   vi.mocked(appendCleanupOperation).mockResolvedValue(undefined);
   vi.mocked(clearCleanupJournal).mockResolvedValue(undefined);
-  vi.mocked(restack).mockResolvedValue({ status: 'success', rebased: [] });
+  vi.mocked(restack).mockResolvedValue({
+    status: 'success',
+    rebased: [],
+    dryRun: false,
+  });
   vi.mocked(saveUndoEntry).mockResolvedValue(undefined);
 });
 
@@ -237,6 +241,7 @@ describe('move command (unit)', () => {
       status: 'conflict',
       rebased: [],
       conflictBranch: 'feat/auth-login',
+      dryRun: false,
     });
 
     const result = await move(cwd, 'feat/inserted', {

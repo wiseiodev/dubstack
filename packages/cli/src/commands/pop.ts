@@ -3,6 +3,7 @@ import {
   countCommitsAhead,
   getBranchTip,
   getCurrentBranch,
+  getRefSha,
   isWorkingTreeClean,
   softResetHead,
 } from '../lib/git';
@@ -13,6 +14,7 @@ import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 interface PopOptions {
   /** Number of commits to pop. Defaults to 1. */
   steps?: number;
+  dryRun?: boolean;
 }
 
 interface PopResult {
@@ -20,6 +22,7 @@ interface PopResult {
   steps: number;
   previousTip: string;
   newTip: string;
+  dryRun: boolean;
 }
 
 /**
@@ -64,7 +67,10 @@ export async function pop(
       "Run 'dub log' to inspect the stack and confirm tracking state.",
     ]);
   }
-  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub pop');
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub pop');
+  }
 
   const branchCommitCount = await countCommitsAhead(branch, parent, cwd);
   if (branchCommitCount === 0) {
@@ -88,6 +94,11 @@ export async function pop(
 
   const previousTip = await getBranchTip(branch, cwd);
 
+  if (dryRun) {
+    const projectedTip = await getRefSha(`HEAD~${steps}`, cwd);
+    return { branch, steps, previousTip, newTip: projectedTip, dryRun };
+  }
+
   await saveUndoEntry(
     {
       operation: 'pop',
@@ -104,5 +115,5 @@ export async function pop(
 
   const newTip = await getBranchTip(branch, cwd);
 
-  return { branch, steps, previousTip, newTip };
+  return { branch, steps, previousTip, newTip, dryRun };
 }

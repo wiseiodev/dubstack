@@ -33,10 +33,12 @@ import {
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import {
   addBranchToStack,
+  type DubState,
   ensureState,
   findStackForBranch,
   getDefaultTrunk,
   getStackTrunk,
+  readState,
   writeState,
 } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
@@ -49,12 +51,14 @@ interface CreateOptions {
   all?: boolean;
   update?: boolean;
   patch?: boolean;
+  dryRun?: boolean;
 }
 
 interface CreateResult {
   branch: string;
   parent: string;
   committed?: string;
+  dryRun: boolean;
 }
 
 type CreateDependencies = AiMetadataDependencies;
@@ -144,7 +148,15 @@ export async function create(
     ]);
   }
 
-  const state = await ensureState(cwd);
+  const dryRun = normalizedOptions.dryRun ?? false;
+  let state: DubState;
+  if (dryRun) {
+    state = await readState(cwd).catch(
+      (): DubState => ({ trunks: [], stacks: [] }),
+    );
+  } else {
+    state = await ensureState(cwd);
+  }
   const currentBranch = await getCurrentBranch(cwd);
   const currentStack = findStackForBranch(state, currentBranch);
   const stackTrunk = currentStack
@@ -155,15 +167,17 @@ export async function create(
   let commitMessage = normalizedOptions.message?.trim();
 
   if (commitMessage || useAi) {
-    if (normalizedOptions.patch) {
-      await interactiveStage(cwd);
-    } else if (normalizedOptions.all) {
-      await stageAll(cwd);
-    } else if (normalizedOptions.update) {
-      await stageUpdate(cwd);
+    if (!dryRun) {
+      if (normalizedOptions.patch) {
+        await interactiveStage(cwd);
+      } else if (normalizedOptions.all) {
+        await stageAll(cwd);
+      } else if (normalizedOptions.update) {
+        await stageUpdate(cwd);
+      }
     }
 
-    if (!(await hasStagedChanges(cwd))) {
+    if (!dryRun && !(await hasStagedChanges(cwd))) {
       const isAggregateFlag =
         normalizedOptions.all ||
         normalizedOptions.update ||
@@ -189,7 +203,7 @@ export async function create(
     }
   }
 
-  if (useAi) {
+  if (useAi && !dryRun) {
     if (!config.aiAssistantEnabled) {
       throw new DubError('AI assistant is disabled for this repo.', [
         "Run 'dub config ai-assistant on' to enable AI for this repo.",
@@ -220,6 +234,14 @@ export async function create(
   }
 
   if (!branchName) {
+    if (dryRun && useAi) {
+      return {
+        branch: '<ai-generated>',
+        parent,
+        ...(commitMessage ? { committed: commitMessage } : {}),
+        dryRun: true,
+      };
+    }
     throw new DubError('Branch name is required.', [
       "Pass '<branch-name>' as the first argument to 'dub create'.",
       "Pass '--ai' to AI-generate the branch name from staged changes.",
@@ -239,6 +261,15 @@ export async function create(
       "Rerun 'dub create <branch>' with a different name.",
       `Run 'dub delete ${branchName}' to remove the existing branch first.`,
     ]);
+  }
+
+  if (dryRun) {
+    return {
+      branch: branchName,
+      parent,
+      ...(commitMessage ? { committed: commitMessage } : {}),
+      dryRun: true,
+    };
   }
 
   await saveUndoEntry(
@@ -286,8 +317,13 @@ export async function create(
         ],
       );
     }
-    return { branch: branchName, parent, committed: commitMessage };
+    return {
+      branch: branchName,
+      parent,
+      committed: commitMessage,
+      dryRun: false,
+    };
   }
 
-  return { branch: branchName, parent };
+  return { branch: branchName, parent, dryRun: false };
 }

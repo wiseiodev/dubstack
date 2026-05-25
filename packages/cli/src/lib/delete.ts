@@ -9,11 +9,13 @@ export interface DeleteTrackedOptions {
   upstack?: boolean;
   downstack?: boolean;
   force?: boolean;
+  dryRun?: boolean;
 }
 
 export interface DeleteTrackedResult {
   deleted: string[];
   reparented: Array<{ branch: string; parent: string | null }>;
+  dryRun: boolean;
 }
 
 export interface DeletePreview {
@@ -58,15 +60,18 @@ export async function deleteTrackedBranch(
 
   const targets = collectTargets(stack, options);
   const deleteSet = new Set(targets);
+  const dryRun = options.dryRun ?? false;
 
   const currentBranch = await getCurrentBranch(cwd);
   if (deleteSet.has(currentBranch)) {
     const fallback = resolveFallbackBranch(stack, options.branch, deleteSet);
-    await checkoutBranch(fallback, cwd);
+    if (!dryRun) await checkoutBranch(fallback, cwd);
   }
 
-  for (const branch of targets) {
-    await deleteLocalBranch(branch, cwd, options.force ?? false);
+  if (!dryRun) {
+    for (const branch of targets) {
+      await deleteLocalBranch(branch, cwd, options.force ?? false);
+    }
   }
 
   const deletedParent = new Map<string, string | null>();
@@ -96,11 +101,12 @@ export async function deleteTrackedBranch(
     (candidate) => candidate.branches.length > 0,
   );
   assertStateInvariants(state.stacks);
-  await writeState(state, cwd);
+  if (!dryRun) await writeState(state, cwd);
 
   return {
     deleted: targets,
     reparented,
+    dryRun,
   };
 }
 

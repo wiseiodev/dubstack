@@ -41,6 +41,23 @@ interface ModifyOptions {
   update?: boolean;
   /** Show unified diff. */
   verbose?: number;
+  /** Preview the planned mutation without amending, committing, or restacking. */
+  dryRun?: boolean;
+}
+
+/**
+ * Structured plan returned by `dub modify --dry-run`. Describes the staging,
+ * commit, and restack actions that would otherwise mutate the repo.
+ */
+export interface ModifyPlan {
+  branch: string;
+  action: 'amend' | 'commit' | 'interactive-rebase';
+  stage: 'all' | 'update' | 'patch' | 'none';
+  hasStagedChanges: boolean;
+  message: string | undefined;
+  rebaseOnto?: string;
+  descendantsToRestack: string[];
+  dryRun: true;
 }
 
 /**
@@ -54,9 +71,24 @@ interface ModifyOptions {
 export async function modify(
   cwd: string,
   options: ModifyOptions,
-): Promise<void> {
+): Promise<ModifyPlan | undefined> {
   const currentBranch = await getCurrentBranch(cwd);
   const state = await readState(cwd);
+  const dryRun = options.dryRun ?? false;
+
+  const stage: ModifyPlan['stage'] = options.patch
+    ? 'patch'
+    : options.all
+      ? 'all'
+      : options.update
+        ? 'update'
+        : 'none';
+
+  const stack = findStackForBranch(state, currentBranch);
+  const descendantsToRestack = stack
+    ? getDescendants(stack, currentBranch)
+    : [];
+  const message = normalizeMessage(options.message);
 
   if (options.interactiveRebase) {
     const parent = getParent(state, currentBranch);
@@ -70,6 +102,19 @@ export async function modify(
       );
     }
 
+    if (dryRun) {
+      return {
+        branch: currentBranch,
+        action: 'interactive-rebase',
+        stage,
+        hasStagedChanges: await hasStagedChanges(cwd),
+        message,
+        rebaseOnto: parent,
+        descendantsToRestack,
+        dryRun: true,
+      };
+    }
+
     const parentTip = await getBranchTip(parent, cwd);
 
     console.log(`Starting interactive rebase on top of '${parent}'...`);
@@ -78,6 +123,18 @@ export async function modify(
 
     await restackChildren(cwd);
     return;
+  }
+
+  if (dryRun) {
+    return {
+      branch: currentBranch,
+      action: options.commit ? 'commit' : 'amend',
+      stage,
+      hasStagedChanges: await hasStagedChanges(cwd),
+      message,
+      descendantsToRestack,
+      dryRun: true,
+    };
   }
 
   if (options.patch) {
@@ -92,7 +149,6 @@ export async function modify(
 
   const hasStaged = await hasStagedChanges(cwd);
   const shouldCreateNew = options.commit;
-  const message = normalizeMessage(options.message);
   const noEdit = !options.edit && !!message;
 
   if (shouldCreateNew) {

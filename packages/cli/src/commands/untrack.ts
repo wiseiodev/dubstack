@@ -13,6 +13,7 @@ import {
 interface UntrackCommandOptions {
   downstack?: boolean;
   interactive?: boolean;
+  dryRun?: boolean;
 }
 
 function isInteractiveShell(): boolean {
@@ -55,10 +56,11 @@ export async function untrack(
     downstack = await confirmDownstack(branch, context.descendants);
   }
 
+  const dryRun = options.dryRun ?? false;
   const previousState = await readState(cwd).catch(() => null);
   const currentBranch = await getCurrentBranch(cwd).catch(() => branch);
-  const result = await untrackBranch(cwd, { branch, downstack });
-  if (previousState && result.removed.length > 0) {
+  const result = await untrackBranch(cwd, { branch, downstack, dryRun });
+  if (!dryRun && previousState && result.removed.length > 0) {
     await saveUndoEntry(
       {
         operation: 'untrack',

@@ -12,12 +12,14 @@ interface DeleteCommandOptions {
   force?: boolean;
   quiet?: boolean;
   interactive?: boolean;
+  dryRun?: boolean;
 }
 
 interface DeleteCommandResult {
   deleted: string[];
   reparented: Array<{ branch: string; parent: string | null }>;
   cancelled?: boolean;
+  dryRun: boolean;
 }
 
 function isInteractiveShell(): boolean {
@@ -44,13 +46,14 @@ export async function deleteCommand(
 ): Promise<DeleteCommandResult> {
   const branch = branchArg ?? (await getCurrentBranch(cwd));
   const interactive = options.interactive ?? isInteractiveShell();
+  const dryRun = options.dryRun ?? false;
   const preview = await getDeletePreview(cwd, {
     branch,
     upstack: options.upstack,
     downstack: options.downstack,
   });
 
-  if (!options.force && !options.quiet) {
+  if (!dryRun && !options.force && !options.quiet) {
     if (!interactive) {
       throw new DubError('Delete requires confirmation.', [
         "Rerun 'dub delete <branch> --force' to skip the confirmation prompt.",
@@ -60,7 +63,7 @@ export async function deleteCommand(
     }
     const confirmed = await confirmDelete(preview.targets);
     if (!confirmed) {
-      return { deleted: [], reparented: [], cancelled: true };
+      return { deleted: [], reparented: [], cancelled: true, dryRun };
     }
   }
 
@@ -81,8 +84,9 @@ export async function deleteCommand(
     upstack: options.upstack ?? false,
     downstack: options.downstack ?? false,
     force: options.force ?? false,
+    dryRun,
   });
-  if (previousState && result.deleted.length > 0) {
+  if (!dryRun && previousState && result.deleted.length > 0) {
     await saveUndoEntry(
       {
         operation: 'delete',
