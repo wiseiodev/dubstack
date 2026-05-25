@@ -64,10 +64,11 @@ export function scoreBranchNaming(
   expected: BranchNamingExpected,
 ): EvalScore {
   const branch = output.branch.trim();
+  const branchLower = branch.toLowerCase();
   const matchesPrefix = branch.startsWith(expected.prefix);
   const validShape = /^[a-z0-9]+(?:[/-][a-z0-9]+)*$/.test(branch);
   const matchedScopeTerms = expected.requiredScopeTerms.filter((term) =>
-    branch.includes(term.toLowerCase()),
+    branchLower.includes(term.toLowerCase()),
   );
   const scopeScore =
     expected.requiredScopeTerms.length === 0
@@ -214,21 +215,34 @@ export function scoreAbsorbTargets(
       assignment.targetSha,
     ]),
   );
-  const matched = output.assignments.filter(
-    (assignment) =>
-      expectedTargets.get(assignment.wipSha) === assignment.targetSha,
-  );
+  const seenWipShas = new Set<string>();
+  const duplicates: string[] = [];
+  const matched: Array<{ wipSha: string; targetSha: string | null }> = [];
   const unexpected = output.assignments.filter(
     (assignment) => !expectedTargets.has(assignment.wipSha),
   );
-  const score =
+
+  for (const assignment of output.assignments) {
+    if (seenWipShas.has(assignment.wipSha)) {
+      duplicates.push(assignment.wipSha);
+      continue;
+    }
+    seenWipShas.add(assignment.wipSha);
+    if (expectedTargets.get(assignment.wipSha) === assignment.targetSha) {
+      matched.push(assignment);
+    }
+  }
+
+  const rawScore =
     expectedTargets.size === 0 ? 1 : matched.length / expectedTargets.size;
+  const score = Math.max(0, Math.min(1, rawScore));
 
   return {
-    score: unexpected.length === 0 ? score : 0,
+    score: unexpected.length === 0 && duplicates.length === 0 ? score : 0,
     metadata: {
       matched: matched.map((assignment) => assignment.wipSha),
       unexpected: unexpected.map((assignment) => assignment.wipSha),
+      duplicates,
     },
   };
 }
@@ -237,8 +251,8 @@ export function parseEvalJudgeResponse(text: string): {
   score: number;
   rationale: string;
 } {
-  const match = text.trim().match(/\{[\s\S]*\}/);
-  if (!match) {
+  const candidate = extractFirstJsonObject(text);
+  if (!candidate) {
     return {
       score: 0,
       rationale: `Judge returned non-JSON output: ${text.slice(0, 200)}`,
@@ -246,7 +260,7 @@ export function parseEvalJudgeResponse(text: string): {
   }
 
   try {
-    const parsed = JSON.parse(match[0]) as {
+    const parsed = JSON.parse(candidate) as {
       score?: unknown;
       rationale?: unknown;
     };
@@ -274,4 +288,45 @@ export function scoreEvalJudgeResponse(text: string): EvalScore {
     score: parsed.score / 100,
     metadata: { rationale: parsed.rationale },
   };
+}
+
+function extractFirstJsonObject(text: string): string | null {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escaped = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) continue;
+
+    if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
 }

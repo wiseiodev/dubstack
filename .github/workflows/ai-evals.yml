@@ -7,19 +7,22 @@ on:
       - '**/ai-*.ts'
       - '**/*.eval.ts'
       - '**/prompts/**'
+      - 'packages/cli/evals/fixtures/**'
+      - 'packages/cli/evals/eval-support.ts'
   schedule:
     - cron: '17 8 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
   cheap-model:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -43,12 +46,15 @@ jobs:
         run: |
           mkdir -p .evalite-results
           if [ -z "$DUBSTACK_GEMINI_API_KEY" ]; then
+            echo "status=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped AI evals because DUBSTACK_GEMINI_API_KEY is not configured."
             echo "Skipped AI evals: DUBSTACK_GEMINI_API_KEY is not configured." | tee .evalite-results/ai-evals.log
             exit 0
           fi
           set -o pipefail
           pnpm evals 2>&1 | tee .evalite-results/ai-evals.log
           pnpm evals:export
+          echo "status=passed" >> "$GITHUB_OUTPUT"
 
       - name: Upload AI eval report
         if: always()
@@ -68,12 +74,17 @@ jobs:
           script: |
             const marker = '<!-- dubstack-ai-evals -->';
             const outcome = '${{ steps.run-evals.outcome }}';
+            const status = '${{ steps.run-evals.outputs.status }}' || outcome;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const label =
+              status === 'skipped'
+                ? 'skipped: `DUBSTACK_GEMINI_API_KEY` is not configured'
+                : status;
             const body = [
               marker,
               '### DubStack AI evals',
               '',
-              `Cheap-model eval outcome: **${outcome}**`,
+              `Cheap-model eval status: **${label}**`,
               '',
               `Report artifact: [workflow run](${runUrl})`,
             ].join('\n');
@@ -107,6 +118,8 @@ jobs:
   nightly-quality:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
