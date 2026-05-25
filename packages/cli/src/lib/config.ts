@@ -14,6 +14,10 @@ export interface DubConfig {
       submitDescription: boolean;
       flow: boolean;
     };
+    prompts: {
+      mode: 'auto' | 'on' | 'off';
+      autoAccept: 'off' | 'high';
+    };
     provider: {
       selected: 'auto' | 'gemini' | 'gateway' | 'bedrock';
       models: {
@@ -55,6 +59,10 @@ const DEFAULT_CONFIG: DubConfig = {
       createMetadata: false,
       submitDescription: false,
       flow: false,
+    },
+    prompts: {
+      mode: 'auto',
+      autoAccept: 'off',
     },
     provider: {
       selected: 'auto',
@@ -120,6 +128,7 @@ export async function writeConfig(
 
 function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
   const defaults = config.ai?.defaults;
+  const prompts = config.ai?.prompts;
   const provider = config.ai?.provider;
   const fallback = config.ai?.shortcutFallback;
   const shellHistory = config.ai?.context?.shellHistory;
@@ -145,6 +154,10 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           typeof defaults?.flow === 'boolean'
             ? defaults.flow
             : DEFAULT_CONFIG.ai.defaults.flow,
+      },
+      prompts: {
+        mode: normalizeAiPromptMode(prompts?.mode),
+        autoAccept: normalizeAiPromptAutoAccept(prompts?.autoAccept),
       },
       provider: {
         selected: normalizeAiProviderSelection(provider?.selected),
@@ -193,6 +206,24 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
       },
     },
   };
+}
+
+function normalizeAiPromptMode(
+  value: unknown,
+): DubConfig['ai']['prompts']['mode'] {
+  if (value === 'auto' || value === 'on' || value === 'off') {
+    return value;
+  }
+  return DEFAULT_CONFIG.ai.prompts.mode;
+}
+
+function normalizeAiPromptAutoAccept(
+  value: unknown,
+): DubConfig['ai']['prompts']['autoAccept'] {
+  if (value === 'off' || value === 'high') {
+    return value;
+  }
+  return DEFAULT_CONFIG.ai.prompts.autoAccept;
 }
 
 function normalizeAiProviderSelection(

@@ -1,6 +1,11 @@
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import chalk from 'chalk';
+import {
+  type AiPromptChoice,
+  isAiPromptOptionEnabled,
+  resolveAiPromptDecision,
+} from '../lib/ai-prompt-decision';
 import { appendCheckoutHistory } from '../lib/checkout-history';
 import {
   appendCleanupOperation,
@@ -9,6 +14,7 @@ import {
   startCleanupJournal,
 } from '../lib/cleanup-journal';
 import { DubError } from '../lib/errors';
+import { execa } from '../lib/exec';
 import {
   branchExists,
   checkoutBranch,
@@ -57,11 +63,13 @@ import { reconcilePrompt } from '../lib/sync/reconcile-prompt';
 import { printBranchOutcome, printSyncSummary } from '../lib/sync/report';
 import type {
   BranchSyncOutcome,
+  BranchSyncStatus,
   ReconcileSource,
   ReconcileSourceHistogram,
   SyncOptions,
   SyncResult,
 } from '../lib/sync/types';
+import { aiResolve } from './ai-resolve';
 import { restack } from './restack';
 import {
   hasNonRootBranches,
@@ -114,6 +122,7 @@ async function confirm(question: string): Promise<boolean> {
 async function choose(
   question: string,
   choices: Array<{ label: string; value: string }>,
+  invalidFallback?: string,
 ): Promise<string> {
   const progress = getActiveProgress();
   if (progress) progress.pause();
@@ -126,12 +135,270 @@ async function choose(
     const answer = await rl.question('Select option: ');
     const idx = Number.parseInt(answer.trim(), 10) - 1;
     if (Number.isNaN(idx) || idx < 0 || idx >= choices.length) {
-      return choices[choices.length - 1].value;
+      return invalidFallback ?? choices[choices.length - 1].value;
     }
     return choices[idx].value;
   } finally {
     rl.close();
     if (progress) progress.resume();
+  }
+}
+
+async function canShowAiPrompt(cwd: string): Promise<boolean> {
+  try {
+    return await isAiPromptOptionEnabled(cwd);
+  } catch {
+    return false;
+  }
+}
+
+const RECONCILE_AI_CHOICES: Array<
+  AiPromptChoice<'rebase-onto-remote' | 'take-remote' | 'abort'>
+> = [
+  {
+    label: 'Rebase your changes on top of the remote version',
+    value: 'rebase-onto-remote',
+  },
+  {
+    label: 'Overwrite the local copy with the remote version',
+    value: 'take-remote',
+  },
+  {
+    label: 'Abort this command',
+    value: 'abort',
+  },
+];
+
+const REMOTE_OR_LOCAL_AI_CHOICES: Array<AiPromptChoice<'remote' | 'local'>> = [
+  {
+    label: 'Overwrite the local copy with the remote version',
+    value: 'remote',
+  },
+  {
+    label: 'Keep the local branch',
+    value: 'local',
+  },
+];
+
+const PARENT_MISMATCH_AI_CHOICES: Array<
+  AiPromptChoice<'remote' | 'local' | 'skip'>
+> = [
+  {
+    label: 'Take remote version and remote parent',
+    value: 'remote',
+  },
+  {
+    label: 'Keep local branch and parent',
+    value: 'local',
+  },
+  {
+    label: 'Skip for now',
+    value: 'skip',
+  },
+];
+
+async function resolveUnsubmittedDecision(input: {
+  cwd: string;
+  branch: string;
+  remoteRef: string;
+  localParent: string | null;
+  showAiPromptOptions: boolean;
+}): Promise<'remote' | 'local'> {
+  const manualPrompt = async (): Promise<'remote' | 'local'> => {
+    if (!input.showAiPromptOptions) {
+      const takeRemote = await confirm(
+        `Branch '${input.branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
+      );
+      return takeRemote ? 'remote' : 'local';
+    }
+
+    return choose(
+      `Branch '${input.branch}' has no DubStack submit baseline. How would you like to handle it?`,
+      [
+        {
+          label: 'Overwrite the local copy with the remote version',
+          value: 'remote',
+        },
+        { label: 'Keep local branch', value: 'local' },
+      ],
+    ) as Promise<'remote' | 'local'>;
+  };
+
+  if (!input.showAiPromptOptions) return manualPrompt();
+
+  const firstChoice = await choose(
+    `Branch '${input.branch}' has no DubStack submit baseline. How would you like to handle it?`,
+    [
+      {
+        label: 'Overwrite the local copy with the remote version',
+        value: 'remote',
+      },
+      { label: 'Keep local branch', value: 'local' },
+      {
+        label: 'Let AI decide (shows reasoning before applying)',
+        value: 'ai',
+      },
+    ],
+    'local',
+  );
+  if (firstChoice !== 'ai') return firstChoice as 'remote' | 'local';
+
+  return resolveAiPromptDecision<'remote' | 'local'>({
+    cwd: input.cwd,
+    scenario: 'unsubmitted branch divergence',
+    subject: input.branch,
+    choices: REMOTE_OR_LOCAL_AI_CHOICES,
+    context: await buildBranchAiPromptContext({
+      cwd: input.cwd,
+      branch: input.branch,
+      remoteRef: input.remoteRef,
+      localParent: input.localParent,
+      status: 'unsubmitted',
+      includePrComments: false,
+    }),
+    fallbackPrompt: manualPrompt,
+  });
+}
+
+async function resolveParentMismatchDecision(input: {
+  cwd: string;
+  branch: string;
+  remoteRef: string;
+  localParent: string | null;
+  remoteParent: string | null;
+  showAiPromptOptions: boolean;
+}): Promise<'remote' | 'local' | 'skip'> {
+  const manualPrompt = () =>
+    choose(
+      `Branch '${input.branch}' parent differs locally ('${input.localParent}') vs remote ('${input.remoteParent}').`,
+      PARENT_MISMATCH_AI_CHOICES.map((choice) => ({
+        label: choice.label,
+        value: choice.value,
+      })),
+    ) as Promise<'remote' | 'local' | 'skip'>;
+
+  if (!input.showAiPromptOptions) return manualPrompt();
+
+  const firstChoice = await choose(
+    `Branch '${input.branch}' parent differs locally ('${input.localParent}') vs remote ('${input.remoteParent}').`,
+    [
+      ...PARENT_MISMATCH_AI_CHOICES.map((choice) => ({
+        label: choice.label,
+        value: choice.value,
+      })),
+      {
+        label: 'Let AI decide (shows reasoning before applying)',
+        value: 'ai',
+      },
+    ],
+    'skip',
+  );
+  if (firstChoice !== 'ai') {
+    return firstChoice as 'remote' | 'local' | 'skip';
+  }
+
+  return resolveAiPromptDecision<'remote' | 'local' | 'skip'>({
+    cwd: input.cwd,
+    scenario: 'remote parent mismatch',
+    subject: input.branch,
+    choices: PARENT_MISMATCH_AI_CHOICES,
+    context: await buildBranchAiPromptContext({
+      cwd: input.cwd,
+      branch: input.branch,
+      remoteRef: input.remoteRef,
+      localParent: input.localParent,
+      remoteParent: input.remoteParent,
+      status: 'needs-remote-sync',
+      includePrComments: false,
+    }),
+    fallbackPrompt: manualPrompt,
+  });
+}
+
+async function buildBranchAiPromptContext(input: {
+  cwd: string;
+  branch: string;
+  remoteRef: string;
+  localParent: string | null;
+  remoteParent?: string | null;
+  status: BranchSyncStatus;
+  includePrComments: boolean;
+}): Promise<string> {
+  const sections = [
+    `Branch: ${input.branch}`,
+    `Status: ${input.status}`,
+    `Local parent: ${input.localParent ?? '(none)'}`,
+    `Remote parent: ${input.remoteParent ?? '(same or unknown)'}`,
+    '',
+    'Recent local commits:',
+    await safeGitOutput(input.cwd, ['log', '--oneline', '-5', input.branch]),
+    '',
+    'Recent remote commits:',
+    await safeGitOutput(input.cwd, ['log', '--oneline', '-5', input.remoteRef]),
+    '',
+    'Local vs remote diff stat:',
+    await safeGitOutput(input.cwd, [
+      'diff',
+      '--stat',
+      input.remoteRef,
+      input.branch,
+    ]),
+    '',
+    'Remote vs local diff stat:',
+    await safeGitOutput(input.cwd, [
+      'diff',
+      '--stat',
+      input.branch,
+      input.remoteRef,
+    ]),
+  ];
+
+  if (input.localParent) {
+    sections.push(
+      '',
+      'Parent branch recent commits:',
+      await safeGitOutput(input.cwd, [
+        'log',
+        '--oneline',
+        '-5',
+        input.localParent,
+      ]),
+    );
+  }
+
+  if (input.includePrComments) {
+    sections.push(
+      '',
+      'Latest PR comments:',
+      await safeGitOutput(
+        input.cwd,
+        [
+          'pr',
+          'view',
+          input.branch,
+          '--json',
+          'comments',
+          '--jq',
+          '.comments[-5:] | map(.author.login + ": " + .body) | join("\\n---\\n")',
+        ],
+        'gh',
+      ),
+    );
+  }
+
+  return sections.join('\n');
+}
+
+async function safeGitOutput(
+  cwd: string,
+  args: string[],
+  command = 'git',
+): Promise<string> {
+  try {
+    const { stdout } = await execa(command, args, { cwd });
+    return stdout.trim() || '(none)';
+  } catch {
+    return '(unavailable)';
   }
 }
 
@@ -155,6 +422,9 @@ export async function sync(
     interactive: rawOptions.interactive ?? isInteractiveShell(),
     fresh: rawOptions.fresh ?? false,
   };
+  const showAiPromptOptions = options.interactive
+    ? await canShowAiPrompt(cwd)
+    : false;
 
   const state = await readState(cwd);
   const originalBranch = await getCurrentBranch(cwd);
@@ -770,10 +1040,14 @@ export async function sync(
             };
             recordSource(result.reconcileSources, 'sync-skip');
           } else {
-            const takeRemote = await confirm(
-              `Branch '${branch}' has no DubStack submit baseline. Overwrite local with remote version?`,
-            );
-            if (takeRemote) {
+            const unsubmittedDecision = await resolveUnsubmittedDecision({
+              cwd,
+              branch,
+              remoteRef,
+              localParent,
+              showAiPromptOptions,
+            });
+            if (unsubmittedDecision === 'remote') {
               await hardResetBranchToRef(branch, remoteRef, cwd);
               outcome = {
                 branch,
@@ -835,17 +1109,14 @@ export async function sync(
             };
             recordSource(result.reconcileSources, 'sync-skip');
           } else {
-            const parentDecision = await choose(
-              `Branch '${branch}' parent differs locally ('${localParent}') vs remote ('${prSyncInfo.baseRefName}').`,
-              [
-                {
-                  label: 'Take remote version and remote parent',
-                  value: 'remote',
-                },
-                { label: 'Keep local branch and parent', value: 'local' },
-                { label: 'Skip for now', value: 'skip' },
-              ],
-            );
+            const parentDecision = await resolveParentMismatchDecision({
+              cwd,
+              branch,
+              remoteRef,
+              localParent,
+              remoteParent: prSyncInfo.baseRefName,
+              showAiPromptOptions,
+            });
             if (parentDecision === 'remote') {
               await hardResetBranchToRef(branch, remoteRef, cwd);
               const stateBranch = stateBranchMap.get(branch);
@@ -919,12 +1190,36 @@ export async function sync(
           continue;
         }
 
-        const decision = await resolveReconcileDecision({
+        let decision = await resolveReconcileDecision({
           branch,
           force: options.force,
           interactive: options.interactive,
-          promptChoice: () => reconcilePrompt({ branch }),
+          promptChoice: () =>
+            reconcilePrompt({ branch, showAiOption: showAiPromptOptions }),
         });
+
+        if (decision === 'ai') {
+          decision = await resolveAiPromptDecision<
+            'rebase-onto-remote' | 'take-remote' | 'abort'
+          >({
+            cwd,
+            scenario: 'three-way reconcile',
+            subject: branch,
+            choices: RECONCILE_AI_CHOICES,
+            context: await buildBranchAiPromptContext({
+              cwd,
+              branch,
+              remoteRef,
+              localParent: stateBranchMap.get(branch)?.parent ?? null,
+              status: 'reconcile-needed',
+              includePrComments: true,
+            }),
+            fallbackPrompt: () =>
+              reconcilePrompt({ branch, showAiOption: false }) as Promise<
+                'rebase-onto-remote' | 'take-remote' | 'abort'
+              >,
+          });
+        }
 
         if (decision === 'abort') {
           throw new SyncAbortError(branch, options.interactive);
@@ -1035,9 +1330,18 @@ export async function sync(
           const conflictDecision = await resolveRestackConflictDecision({
             branch: conflictBranch,
             interactive: options.interactive,
+            showAiOption: showAiPromptOptions,
             promptChoice: (branchName) =>
-              restackConflictPrompt({ branch: branchName }),
+              restackConflictPrompt({
+                branch: branchName,
+                showAiOption: showAiPromptOptions,
+              }),
           });
+          if (conflictDecision === 'ai') {
+            await aiResolve(cwd, {});
+            restackChanged = true;
+            continue;
+          }
           if (conflictDecision === 'cancel') {
             const rollback = await rollbackRestack(cwd);
             console.log(

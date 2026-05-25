@@ -723,6 +723,36 @@ dub config ai-defaults submit on
 dub config ai-defaults flow on
 ```
 
+### `dub config ai-prompts [auto|on|off]`
+
+Manage AI choices inside interactive sync/restack/post-merge prompts.
+
+```bash
+# inspect current prompt mode
+dub config ai-prompts
+
+# show AI choices whenever the repo AI assistant is enabled
+dub config ai-prompts auto
+
+# hide AI choices in interactive prompts
+dub config ai-prompts off
+```
+
+### `dub config ai-prompts-auto-accept [off|high]`
+
+Manage whether prompt recommendations can skip the confirmation prompt.
+
+```bash
+# inspect current auto-accept behavior
+dub config ai-prompts-auto-accept
+
+# apply high-confidence prompt recommendations immediately
+dub config ai-prompts-auto-accept high
+
+# always confirm recommendations before applying
+dub config ai-prompts-auto-accept off
+```
+
 ### `dub config ai-provider [auto|gemini|gateway|bedrock]`
 
 Manage the repo-local AI provider selection.
