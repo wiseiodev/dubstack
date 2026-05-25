@@ -82,11 +82,14 @@ dub prune --apply
 dub merge-check --pr 123
 
 # merge next safe PR + run maintenance
+# uses GitHub merge queue automatically when trunk requires it
 dub merge-next
 
 # repeat until complete
 dub merge-next
 ```
+
+When queue mode is used, run `dub sync` after GitHub processes the queue.
 
 If manual merges happened in GitHub or another UI:
 

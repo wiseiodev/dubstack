@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/github.js', () => ({
   checkGhAuth: vi.fn(),
+  enqueuePrToMergeQueue: vi.fn(),
   ensureGhInstalled: vi.fn(),
   getAllPrSyncInfoBatch: vi.fn(),
+  getBranchMergeQueueStatus: vi.fn(),
   getBranchPrSyncInfo: vi.fn(),
   getPr: vi.fn(),
   getPrMergeStatusByNumber: vi.fn(),
@@ -37,8 +39,10 @@ import {
 } from '../lib/cleanup-journal';
 import {
   checkGhAuth,
+  enqueuePrToMergeQueue,
   ensureGhInstalled,
   getAllPrSyncInfoBatch,
+  getBranchMergeQueueStatus,
   getBranchPrSyncInfo,
   getPr,
   getPrMergeStatusByNumber,
@@ -51,7 +55,9 @@ import { getSubmitPlan } from './submit';
 
 const mockEnsureGhInstalled = ensureGhInstalled as Mock;
 const mockCheckGhAuth = checkGhAuth as Mock;
+const mockEnqueuePrToMergeQueue = enqueuePrToMergeQueue as Mock;
 const mockGetAllPrSyncInfoBatch = getAllPrSyncInfoBatch as Mock;
+const mockGetBranchMergeQueueStatus = getBranchMergeQueueStatus as Mock;
 const mockGetBranchPrSyncInfo = getBranchPrSyncInfo as Mock;
 const mockGetPr = getPr as Mock;
 const mockGetPrMergeStatusByNumber = getPrMergeStatusByNumber as Mock;
@@ -108,6 +114,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockEnsureGhInstalled.mockResolvedValue(undefined);
   mockCheckGhAuth.mockResolvedValue(undefined);
+  mockEnqueuePrToMergeQueue.mockResolvedValue(undefined);
+  mockGetBranchMergeQueueStatus.mockResolvedValue({
+    mergeQueueEnabled: false,
+  });
   mockGetBranchPrSyncInfo.mockResolvedValue({
     state: 'NONE',
     baseRefName: null,
@@ -180,6 +190,7 @@ describe('mergeNext linear stack', () => {
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
     expect(result.siblingCandidates).toEqual([]);
     expect(result.blockedSiblings).toEqual([]);
+    expect(result.mode).toBe('direct');
   });
 
   it('supports dry-run without merging', async () => {
@@ -193,6 +204,7 @@ describe('mergeNext linear stack', () => {
     expect(result.preMergeRetargeted).toEqual(['feat/b']);
     expect(result.siblingCandidates).toEqual([]);
     expect(result.blockedSiblings).toEqual([]);
+    expect(result.mode).toBe('direct');
   });
 
   it('throws when no branch in the stack has an open PR', async () => {
@@ -263,6 +275,62 @@ describe('mergeNext linear stack', () => {
     expect(mockStartCleanupJournal).toHaveBeenCalled();
     expect(mockAppendCleanupOperation).toHaveBeenCalled();
     expect(mockClearCleanupJournal).not.toHaveBeenCalled();
+  });
+
+  it('auto-detects merge queue and skips post-merge maintenance after enqueue', async () => {
+    mockGetBranchMergeQueueStatus.mockResolvedValue({
+      mergeQueueEnabled: true,
+    });
+
+    const result = await mergeNext('/repo');
+
+    expect(mockEnqueuePrToMergeQueue).toHaveBeenCalledWith(101, '/repo', {
+      method: 'squash',
+    });
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
+    expect(mockPostMerge).not.toHaveBeenCalled();
+    expect(result.mode).toBe('queue');
+    expect(result.preMergeRetargeted).toEqual([]);
+  });
+
+  it('lets --no-queue force the direct merge path in merge-queue repos', async () => {
+    const result = await mergeNext('/repo', { queue: false });
+
+    expect(mockGetBranchMergeQueueStatus).not.toHaveBeenCalled();
+    expect(mockMergePr).toHaveBeenCalledWith(101, '/repo', {
+      method: 'squash',
+      deleteBranch: true,
+    });
+    expect(mockEnqueuePrToMergeQueue).not.toHaveBeenCalled();
+    expect(result.mode).toBe('direct');
+  });
+
+  it('errors cleanly when --queue is passed but trunk has no merge queue', async () => {
+    await expect(mergeNext('/repo', { queue: true })).rejects.toMatchObject({
+      message: "GitHub merge queue is not enabled for trunk branch 'main'.",
+      recovery: expect.arrayContaining([
+        expect.stringContaining('Enable a merge queue'),
+      ]),
+    });
+    expect(mockEnqueuePrToMergeQueue).not.toHaveBeenCalled();
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockPostMerge).not.toHaveBeenCalled();
+  });
+
+  it('supports dry-run queue mode without enqueueing or post-merge maintenance', async () => {
+    mockGetBranchMergeQueueStatus.mockResolvedValue({
+      mergeQueueEnabled: true,
+    });
+
+    const result = await mergeNext('/repo', { dryRun: true });
+
+    expect(result.mode).toBe('queue');
+    expect(result.preMergeRetargeted).toEqual([]);
+    expect(mockEnqueuePrToMergeQueue).not.toHaveBeenCalled();
+    expect(mockMergePr).not.toHaveBeenCalled();
+    expect(mockRetargetPrBase).not.toHaveBeenCalled();
+    expect(mockPostMerge).not.toHaveBeenCalled();
   });
 });
 
