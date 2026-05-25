@@ -1,4 +1,4 @@
-import type { DubConfig, McpMode } from '../lib/config';
+import type { DubConfig, McpMode, SubmitDefault } from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import { parseReviewerList } from '../lib/reviewers';
@@ -28,6 +28,11 @@ export interface ConfigReviewersResult {
   changed: boolean;
 }
 
+export interface ConfigSubmitDefaultResult {
+  mode: SubmitDefault;
+  changed: boolean;
+}
+
 export interface ConfigAiPromptsResult {
   mode: 'auto' | 'on' | 'off';
   changed: boolean;
@@ -45,7 +50,8 @@ export type AiProvider =
   | 'anthropic'
   | 'gateway'
   | 'bedrock'
-  | 'openai';
+  | 'openai'
+  | 'ollama';
 export type AiModelProvider = Exclude<AiProvider, 'auto'>;
 
 export async function configAiAssistant(
@@ -337,6 +343,36 @@ export async function configReviewers(
   };
 }
 
+export async function configSubmitDefault(
+  cwd: string,
+  mode?: string,
+): Promise<ConfigSubmitDefaultResult> {
+  const config = await readConfig(cwd);
+  if (mode == null) {
+    return {
+      mode: config.submitDefault,
+      changed: false,
+    };
+  }
+
+  const parsed = parseSubmitDefault(mode);
+  const changed = config.submitDefault !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        submitDefault: parsed,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    mode: parsed,
+    changed,
+  };
+}
+
 function sameReviewers(left: string[], right: string[]): boolean {
   return (
     left.length === right.length && left.every((value, i) => value === right[i])
@@ -353,6 +389,20 @@ function parseMcpMode(value: string): McpMode {
       "Pass 'read-only' to disable mutating MCP tools.",
       "Pass 'interactive' to require terminal confirmation before mutating tools run (default).",
       "Pass 'trusted' to let mutating MCP tools run without confirmation.",
+    ],
+  );
+}
+
+function parseSubmitDefault(value: string): SubmitDefault {
+  if (value === 'auto' || value === 'draft' || value === 'publish') {
+    return value;
+  }
+  throw new DubError(
+    "Submit default must be one of 'auto', 'draft', or 'publish'.",
+    [
+      "Pass 'auto' to create draft PRs when CI workflows are configured.",
+      "Pass 'draft' to create new submit PRs as drafts.",
+      "Pass 'publish' to promote existing draft PRs by default.",
     ],
   );
 }
@@ -401,14 +451,15 @@ function parseAiProvider(value: string): AiProvider {
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }
   throw new DubError(
-    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     [
-      "Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+      "Pass one of: 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     ],
   );
 }
@@ -419,14 +470,15 @@ function parseAiModelProvider(value: string): AiModelProvider {
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }
   throw new DubError(
-    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+    "AI model provider must be one of 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     [
-      "Pass one of: 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai' as --provider.",
+      "Pass one of: 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama' as --provider.",
     ],
   );
 }

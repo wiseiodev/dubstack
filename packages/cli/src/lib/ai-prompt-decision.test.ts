@@ -11,6 +11,7 @@ const baseConfig: DubConfig = {
   aiAssistantEnabled: true,
   mcpMode: 'interactive',
   reviewers: [],
+  submitDefault: 'auto',
   ai: {
     defaults: {
       createMetadata: false,
@@ -29,6 +30,7 @@ const baseConfig: DubConfig = {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     },
     shortcutFallback: {

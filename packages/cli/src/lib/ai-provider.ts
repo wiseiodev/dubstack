@@ -1,7 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import type { createAnthropic } from '@ai-sdk/anthropic';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
 import type { createOpenAI } from '@ai-sdk/openai';
+import type { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type {
   fromIni,
   fromNodeProviderChain,
@@ -15,7 +17,11 @@ export type ResolvedAiProviderName =
   | 'anthropic'
   | 'gateway'
   | 'bedrock'
-  | 'openai';
+  | 'openai'
+  | 'ollama';
+
+export const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+const DEFAULT_OLLAMA_MODEL = 'qwen2.5-coder';
 
 export interface ResolveAiProviderDeps {
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
@@ -23,6 +29,8 @@ export interface ResolveAiProviderDeps {
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
   createOpenAI?: typeof createOpenAI;
+  createOpenAICompatible?: typeof createOpenAICompatible;
+  checkOllamaEndpoint?: (baseUrl: string) => void;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
@@ -68,6 +76,10 @@ export function resolveAiProvider(input: {
     return resolveOpenAiProvider(input.deps, providerConfig);
   }
 
+  if (selected === 'ollama') {
+    return resolveOllamaProvider(input.deps, providerConfig);
+  }
+
   const geminiApiKey = process.env.DUBSTACK_GEMINI_API_KEY?.trim();
   if (geminiApiKey) {
     return resolveGoogleProvider(input.deps, providerConfig);
@@ -94,6 +106,10 @@ export function resolveAiProvider(input: {
     return resolveOpenAiProvider(input.deps, providerConfig);
   }
 
+  if (isOllamaEnvConfigured()) {
+    return resolveOllamaProvider(input.deps, providerConfig);
+  }
+
   throw new DubError('AI assistant has no configured provider.', [
     "Run 'dub ai setup' for an interactive guided setup.",
     "Run 'dub ai env --gemini-key <key>' to configure Gemini.",
@@ -101,6 +117,7 @@ export function resolveAiProvider(input: {
     "Run 'dub ai env --gateway-key <key>' to configure the AI Gateway.",
     "Run 'dub ai env --bedrock-region <region> --bedrock-model <model>' to configure Bedrock.",
     "Run 'dub ai env --openai-key <key>' to configure OpenAI.",
+    "Run 'dub config ai-provider ollama' to use a local Ollama endpoint.",
   ]);
 }
 
@@ -405,6 +422,35 @@ function resolveOpenAiProvider(
   };
 }
 
+function resolveOllamaProvider(
+  deps: ResolveAiProviderDeps,
+  providerConfig: DubConfig['ai']['provider'],
+): ResolvedAiProvider {
+  if (!deps.createOpenAICompatible) {
+    throw new DubError('Ollama support is unavailable in this build.', [
+      "Run 'dub config ai-provider gemini', 'gateway', or 'openai' to switch providers.",
+      'Reinstall DubStack from a build that includes Ollama support if you need it.',
+    ]);
+  }
+
+  const baseUrl = getOllamaBaseUrl();
+  const checkEndpoint = deps.checkOllamaEndpoint ?? checkOllamaEndpoint;
+  checkEndpoint(baseUrl);
+
+  const modelId =
+    getConfiguredModel('ollama', providerConfig) || DEFAULT_OLLAMA_MODEL;
+  const ollama = deps.createOpenAICompatible({
+    name: 'ollama',
+    baseURL: toOpenAiCompatibleBaseUrl(baseUrl),
+  });
+
+  return {
+    provider: 'ollama',
+    model: ollama(modelId),
+    modelId,
+  };
+}
+
 function getConfiguredModel(
   provider: keyof DubConfig['ai']['provider']['models'],
   providerConfig: DubConfig['ai']['provider'],
@@ -430,6 +476,10 @@ function getConfiguredModel(
     return normalizeEnvModel(process.env.DUBSTACK_BEDROCK_MODEL);
   }
 
+  if (provider === 'ollama') {
+    return normalizeEnvModel(process.env.DUBSTACK_OLLAMA_MODEL);
+  }
+
   return normalizeEnvModel(process.env.DUBSTACK_OPENAI_MODEL);
 }
 
@@ -440,4 +490,108 @@ function normalizeEnvModel(value: string | undefined): string | null {
 
 function supportsBedrockReasoning(modelId: string): boolean {
   return /claude-3-7|claude-(sonnet|opus|haiku)-4/.test(modelId);
+}
+
+function isOllamaEnvConfigured(): boolean {
+  return Boolean(
+    process.env.DUBSTACK_OLLAMA_BASE_URL?.trim() ||
+      process.env.DUBSTACK_OLLAMA_MODEL?.trim(),
+  );
+}
+
+export function getOllamaBaseUrl(): string {
+  return normalizeOllamaBaseUrl(
+    process.env.DUBSTACK_OLLAMA_BASE_URL || DEFAULT_OLLAMA_BASE_URL,
+  );
+}
+
+export function normalizeOllamaBaseUrl(value: string): string {
+  const baseUrl = value.trim().replace(/\/+$/, '');
+  if (!baseUrl) {
+    throw new DubError('Ollama base URL cannot be empty.', [
+      `Pass a non-empty URL (e.g. '${DEFAULT_OLLAMA_BASE_URL}').`,
+    ]);
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    throw new DubError('Ollama base URL must be a valid URL.', [
+      `Pass a URL like '${DEFAULT_OLLAMA_BASE_URL}'.`,
+    ]);
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new DubError('Ollama base URL must use http or https.', [
+      `Pass a URL like '${DEFAULT_OLLAMA_BASE_URL}'.`,
+    ]);
+  }
+
+  return baseUrl;
+}
+
+export function toOpenAiCompatibleBaseUrl(baseUrl: string): string {
+  const normalized = normalizeOllamaBaseUrl(baseUrl);
+  return normalized.endsWith('/v1') ? normalized : `${normalized}/v1`;
+}
+
+export function getOllamaTagsUrl(baseUrl: string): string {
+  const normalized = normalizeOllamaBaseUrl(baseUrl);
+  const root = normalized.endsWith('/v1')
+    ? normalized.slice(0, -'/v1'.length)
+    : normalized;
+  return `${root}/api/tags`;
+}
+
+export function checkOllamaEndpoint(
+  baseUrl: string,
+  execFile: typeof execFileSync = execFileSync,
+): void {
+  const healthCheckUrl = getOllamaHealthCheckUrl(baseUrl);
+  try {
+    execFile(
+      'curl',
+      ['--fail', '--silent', '--show-error', '--max-time', '2', healthCheckUrl],
+      {
+        stdio: 'pipe',
+      },
+    );
+  } catch (error) {
+    if (isMissingCurlError(error)) {
+      throw new DubError(
+        'Ollama reachability checks require curl, but curl was not found.',
+        [
+          'Install curl or make sure it is available on PATH.',
+          "Run 'dub config ai-provider <provider>' to switch providers.",
+        ],
+      );
+    }
+
+    throw new DubError(
+      'Ollama provider is selected but the local endpoint is not reachable.',
+      [
+        `Start Ollama and verify '${healthCheckUrl}' responds.`,
+        "For LM Studio, set DUBSTACK_OLLAMA_BASE_URL to the server's '/v1' endpoint.",
+        `Set DUBSTACK_OLLAMA_BASE_URL if your endpoint is not '${DEFAULT_OLLAMA_BASE_URL}'.`,
+        "Run 'dub config ai-provider <provider>' to switch providers.",
+      ],
+    );
+  }
+}
+
+function getOllamaHealthCheckUrl(baseUrl: string): string {
+  const normalized = normalizeOllamaBaseUrl(baseUrl);
+  return normalized.endsWith('/v1')
+    ? `${normalized}/models`
+    : getOllamaTagsUrl(normalized);
+}
+
+function isMissingCurlError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'ENOENT'
+  );
 }

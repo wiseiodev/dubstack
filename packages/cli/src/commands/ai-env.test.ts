@@ -43,6 +43,7 @@ describe('configureAiEnv', () => {
         "export DUBSTACK_GEMINI_API_KEY='old'",
         "export DUBSTACK_AI_GATEWAY_API_KEY='old'",
         "export DUBSTACK_OPENAI_API_KEY='old'",
+        "export DUBSTACK_OLLAMA_BASE_URL='http://localhost:11434'",
         '',
       ].join('\n'),
     );
@@ -51,6 +52,7 @@ describe('configureAiEnv', () => {
       geminiKey: 'new-gemini',
       gatewayKey: 'new-gateway',
       openaiKey: 'new-openai',
+      ollamaBaseUrl: 'http://localhost:11435',
       profile,
     });
     const updated = await fs.promises.readFile(profile, 'utf8');
@@ -58,11 +60,15 @@ describe('configureAiEnv', () => {
     expect(updated.match(/DUBSTACK_GEMINI_API_KEY/g)?.length).toBe(1);
     expect(updated.match(/DUBSTACK_AI_GATEWAY_API_KEY/g)?.length).toBe(1);
     expect(updated.match(/DUBSTACK_OPENAI_API_KEY/g)?.length).toBe(1);
+    expect(updated.match(/DUBSTACK_OLLAMA_BASE_URL/g)?.length).toBe(1);
     expect(updated).toContain("export DUBSTACK_GEMINI_API_KEY='new-gemini'");
     expect(updated).toContain(
       "export DUBSTACK_AI_GATEWAY_API_KEY='new-gateway'",
     );
     expect(updated).toContain("export DUBSTACK_OPENAI_API_KEY='new-openai'");
+    expect(updated).toContain(
+      "export DUBSTACK_OLLAMA_BASE_URL='http://localhost:11435'",
+    );
   });
 
   it('writes model exports without keys', async () => {
@@ -74,6 +80,7 @@ describe('configureAiEnv', () => {
       anthropicModel: 'claude-sonnet-4-20250514',
       gatewayModel: 'google/gemini-3-flash',
       openaiModel: 'gpt-5.5',
+      ollamaModel: 'qwen2.5-coder',
       profile,
     });
     const updated = await fs.promises.readFile(profile, 'utf8');
@@ -83,6 +90,7 @@ describe('configureAiEnv', () => {
       'DUBSTACK_ANTHROPIC_MODEL',
       'DUBSTACK_AI_GATEWAY_MODEL',
       'DUBSTACK_OPENAI_MODEL',
+      'DUBSTACK_OLLAMA_MODEL',
     ]);
     expect(updated).toContain(
       "export DUBSTACK_GEMINI_MODEL='gemini-2.5-flash'",
@@ -94,6 +102,7 @@ describe('configureAiEnv', () => {
       "export DUBSTACK_AI_GATEWAY_MODEL='google/gemini-3-flash'",
     );
     expect(updated).toContain("export DUBSTACK_OPENAI_MODEL='gpt-5.5'");
+    expect(updated).toContain("export DUBSTACK_OLLAMA_MODEL='qwen2.5-coder'");
   });
 
   it('writes OpenAI key and model exports', async () => {
@@ -115,6 +124,29 @@ describe('configureAiEnv', () => {
     expect(updated).toContain("export DUBSTACK_OPENAI_MODEL='gpt-5.5'");
     expect(process.env.DUBSTACK_OPENAI_API_KEY).toBe('openai-secret');
     expect(process.env.DUBSTACK_OPENAI_MODEL).toBe('gpt-5.5');
+  });
+
+  it('writes Ollama base URL and model exports', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await fs.promises.writeFile(profile, '# existing\n');
+
+    const result = await configureAiEnv({
+      ollamaBaseUrl: 'http://localhost:11434/',
+      ollamaModel: 'llama3.1',
+      profile,
+    });
+    const updated = await fs.promises.readFile(profile, 'utf8');
+
+    expect(result.updated).toEqual([
+      'DUBSTACK_OLLAMA_BASE_URL',
+      'DUBSTACK_OLLAMA_MODEL',
+    ]);
+    expect(updated).toContain(
+      "export DUBSTACK_OLLAMA_BASE_URL='http://localhost:11434'",
+    );
+    expect(updated).toContain("export DUBSTACK_OLLAMA_MODEL='llama3.1'");
+    expect(process.env.DUBSTACK_OLLAMA_BASE_URL).toBe('http://localhost:11434');
+    expect(process.env.DUBSTACK_OLLAMA_MODEL).toBe('llama3.1');
   });
 
   it('writes Anthropic key and model exports', async () => {
@@ -210,6 +242,13 @@ describe('configureAiEnv', () => {
     await expect(
       configureAiEnv({ profile, geminiModel: '   ' }),
     ).rejects.toThrow('Gemini model cannot be empty');
+  });
+
+  it('rejects empty Ollama base URLs', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await expect(
+      configureAiEnv({ profile, ollamaBaseUrl: '   ' }),
+    ).rejects.toThrow('Ollama base URL cannot be empty');
   });
 
   it('rejects gateway-style Gemini model names', async () => {

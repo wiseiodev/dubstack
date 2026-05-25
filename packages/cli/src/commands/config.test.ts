@@ -10,6 +10,7 @@ import {
   configAiProvider,
   configMcpMode,
   configReviewers,
+  configSubmitDefault,
 } from './config';
 
 let dir: string;
@@ -159,9 +160,17 @@ describe('config ai-provider', () => {
     expect(config.ai.provider.selected).toBe('openai');
   });
 
+  it('writes Ollama as a selected provider', async () => {
+    const result = await configAiProvider(dir, 'ollama');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ provider: 'ollama', changed: true });
+    expect(config.ai.provider.selected).toBe('ollama');
+  });
+
   it('throws for invalid provider names', async () => {
     await expect(configAiProvider(dir, 'claude')).rejects.toThrow(
-      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', or 'openai'.",
+      "AI provider must be one of 'auto', 'gemini', 'anthropic', 'gateway', 'bedrock', 'openai', or 'ollama'.",
     );
   });
 });
@@ -199,6 +208,17 @@ describe('config ai-model', () => {
       changed: true,
     });
     expect(config.ai.provider.models.openai).toBe('gpt-5.5');
+  });
+
+  it('writes an Ollama model override', async () => {
+    const result = await configAiModel(dir, 'ollama', 'qwen2.5-coder');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({
+      model: 'qwen2.5-coder',
+      changed: true,
+    });
+    expect(config.ai.provider.models.ollama).toBe('qwen2.5-coder');
   });
 
   it('clears a provider-specific model override', async () => {
@@ -293,5 +313,34 @@ describe('config reviewers', () => {
     await expect(
       configReviewers(dir, 'alice', { clear: true }),
     ).rejects.toThrow("'--clear' cannot be combined with a reviewer list.");
+  });
+});
+
+describe('config submit-default', () => {
+  it('returns the default auto mode when no mode is set', async () => {
+    const result = await configSubmitDefault(dir);
+    expect(result).toEqual({ mode: 'auto', changed: false });
+  });
+
+  it('writes draft mode when set', async () => {
+    const result = await configSubmitDefault(dir, 'draft');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'draft', changed: true });
+    expect(config.submitDefault).toBe('draft');
+  });
+
+  it('writes publish mode when set', async () => {
+    const result = await configSubmitDefault(dir, 'publish');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'publish', changed: true });
+    expect(config.submitDefault).toBe('publish');
+  });
+
+  it('throws for invalid modes', async () => {
+    await expect(configSubmitDefault(dir, 'ready')).rejects.toThrow(
+      "Submit default must be one of 'auto', 'draft', or 'publish'.",
+    );
   });
 });

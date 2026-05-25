@@ -1228,6 +1228,11 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--draft', 'Create new PRs as drafts')
+  .option(
+    '--publish',
+    'Promote existing draft PRs in the submit scope to ready for review',
+  )
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
@@ -1264,6 +1269,8 @@ Examples:
   $ dub submit --stack      Push every branch in the stack (trees supported)
   $ dub submit --branch foo Push only the 'foo' branch
   $ dub submit --dry-run    Preview what would happen
+  $ dub submit --draft      Create new PRs as drafts
+  $ dub submit --publish    Promote existing draft PRs to ready for review
   $ dub submit --ai         Generate a PR description before updating the PR body
   $ dub submit --reviewers alice,bob,@org/team
                             Request reviewers for every submitted PR
@@ -1278,6 +1285,11 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--draft', 'Create new PRs as drafts')
+  .option(
+    '--publish',
+    'Promote existing draft PRs in the submit scope to ready for review',
+  )
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
@@ -1874,7 +1886,7 @@ program
     new Command('ai-provider')
       .argument(
         '[provider]',
-        'Set to auto/gemini/anthropic/gateway/bedrock/openai (omit to inspect current value)',
+        'Set to auto/gemini/anthropic/gateway/bedrock/openai/ollama (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
       .action(async (provider?: string) => {
@@ -1971,11 +1983,40 @@ program
       ),
   )
   .addCommand(
+    new Command('submit-default')
+      .argument(
+        '[mode]',
+        'Set to auto/draft/publish (omit to inspect current value)',
+      )
+      .description('Manage the repo-local submit PR lifecycle default')
+      .action(async (mode?: string) => {
+        const { configSubmitDefault } = await import('./commands/config');
+        const result = await configSubmitDefault(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(
+              `Submit default is '${result.mode}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ Submit default set to '${result.mode}'`));
+        } else {
+          console.log(
+            chalk.yellow(`⚠ Submit default is already '${result.mode}'`),
+          );
+        }
+      }),
+  )
+  .addCommand(
     new Command('ai-model')
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
         '--provider <provider>',
-        'Provider name: gemini, anthropic, gateway, bedrock, or openai',
+        'Provider name: gemini, anthropic, gateway, bedrock, openai, or ollama',
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
@@ -2085,10 +2126,12 @@ program
       .option('--anthropic-key <key>', 'Set DUBSTACK_ANTHROPIC_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
       .option('--openai-key <key>', 'Set DUBSTACK_OPENAI_API_KEY')
+      .option('--ollama-base-url <url>', 'Set DUBSTACK_OLLAMA_BASE_URL')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
       .option('--anthropic-model <model>', 'Set DUBSTACK_ANTHROPIC_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
       .option('--openai-model <model>', 'Set DUBSTACK_OPENAI_MODEL')
+      .option('--ollama-model <model>', 'Set DUBSTACK_OLLAMA_MODEL')
       .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
       .option('--bedrock-region <region>', 'Set DUBSTACK_BEDROCK_AWS_REGION')
       .option('--bedrock-model <model>', 'Set DUBSTACK_BEDROCK_MODEL')
@@ -2106,10 +2149,12 @@ program
           anthropicKey?: string;
           gatewayKey?: string;
           openaiKey?: string;
+          ollamaBaseUrl?: string;
           geminiModel?: string;
           anthropicModel?: string;
           gatewayModel?: string;
           openaiModel?: string;
+          ollamaModel?: string;
           bedrockProfile?: string;
           bedrockRegion?: string;
           bedrockModel?: string;
@@ -2122,10 +2167,12 @@ program
             anthropicKey: options.anthropicKey,
             gatewayKey: options.gatewayKey,
             openaiKey: options.openaiKey,
+            ollamaBaseUrl: options.ollamaBaseUrl,
             geminiModel: options.geminiModel,
             anthropicModel: options.anthropicModel,
             gatewayModel: options.gatewayModel,
             openaiModel: options.openaiModel,
+            ollamaModel: options.ollamaModel,
             bedrockProfile: options.bedrockProfile,
             bedrockRegion: options.bedrockRegion,
             bedrockModel: options.bedrockModel,
@@ -2734,6 +2781,8 @@ async function runSubmit(options: {
   dryRun?: boolean;
   ai?: boolean;
   noAi?: boolean;
+  draft?: boolean;
+  publish?: boolean;
   path?: SubmitPathMode;
   upstack?: boolean;
   downstack?: boolean;
@@ -2747,6 +2796,8 @@ async function runSubmit(options: {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
     noAi: options.noAi,
+    draft: options.draft,
+    publish: options.publish,
     path: options.path,
     upstack: options.upstack,
     downstack: options.downstack,
@@ -2775,6 +2826,13 @@ async function runSubmit(options: {
         `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s)`,
       ),
     );
+    if (result.published.length > 0) {
+      console.log(
+        chalk.green(
+          `✔ Published ${result.published.length} draft PR(s) as ready for review`,
+        ),
+      );
+    }
     for (const branch of [...result.created, ...result.updated]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
     }
