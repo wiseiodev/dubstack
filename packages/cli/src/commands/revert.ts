@@ -267,11 +267,25 @@ async function resolveRevertTarget(
   target: string,
   cwd: string,
 ): Promise<ResolvedTarget> {
-  if (PR_NUMBER_PATTERN.test(target)) {
+  if (target.startsWith('#')) {
     return resolvePrTarget(target.replace(/^#/, ''), cwd);
   }
   if (SHA_PATTERN.test(target)) {
-    return resolveShaTarget(target, cwd);
+    try {
+      return await resolveShaTarget(target, cwd);
+    } catch (error) {
+      if (
+        PR_NUMBER_PATTERN.test(target) &&
+        error instanceof DubError &&
+        error.message === `Commit '${target}' not found in this repository.`
+      ) {
+        return resolvePrTarget(target, cwd);
+      }
+      throw error;
+    }
+  }
+  if (PR_NUMBER_PATTERN.test(target)) {
+    return resolvePrTarget(target, cwd);
   }
   throw new DubError(
     `'${target}' is not a recognized PR number or commit SHA.`,

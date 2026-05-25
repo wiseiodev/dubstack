@@ -7,11 +7,8 @@ export interface FreezeCommandOptions {
 
 /**
  * Sets the `frozen` flag on a tracked branch. Surfaces in `dub log` (🔒)
- * and `dub doctor`.
- *
- * Note: this is a passive marker only. `dub restack` and `dub sync` do
- * NOT yet read this field — the enforcement wiring is tracked separately
- * as DUB-82.
+ * and `dub doctor`; branch-mutating maintenance skips frozen branches until
+ * the user explicitly unfreezes them.
  *
  * - `branch` defaults to the current branch when omitted.
  * - `--downstack` cascades through ancestors toward trunk (root excluded).

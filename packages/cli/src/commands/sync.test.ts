@@ -169,7 +169,12 @@ const mockRestackConflictPrompt = restackConflictPrompt as ReturnType<
 const mockRollbackRestack = rollbackRestack as ReturnType<typeof vi.fn>;
 
 function makeState(
-  branches: { name: string; parent: string | null; type?: 'root' }[],
+  branches: {
+    name: string;
+    parent: string | null;
+    type?: 'root';
+    frozen?: boolean;
+  }[],
 ): DubState {
   return {
     stacks: [
@@ -526,6 +531,59 @@ describe('sync', () => {
       'origin/feat/a',
       '/repo',
     );
+  });
+
+  it('classifies frozen branches as frozen-skipped and does not let --force mutate them', async () => {
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main', frozen: true },
+      ]),
+    );
+    mockGetRefSha
+      .mockResolvedValueOnce('local-a')
+      .mockResolvedValueOnce('remote-a');
+    mockIsAncestor.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    const result = await sync('/repo', {
+      interactive: false,
+      force: true,
+      restack: false,
+    });
+
+    expect(result.branches[0]).toMatchObject({
+      branch: 'feat/a',
+      status: 'frozen-skipped',
+      action: 'skipped',
+      reconcileSource: 'sync-skip',
+    });
+    expect(result.branches[0]?.message).toContain('dub unfreeze feat/a');
+    expect(mockHardResetBranchToRef).not.toHaveBeenCalledWith(
+      'feat/a',
+      'origin/feat/a',
+      '/repo',
+    );
+  });
+
+  it('refetches recently-synced frozen branches instead of treating them as fresh cache hits', async () => {
+    const state = makeState([
+      { name: 'main', parent: null, type: 'root' },
+      { name: 'feat/a', parent: 'main', frozen: true },
+    ]);
+    const featA = state.stacks[0].branches.find((b) => b.name === 'feat/a');
+    if (featA) featA.last_synced_at = new Date().toISOString();
+    mockReadState.mockResolvedValue(state);
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await sync('/repo', { interactive: false, restack: false });
+
+    expect(mockFetchBranches).toHaveBeenCalledWith(
+      ['main', 'feat/a'],
+      '/repo',
+      'origin',
+      expect.objectContaining({ onBranchStart: expect.any(Function) }),
+    );
+    expect(result.branches[0]?.status).toBe('frozen-skipped');
   });
 
   it('classifies equal unmanaged branch as updated outside dubstack', async () => {

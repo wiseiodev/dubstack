@@ -606,7 +606,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.freeze',
     description:
-      'Set the `frozen` flag on a tracked branch (stack-aware). Note: this is a passive marker only — `dub restack` and `dub sync` do NOT yet honor the flag. The enforcement wiring is tracked as DUB-82.',
+      'Set the `frozen` flag on a tracked branch (stack-aware). Restack, sync, and post-merge skip frozen branches until they are explicitly unfrozen.',
     mutating: true,
     inputSchema: {
       type: 'object',
@@ -630,7 +630,7 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'dubstack.unfreeze',
     description:
-      'Clear the `frozen` flag on a tracked branch (stack-aware). Note: the flag is a passive marker — `dub restack` and `dub sync` do NOT yet honor it, so clearing the flag has no effect on rebase behavior until DUB-82 lands.',
+      'Clear the `frozen` flag on a tracked branch (stack-aware) so restack, sync, and post-merge can mutate it again.',
     mutating: true,
     inputSchema: {
       type: 'object',
