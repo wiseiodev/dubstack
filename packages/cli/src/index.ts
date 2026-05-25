@@ -37,6 +37,7 @@ import { docs } from './commands/docs';
 import { doctor } from './commands/doctor';
 import { flow } from './commands/flow';
 import { fold } from './commands/fold';
+import { freeze } from './commands/freeze';
 import { init } from './commands/init';
 import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
@@ -52,6 +53,7 @@ import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { ready } from './commands/ready';
 import { rename } from './commands/rename';
+import { reorder } from './commands/reorder';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import { revert } from './commands/revert';
@@ -66,6 +68,7 @@ import { sync } from './commands/sync';
 import { track } from './commands/track';
 import { trunk } from './commands/trunk';
 import { undo } from './commands/undo';
+import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
 import { watch } from './commands/watch';
@@ -1147,7 +1150,7 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, dub restack, dub rename, dub move, or dub pop operation',
+    'Undo the last dub create, restack, rename, move, pop, reorder, freeze, unfreeze, absorb, or unlink operation',
   )
   .addHelpText(
     'after',
@@ -1404,18 +1407,25 @@ program
       console.log(
         chalk.green(`✔ No issues found for '${result.checkedBranch}'.`),
       );
-      return;
+    } else {
+      console.log(
+        chalk.yellow(
+          `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
+        ),
+      );
+      for (const issue of result.issues) {
+        console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
+        console.log(chalk.dim(`  ${issue.details}`));
+        for (const fix of issue.fixes) {
+          console.log(chalk.dim(`  ↳ ${fix}`));
+        }
+      }
     }
-    console.log(
-      chalk.yellow(
-        `⚠ Found ${result.issues.length} issue(s) for '${result.checkedBranch}':`,
-      ),
-    );
-    for (const issue of result.issues) {
-      console.log(chalk.yellow(`• [${issue.code}] ${issue.summary}`));
-      console.log(chalk.dim(`  ${issue.details}`));
-      for (const fix of issue.fixes) {
-        console.log(chalk.dim(`  ↳ ${fix}`));
+    for (const notice of result.notices) {
+      console.log(chalk.blue(`ℹ [${notice.code}] ${notice.summary}`));
+      console.log(chalk.dim(`  ${notice.details}`));
+      for (const branch of notice.branches) {
+        console.log(chalk.dim(`  ↳ ${branch}`));
       }
     }
   });
@@ -2132,12 +2142,139 @@ Examples:
   });
 
 program
+  .command('reorder')
+  .description(
+    'Interactively reorder or drop commits within the current branch',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub reorder    Open the picker for the current branch's commits`,
+  )
+  .action(async () => {
+    const result = await reorder(process.cwd());
+
+    if (result.status === 'no-op') {
+      console.log(
+        chalk.yellow(
+          `⚠ Nothing to do: ${result.noOpReason ?? 'no changes in picker'}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'cancelled') {
+      console.log(
+        chalk.yellow(
+          `⚠ Reorder cancelled${result.noOpReason ? `: ${result.noOpReason}` : ''}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'exit' || result.status === 'conflict') {
+      const isReorderRebase = result.conflictSource === 'reorder';
+      const subject = isReorderRebase
+        ? `reordering '${result.conflictBranch}'`
+        : `restacking descendant '${result.conflictBranch}'`;
+      const verb = result.status === 'exit' ? 'left in conflict' : 'Conflict';
+      console.log(chalk.yellow(`⚠ ${verb} while ${subject}`));
+      if (isReorderRebase) {
+        // No `restack-progress.json` was written, so `dub continue` cannot
+        // resume on its own — point the user at the underlying git command,
+        // then `dub restack` afterwards to rebase descendants.
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: git rebase --continue',
+          ),
+        );
+        console.log(
+          chalk.dim(
+            "  Once the rebase finishes, run 'dub restack' to rebase descendants.",
+          ),
+        );
+        console.log(
+          chalk.dim('  Or run: git rebase --abort, then dub undo, to bail.'),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
+          ),
+        );
+      }
+      return;
+    }
+    const kept = result.finalPicks.length;
+    const dropped = result.dropped.length;
+    console.log(
+      chalk.green(
+        `✔ Reordered ${kept} commit(s)${dropped > 0 ? `, dropped ${dropped}` : ''}`,
+      ),
+    );
+    if (result.rebased.length > 0) {
+      console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
+    }
+  });
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
   .action(async (branch?: string) => {
     await pr(process.cwd(), branch);
   });
+
+program
+  .command('freeze')
+  .argument('[branch]', 'Branch to freeze (defaults to current branch)')
+  .option('--downstack', 'Also freeze ancestors toward trunk')
+  .option('--upstack', 'Also freeze descendants')
+  .description(
+    "Set the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub freeze                       Freeze the current branch
+  $ dub freeze feat/auth-login       Freeze a specific tracked branch
+  $ dub freeze feat/auth-login --downstack   Freeze the branch and its ancestors
+  $ dub freeze --upstack             Freeze the current branch and its descendants`,
+  )
+  .action(
+    async (
+      branch: string | undefined,
+      options: { downstack?: boolean; upstack?: boolean },
+    ) => {
+      const result = await freeze(process.cwd(), branch, options);
+      printFreezeResult(result, 'frozen');
+    },
+  );
+
+program
+  .command('unfreeze')
+  .argument('[branch]', 'Branch to unfreeze (defaults to current branch)')
+  .option('--downstack', 'Also unfreeze ancestors toward trunk')
+  .option('--upstack', 'Also unfreeze descendants')
+  .description(
+    "Clear the 'frozen' flag on a tracked branch (passive marker; restack/sync skip lands in DUB-82)",
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub unfreeze                     Unfreeze the current branch
+  $ dub unfreeze feat/auth-login --upstack    Unfreeze a branch and its descendants`,
+  )
+  .action(
+    async (
+      branch: string | undefined,
+      options: { downstack?: boolean; upstack?: boolean },
+    ) => {
+      const result = await unfreeze(process.cwd(), branch, options);
+      printFreezeResult(result, 'unfrozen');
+    },
+  );
 
 program
   .command('rename')
@@ -2607,6 +2744,56 @@ function parseSubmitPath(value: string): SubmitPathMode {
     "Pass '--downstack' (replaces '--path current').",
     "Pass '--stack' (replaces '--path stack').",
   ]);
+}
+
+function printFreezeResult(
+  result: {
+    changed: string[];
+    unchanged: string[];
+    skipped: Array<{ branch: string; worktree: string }>;
+  },
+  pastTense: 'frozen' | 'unfrozen',
+): void {
+  if (result.changed.length === 0) {
+    if (result.unchanged.length === 0 && result.skipped.length === 0) {
+      console.log(chalk.yellow('⚠ No tracked branches were updated.'));
+      return;
+    }
+    if (result.unchanged.length > 0) {
+      console.log(
+        chalk.yellow(`⚠ Already ${pastTense}: ${result.unchanged.join(', ')}`),
+      );
+    } else {
+      console.log(
+        chalk.yellow(
+          '⚠ No tracked branches were updated — every target was checked out in another worktree.',
+        ),
+      );
+    }
+  } else {
+    console.log(
+      chalk.green(
+        `✔ ${capitalize(pastTense)} ${result.changed.length} branch(es): ${result.changed.join(', ')}`,
+      ),
+    );
+    if (result.unchanged.length > 0) {
+      console.log(
+        chalk.dim(`  ↳ already ${pastTense}: ${result.unchanged.join(', ')}`),
+      );
+    }
+  }
+  if (result.skipped.length > 0) {
+    const skippedNames = result.skipped.map((s) => s.branch).join(', ');
+    console.log(
+      chalk.dim(
+        `  ↳ skipped (checked out in another worktree): ${skippedNames}`,
+      ),
+    );
+  }
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : value[0].toUpperCase() + value.slice(1);
 }
 
 function describeScopeLabel(scope: SubmitScope): string {

@@ -18,6 +18,7 @@ import { getCurrentBranch, getDiffBetween } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import { detectActiveOperation } from '../lib/operation-state';
+import type { RebaseTodoEntry } from '../lib/rebase-todo';
 import type { ScopeMode } from '../lib/scope';
 import { getStackOverviewBatch } from '../lib/stack-overview';
 import { absorb } from './absorb';
@@ -28,6 +29,7 @@ import { create } from './create';
 import { deleteCommand } from './delete';
 import { doctor } from './doctor';
 import { fold } from './fold';
+import { freeze } from './freeze';
 import { history } from './history';
 import { logJson } from './log';
 import { mergeCheck } from './merge-check';
@@ -37,6 +39,7 @@ import { parent } from './parent';
 import { pop } from './pop';
 import { ready } from './ready';
 import { rename } from './rename';
+import { reorder } from './reorder';
 import { revert } from './revert';
 import { type SplitMode, split } from './split';
 import { squash } from './squash';
@@ -45,6 +48,7 @@ import { status } from './status';
 import { submit } from './submit';
 import { sync } from './sync';
 import { trunk } from './trunk';
+import { unfreeze } from './unfreeze';
 import { unlink } from './unlink';
 
 type JsonValue =
@@ -142,11 +146,14 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.reorder': ['entries'],
   'dubstack.revert': ['target', 'branch', 'submit'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
   'dubstack.stash-pop': ['on', 'force'],
   'dubstack.stash-list': [],
+  'dubstack.freeze': ['branch', 'upstack', 'downstack'],
+  'dubstack.unfreeze': ['branch', 'upstack', 'downstack'],
   'dubstack.absorb': ['ai', 'stack', 'dryRun'],
   'dubstack.split': [
     'mode',
@@ -539,6 +546,90 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.reorder',
+    description:
+      "Reorder or drop commits on the current tracked branch. AI clients must supply the full reordered todo (oldest-first) via `entries`; the TUI picker is bypassed. The cascading restack still runs and an undo entry is saved. Returns the resulting status ('success' | 'conflict' | 'exit' | 'cancelled' | 'no-op').",
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entries: {
+          type: 'array',
+          description:
+            'Ordered rebase todo, oldest commit first. Every commit currently between the parent and HEAD must appear exactly once; mark omissions as `action: "drop"` rather than leaving them out.',
+          items: {
+            type: 'object',
+            properties: {
+              sha: {
+                type: 'string',
+                description:
+                  'Full commit SHA (short SHA also accepted but discouraged for AI use).',
+              },
+              action: {
+                type: 'string',
+                enum: ['pick', 'drop'],
+                description:
+                  "'pick' keeps the commit; 'drop' removes it from the branch. No other rebase verbs are supported — use 'dub modify --pop' / 'dub squash' for edit/squash/reword.",
+              },
+            },
+            required: ['sha', 'action'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['entries'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.freeze',
+    description:
+      'Set the `frozen` flag on a tracked branch (stack-aware). Note: this is a passive marker only — `dub restack` and `dub sync` do NOT yet honor the flag. The enforcement wiring is tracked as DUB-82.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to freeze (defaults to the current branch).',
+        },
+        downstack: {
+          type: 'boolean',
+          description: 'Also freeze ancestors toward trunk.',
+        },
+        upstack: {
+          type: 'boolean',
+          description: 'Also freeze descendants.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.unfreeze',
+    description:
+      'Clear the `frozen` flag on a tracked branch (stack-aware). Note: the flag is a passive marker — `dub restack` and `dub sync` do NOT yet honor it, so clearing the flag has no effect on rebase behavior until DUB-82 lands.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to unfreeze (defaults to the current branch).',
+        },
+        downstack: {
+          type: 'boolean',
+          description: 'Also unfreeze ancestors toward trunk.',
+        },
+        upstack: {
+          type: 'boolean',
+          description: 'Also unfreeze descendants.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -1290,6 +1381,27 @@ async function callTool(
       }
       return mutatingToolResult(() => checkout(branch, cwd));
     }
+    case 'dubstack.reorder': {
+      const entries = parseReorderEntries(args.entries);
+      return mutatingToolResult(
+        async () =>
+          reorder(cwd, {
+            entries,
+            // Non-TTY contexts can't surface the three-option conflict
+            // prompt; resolve to "continue" so the rebase pauses for
+            // manual resolution. We flag the response as an error below
+            // so the AI client knows the repo is mid-rebase.
+            promptConflict: async () => 'continue',
+          }),
+        {
+          // Conflict/exit leaves an interactive rebase mid-flight; surface
+          // that as a tool error so AI clients see the repo state isn't
+          // clean and can prompt the human for manual recovery.
+          isError: (result) =>
+            result.status === 'conflict' || result.status === 'exit',
+        },
+      );
+    }
     case 'dubstack.revert': {
       const target = optionalString(args.target);
       if (!target) {
@@ -1353,6 +1465,20 @@ async function callTool(
       );
     case 'dubstack.stash-list':
       return jsonToolResult(await stashList(cwd));
+    case 'dubstack.freeze':
+      return mutatingToolResult(() =>
+        freeze(cwd, optionalString(args.branch), {
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+        }),
+      );
+    case 'dubstack.unfreeze':
+      return mutatingToolResult(() =>
+        unfreeze(cwd, optionalString(args.branch), {
+          upstack: optionalBoolean(args.upstack),
+          downstack: optionalBoolean(args.downstack),
+        }),
+      );
     case 'dubstack.absorb':
       return mutatingToolResult(() =>
         absorb(cwd, {
@@ -1587,8 +1713,20 @@ async function proposePrDescriptionTool(
 
 let stdioCaptureActive = false;
 
+interface MutatingToolResultOptions<T> {
+  /**
+   * Optional callback to decide whether the tool result represents a
+   * recoverable error condition (e.g. a mid-rebase conflict) that the AI
+   * client should treat as a failure rather than a success. When it returns
+   * `true`, `isError: true` is set on the JSON-RPC response so the client
+   * knows to surface the structured result for human intervention.
+   */
+  isError?: (result: T) => boolean;
+}
+
 async function mutatingToolResult<T>(
   fn: () => Promise<T>,
+  options: MutatingToolResultOptions<T> = {},
 ): Promise<ToolCallResult> {
   if (stdioCaptureActive) {
     // The server's per-line queue should already serialize tool calls; this
@@ -1634,6 +1772,7 @@ async function mutatingToolResult<T>(
       result: value,
       output: captured.join(''),
     });
+    const isError = options.isError?.(value) === true;
     return {
       content: [
         {
@@ -1642,6 +1781,7 @@ async function mutatingToolResult<T>(
         },
       ],
       structuredContent,
+      ...(isError ? { isError: true } : {}),
     };
   } finally {
     process.stdout.write = originalStdoutWrite;
@@ -1866,6 +2006,74 @@ function optionalSplitMode(value: unknown): SplitMode | undefined {
     return value;
   }
   return undefined;
+}
+
+/**
+ * Validates the `entries` argument of the `dubstack.reorder` tool call and
+ * normalises it to a `RebaseTodoEntry[]`. Surfaces a `DubError` with
+ * recovery hints when the shape is wrong so AI clients can self-correct.
+ *
+ * Enforces non-emptiness, >=2 entries (matches `reorder()` which rejects
+ * single-commit branches), well-formed shape, no duplicate SHAs, and at
+ * least one `pick`. The "every commit between parent and HEAD must appear"
+ * invariant is enforced downstream by `reorder()` itself once it can read
+ * the actual git state.
+ */
+function parseReorderEntries(value: unknown): RebaseTodoEntry[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new DubError(
+      "'entries' must be a non-empty array of {sha, action} objects.",
+      [
+        "Pass the full rebase todo, oldest commit first, e.g. [{'sha': '<sha>', 'action': 'pick'}, ...].",
+        'Call dubstack.log or git log to discover the commits to reorder.',
+      ],
+    );
+  }
+  if (value.length < 2) {
+    throw new DubError(
+      "'entries' must contain at least 2 commits; dub reorder cannot rewrite a single-commit branch.",
+      [
+        "Use 'dub modify --pop' to edit a single-commit branch.",
+        'Add more commits before invoking dubstack.reorder.',
+      ],
+    );
+  }
+  const normalized = value.map((raw, idx) => {
+    const entry = asRecord(raw);
+    const sha = typeof entry?.sha === 'string' ? entry.sha.trim() : '';
+    const action = entry?.action;
+    if (sha.length === 0 || (action !== 'pick' && action !== 'drop')) {
+      throw new DubError(
+        `'entries[${idx}]' is invalid: expected {sha: string, action: 'pick' | 'drop'}.`,
+        [
+          "Set 'action' to 'pick' (keep) or 'drop' (remove).",
+          "Pass the full commit SHA in 'sha'.",
+        ],
+      );
+    }
+    return { sha, action } satisfies RebaseTodoEntry;
+  });
+  const seen = new Set<string>();
+  for (const entry of normalized) {
+    if (seen.has(entry.sha)) {
+      throw new DubError(
+        `'entries' contains a duplicate SHA '${entry.sha}'. Each commit may appear only once.`,
+        [
+          'Remove the duplicate; mark commits to skip with `action: "drop"` instead of repeating them.',
+        ],
+      );
+    }
+    seen.add(entry.sha);
+  }
+  if (normalized.every((e) => e.action === 'drop')) {
+    throw new DubError(
+      "'entries' marks every commit as 'drop'; the rebase would leave the branch empty.",
+      [
+        "Keep at least one commit as 'pick' (use 'dub delete' if you really want to remove the branch).",
+      ],
+    );
+  }
+  return normalized;
 }
 
 function toJsonValue(value: unknown): JsonValue {
