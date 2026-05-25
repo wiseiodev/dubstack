@@ -1228,6 +1228,11 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--draft', 'Create new PRs as drafts')
+  .option(
+    '--publish',
+    'Promote existing draft PRs in the submit scope to ready for review',
+  )
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
@@ -1260,6 +1265,8 @@ Examples:
   $ dub submit --stack      Push every branch in the stack (trees supported)
   $ dub submit --branch foo Push only the 'foo' branch
   $ dub submit --dry-run    Preview what would happen
+  $ dub submit --draft      Create new PRs as drafts
+  $ dub submit --publish    Promote existing draft PRs to ready for review
   $ dub submit --ai         Generate a PR description before updating the PR body
   $ dub submit --web        Open browser PR create forms for new PRs
   $ dub submit --merge-when-ready --method squash
@@ -1273,6 +1280,11 @@ program
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
+  .option('--draft', 'Create new PRs as drafts')
+  .option(
+    '--publish',
+    'Promote existing draft PRs in the submit scope to ready for review',
+  )
   .option('--upstack', 'Submit current branch + all descendants')
   .option('--downstack', 'Submit current branch + ancestors to trunk (default)')
   .option('--stack', 'Submit the full tree from trunk')
@@ -1914,6 +1926,35 @@ program
           console.log(chalk.green(`✔ MCP mode set to '${result.mode}'`));
         } else {
           console.log(chalk.yellow(`⚠ MCP mode is already '${result.mode}'`));
+        }
+      }),
+  )
+  .addCommand(
+    new Command('submit-default')
+      .argument(
+        '[mode]',
+        'Set to auto/draft/publish (omit to inspect current value)',
+      )
+      .description('Manage the repo-local submit PR lifecycle default')
+      .action(async (mode?: string) => {
+        const { configSubmitDefault } = await import('./commands/config');
+        const result = await configSubmitDefault(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(
+              `Submit default is '${result.mode}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ Submit default set to '${result.mode}'`));
+        } else {
+          console.log(
+            chalk.yellow(`⚠ Submit default is already '${result.mode}'`),
+          );
         }
       }),
   )
@@ -2687,6 +2728,8 @@ async function runSubmit(options: {
   dryRun?: boolean;
   ai?: boolean;
   noAi?: boolean;
+  draft?: boolean;
+  publish?: boolean;
   path?: SubmitPathMode;
   upstack?: boolean;
   downstack?: boolean;
@@ -2700,6 +2743,8 @@ async function runSubmit(options: {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
     noAi: options.noAi,
+    draft: options.draft,
+    publish: options.publish,
     path: options.path,
     upstack: options.upstack,
     downstack: options.downstack,
@@ -2712,9 +2757,10 @@ async function runSubmit(options: {
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
+    const prAction = options.web ? 'check/open' : 'check/create';
     console.log(
       chalk.green(
-        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and check/create ${result.pushed.length} PR(s).`,
+        `✔ Dry-run complete (${describeScopeLabel(result.scope)}): would push ${result.pushed.length} branch(es) and ${prAction} ${result.pushed.length} PR(s).`,
       ),
     );
     return;
@@ -2726,6 +2772,13 @@ async function runSubmit(options: {
         `✔ Pushed ${result.pushed.length} branch(es), created ${result.created.length} PR(s), updated ${result.updated.length} PR(s), opened ${result.webOpened.length} PR form(s)`,
       ),
     );
+    if (result.published.length > 0) {
+      console.log(
+        chalk.green(
+          `✔ Published ${result.published.length} draft PR(s) as ready for review`,
+        ),
+      );
+    }
     for (const branch of [
       ...result.created,
       ...result.updated,

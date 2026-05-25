@@ -1,4 +1,6 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/git.js', () => ({
@@ -16,6 +18,7 @@ vi.mock('../lib/github.js', () => ({
   getPr: vi.fn(),
   getRepositoryWebUrl: vi.fn(),
   createPr: vi.fn(),
+  markPrReady: vi.fn(),
   updatePrBody: vi.fn(),
   isPrAutoMergeEnabled: vi.fn(),
   enablePrAutoMerge: vi.fn(),
@@ -56,13 +59,14 @@ import {
   getPr,
   getRepositoryWebUrl,
   isPrAutoMergeEnabled,
+  markPrReady,
   openPrCreateWebFlow,
   updatePrBody,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
 import type { DubState } from '../lib/state';
 import { readState, writeState } from '../lib/state';
-import { resolveScope, submit } from './submit';
+import { resolveScope, resolveSubmitLifecycle, submit } from './submit';
 
 const mockGetCurrentBranch = getCurrentBranch as ReturnType<typeof vi.fn>;
 const mockGetBranchTip = getBranchTip as ReturnType<typeof vi.fn>;
@@ -77,6 +81,7 @@ const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
 const mockGetRepositoryWebUrl = getRepositoryWebUrl as ReturnType<typeof vi.fn>;
 const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
+const mockMarkPrReady = markPrReady as ReturnType<typeof vi.fn>;
 const mockUpdatePrBody = updatePrBody as ReturnType<typeof vi.fn>;
 const mockIsPrAutoMergeEnabled = isPrAutoMergeEnabled as ReturnType<
   typeof vi.fn
@@ -93,9 +98,12 @@ const mockReadMetadataTemplates = readMetadataTemplates as ReturnType<
 function makeConfig(overrides?: {
   aiAssistantEnabled?: boolean;
   submitDescription?: boolean;
+  submitDefault?: 'auto' | 'draft' | 'publish';
 }) {
   return {
     aiAssistantEnabled: overrides?.aiAssistantEnabled ?? false,
+    mcpMode: 'interactive' as const,
+    submitDefault: overrides?.submitDefault ?? 'auto',
     ai: {
       defaults: {
         createMetadata: false,
@@ -172,6 +180,7 @@ beforeEach(() => {
   mockGetDiffBetween.mockResolvedValue('diff --git a/file.ts b/file.ts');
   mockGetLastCommitMessage.mockResolvedValue('feat: existing title');
   mockGetRepositoryWebUrl.mockResolvedValue('https://github.com/o/r');
+  mockMarkPrReady.mockResolvedValue(undefined);
   mockUpdatePrBody.mockResolvedValue(undefined);
   mockIsPrAutoMergeEnabled.mockResolvedValue(false);
   mockEnablePrAutoMerge.mockResolvedValue({ method: 'squash' });
@@ -438,6 +447,7 @@ describe('submit', () => {
       'feat: exact squash title',
       expect.any(String),
       '/repo',
+      { draft: false },
     );
   });
 
@@ -596,6 +606,159 @@ describe('submit', () => {
     expect(result.created).toEqual(['feat/a']);
     expect(mockPushBranch).toHaveBeenCalledWith('feat/a', '/repo');
     expect(mockWriteState).toHaveBeenCalled();
+  });
+
+  it('creates new PRs as drafts when --draft is passed', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage.mockResolvedValue('feat: new feature');
+    mockCreatePr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: new feature',
+      body: '',
+      isDraft: true,
+    });
+
+    await submit('/repo', false, { draft: true });
+
+    expect(mockCreatePr).toHaveBeenCalledWith(
+      'feat/a',
+      'main',
+      'feat: new feature',
+      expect.any(String),
+      '/repo',
+      { draft: true },
+    );
+  });
+
+  it('uses the configured draft submit default when lifecycle flags are omitted', async () => {
+    mockReadConfig.mockResolvedValue(makeConfig({ submitDefault: 'draft' }));
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage.mockResolvedValue('feat: new feature');
+    mockCreatePr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: new feature',
+      body: '',
+      isDraft: true,
+    });
+
+    await submit('/repo', false);
+
+    expect(mockCreatePr).toHaveBeenCalledWith(
+      'feat/a',
+      'main',
+      'feat: new feature',
+      expect.any(String),
+      '/repo',
+      { draft: true },
+    );
+  });
+
+  it('promotes existing draft PRs when --publish is passed', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+      isDraft: true,
+    });
+
+    const result = await submit('/repo', false, { publish: true });
+
+    expect(result.published).toEqual(['feat/a']);
+    expect(mockCreatePr).not.toHaveBeenCalled();
+    expect(mockMarkPrReady).toHaveBeenCalledWith(42, '/repo');
+  });
+
+  it('rejects --publish when a selected branch has no open PR', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+
+    await expect(submit('/repo', false, { publish: true })).rejects.toThrow(
+      "Cannot publish 'feat/a' because no open PR exists.",
+    );
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockCreatePr).not.toHaveBeenCalled();
+  });
+
+  it('rejects --publish dry-run when a selected branch has no open PR', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+
+    await expect(submit('/repo', true, { publish: true })).rejects.toThrow(
+      "Cannot publish 'feat/a' because no open PR exists.",
+    );
+    expect(mockGetPr).toHaveBeenCalledWith('feat/a', '/repo');
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockCreatePr).not.toHaveBeenCalled();
+  });
+
+  it('previews draft PR publishing during --publish dry-run without mutating GitHub', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+      isDraft: true,
+    });
+
+    await submit('/repo', true, { publish: true });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      '[dry-run] would publish draft PR #42: feat/a',
+    );
+    expect(mockPushBranch).not.toHaveBeenCalled();
+    expect(mockMarkPrReady).not.toHaveBeenCalled();
+    expect(mockUpdatePrBody).not.toHaveBeenCalled();
+    logSpy.mockRestore();
+  });
+
+  it('rejects combining --draft and --publish', async () => {
+    await expect(
+      submit('/repo', false, { draft: true, publish: true }),
+    ).rejects.toThrow("'--draft' cannot be combined with '--publish'.");
   });
 
   it('updates existing PRs instead of creating', async () => {
@@ -1060,5 +1223,37 @@ describe('resolveScope', () => {
       expect.stringContaining("'--path stack' is deprecated"),
     );
     warn.mockRestore();
+  });
+});
+
+describe('resolveSubmitLifecycle', () => {
+  it('uses auto mode to create drafts when GitHub workflows are configured', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'dub-submit-lifecycle-'));
+    try {
+      await mkdir(path.join(dir, '.github', 'workflows'), {
+        recursive: true,
+      });
+      await writeFile(
+        path.join(dir, '.github', 'workflows', 'ci.yml'),
+        'name: ci\n',
+      );
+
+      await expect(resolveSubmitLifecycle(dir, {}, 'auto')).resolves.toBe(
+        'draft',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses auto mode to create ready PRs when no workflows are configured', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'dub-submit-lifecycle-'));
+    try {
+      await expect(resolveSubmitLifecycle(dir, {}, 'auto')).resolves.toBe(
+        'ready',
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

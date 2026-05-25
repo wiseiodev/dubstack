@@ -10,6 +10,7 @@ export interface PrInfo {
   url: string;
   title: string;
   body: string;
+  isDraft?: boolean;
 }
 
 export type BranchPrLifecycleState = 'OPEN' | 'CLOSED' | 'MERGED' | 'NONE';
@@ -195,7 +196,7 @@ export async function getPr(
       '--state',
       'open',
       '--json',
-      'number,url,title,body',
+      'number,url,title,body,isDraft',
       '--jq',
       '.[0]',
     ],
@@ -985,6 +986,7 @@ export async function createPr(
   title: string,
   bodyFile: string,
   cwd: string,
+  options: { draft?: boolean } = {},
 ): Promise<PrInfo> {
   const args = [
     'pr',
@@ -998,6 +1000,9 @@ export async function createPr(
     '--body-file',
     bodyFile,
   ];
+  if (options.draft === true) {
+    args.push('--draft');
+  }
 
   let attempt = 0;
   try {
@@ -1024,6 +1029,7 @@ export async function createPr(
           url,
           title,
           body: '',
+          isDraft: options.draft === true,
         };
       },
       {
@@ -1098,6 +1104,32 @@ export async function openPrCreateWebFlow(
     ]);
   }
   return { url, bodyIncluded, bodyFilePath, bodyFileError };
+}
+
+/**
+ * Marks a draft PR as ready for review.
+ * @param prNumber - The PR number to publish
+ */
+export async function markPrReady(
+  prNumber: number,
+  cwd: string,
+): Promise<void> {
+  try {
+    await runGh(['pr', 'ready', String(prNumber)], { cwd });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
+    throw new DubError(`Failed to publish PR #${prNumber}: ${message}`, [
+      `Run 'gh pr ready ${prNumber}' manually to inspect the failure.`,
+      "Run 'gh auth status' to verify authentication, then retry.",
+    ]);
+  }
 }
 
 /**

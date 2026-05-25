@@ -15,6 +15,12 @@ dub submit --dry-run
 # Generate a PR description body with AI
 dub submit --ai
 
+# Create new PRs as drafts
+dub submit --draft
+
+# Promote existing draft PRs to ready for review
+dub submit --publish
+
 # Submit current branch + ancestors to trunk (default)
 dub submit
 
@@ -42,6 +48,8 @@ dub submit --merge-when-ready --method rebase
 | `--dry-run` | Preview submit actions without executing |
 | `--ai` | Generate a PR description body for this invocation |
 | `--no-ai` | Disable AI PR description generation for this invocation |
+| `--draft` | Create new PRs as drafts |
+| `--publish` | Promote existing draft PRs in the submit scope to ready for review |
 | (default) | Current branch + ancestors to trunk |
 | `--downstack` | Same as default — current branch + ancestors to trunk |
 | `--upstack` | Current branch + all descendants |
@@ -55,7 +63,25 @@ dub submit --merge-when-ready --method rebase
 
 Scope flags are mutually exclusive. Passing more than one (or combining a scope flag with `--path`) is a validation error.
 
+`--draft` and `--publish` are mutually exclusive. `--draft` only affects newly created PRs; existing PRs stay in their current lifecycle state. `--publish` requires every selected branch to already have an open PR.
+
 **Aliases:** `dub ss`
+
+## Submit Lifecycle Defaults
+
+```bash
+# Inspect current lifecycle default
+dub config submit-default
+
+# Create new submit PRs as drafts by default
+dub config submit-default draft
+
+# Promote existing draft PRs by default
+dub config submit-default publish
+
+# Draft when `.github/workflows/` contains workflow files; otherwise ready
+dub config submit-default auto
+```
 
 ## Migration from `--path`
 
