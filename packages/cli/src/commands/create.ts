@@ -27,6 +27,7 @@ import {
   hasStagedChanges,
   interactiveStage,
   isValidBranchName,
+  isWorkingTreeClean,
   stageAll,
   stageUpdate,
 } from '../lib/git';
@@ -177,11 +178,19 @@ export async function create(
       }
     }
 
-    if (!dryRun && !(await hasStagedChanges(cwd))) {
-      const isAggregateFlag =
-        normalizedOptions.all ||
-        normalizedOptions.update ||
-        normalizedOptions.patch;
+    const isAggregateFlag =
+      normalizedOptions.all ||
+      normalizedOptions.update ||
+      normalizedOptions.patch;
+    // In dry-run we never mutated the index, so checking the post-stage state
+    // would always be empty when --all/--update/--patch is set. Instead, look
+    // at the working tree — that's what an aggregate flag would have staged.
+    const nothingToCommit = dryRun
+      ? isAggregateFlag
+        ? await isWorkingTreeClean(cwd)
+        : !(await hasStagedChanges(cwd))
+      : !(await hasStagedChanges(cwd));
+    if (nothingToCommit) {
       const message = isAggregateFlag
         ? 'No changes to commit.'
         : 'No staged changes.';

@@ -5,6 +5,7 @@ import { getDescendants } from './graph';
 import { assertStateInvariants } from './invariants';
 import {
   addBranchToStack,
+  type DubState,
   ensureConfiguredTrunk,
   ensureState,
   findStackForBranch,
@@ -61,7 +62,12 @@ export async function trackBranch(
   }
   await validateTrackParent(cwd, branch, parent);
 
-  const state = await (dryRun ? readState(cwd) : ensureState(cwd));
+  // Dry-run must never create state on disk. Fall back to an empty in-memory
+  // state when `.git/dubstack/state.json` is missing so a fresh repo can still
+  // preview a plan (matches the `create` / `revert` dry-run pattern).
+  const state: DubState = dryRun
+    ? await readState(cwd).catch(() => ({ trunks: [], stacks: [] }))
+    : await ensureState(cwd);
   const sourceStack = findStackForBranch(state, branch);
   const destinationStack = findStackForBranch(state, parent);
 

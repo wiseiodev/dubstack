@@ -49,6 +49,13 @@ export interface MoveResult {
   rebased: string[];
   /** Branches whose PR base was retargeted. */
   retargeted: string[];
+  /**
+   * Branches that *would* have their PR base retargeted (dry-run only).
+   * Listed as "candidates" rather than "would-retarget" because dry-run does
+   * not call `gh pr view` to confirm each PR is open and has the wrong base,
+   * so this is an upper bound on what a real run would touch.
+   */
+  retargetCandidates?: string[];
   /** True when nothing changed (target was already in the requested position). */
   noOp: boolean;
   /** Human-readable explanation set when `noOp` is true. */
@@ -273,7 +280,12 @@ export async function move(
         '',
       reparented: reparents.map((r) => r.branch),
       rebased: [],
-      retargeted: candidateRetargetBranches.map((entry) => entry.name),
+      // No retarget actually ran — that requires a live `gh pr view` to
+      // confirm the PR is OPEN with a stale base. Surface the candidates
+      // separately so callers can distinguish "did happen" from "might
+      // happen".
+      retargeted: [],
+      retargetCandidates: candidateRetargetBranches.map((entry) => entry.name),
       noOp: false,
       dryRun: true,
     };

@@ -109,6 +109,29 @@ describe('--dry-run contract', () => {
     ).rejects.toThrow();
   });
 
+  it('create --dry-run -m surfaces "no staged changes" same as a real run', async () => {
+    // Per Copilot review: dry-run should still run read-only validation so
+    // the plan matches what an actual run would do. With no staged changes
+    // and a non-aggregate flag, the real run errors — dry-run must too.
+    await setupStack();
+
+    await expect(
+      create('feat/c', dir, { message: 'feat: x', dryRun: true }),
+    ).rejects.toThrow(/No staged changes/);
+  });
+
+  it('create --dry-run -a -m surfaces "no changes to commit" on a clean tree', async () => {
+    await setupStack();
+
+    await expect(
+      create('feat/c', dir, {
+        message: 'feat: x',
+        all: true,
+        dryRun: true,
+      }),
+    ).rejects.toThrow(/No changes to commit/);
+  });
+
   it('modify returns a plan with no commit or restack', async () => {
     await setupStack();
     const before = await readSnapshot();
@@ -187,6 +210,27 @@ describe('--dry-run contract', () => {
     expect(result.dryRun).toBe(true);
     expect(result.removed).toContain('feat/b');
     expectNoMutation(before, await readSnapshot());
+  });
+
+  it('track --dry-run works in a repo with no DubStack state on disk', async () => {
+    // Per Copilot review: dry-run must not require state.json to exist —
+    // ensureState would write a fresh state file, but dry-run cannot mutate
+    // disk. Verify a `dub track --dry-run` on a fresh repo succeeds.
+    await gitInRepo(dir, ['checkout', '-b', 'feat/loose']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'loose-1']);
+    const stateBefore = fs.existsSync(`${dir}/.git/dubstack/state.json`);
+
+    const result = await track(dir, 'feat/loose', {
+      parent: 'main',
+      interactive: false,
+      dryRun: true,
+    });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.branch).toBe('feat/loose');
+    expect(result.parent).toBe('main');
+    // No state file created.
+    expect(fs.existsSync(`${dir}/.git/dubstack/state.json`)).toBe(stateBefore);
   });
 
   it('track reports the planned parent without writing state', async () => {
@@ -350,6 +394,9 @@ describe('--dry-run contract', () => {
     expect(result.branch).toBe('feat/b');
     expect(result.previousParent).toBe('feat/a');
     expect(result.retargeted).toBe(false);
+    // Plan must be deterministic — no per-call UUIDs leaking into the JSON
+    // envelope.
+    expect(result.newStackId).toBe('<would-create-new-stack>');
     expectNoMutation(before, await readSnapshot());
   });
 

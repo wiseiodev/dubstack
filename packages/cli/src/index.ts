@@ -967,6 +967,13 @@ Examples:
             `✔ Dry-run: would move '${result.branch}' ${result.position} '${result.target}' (new parent: '${result.newParent}')`,
           ),
         );
+        if (result.retargetCandidates && result.retargetCandidates.length > 0) {
+          console.log(
+            chalk.dim(
+              `  ↳ retarget candidates (PRs with pr_number; real run verifies state): ${result.retargetCandidates.join(', ')}`,
+            ),
+          );
+        }
         return;
       }
       if (result.noOp) {

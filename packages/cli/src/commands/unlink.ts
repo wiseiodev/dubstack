@@ -166,11 +166,15 @@ export async function unlink(
   }
 
   if (dryRun) {
-    const projectedNewStackId = crypto.randomUUID();
+    // The real run allocates a fresh UUID for the new stack. Reporting a
+    // randomUUID here would (a) make the JSON plan nondeterministic across
+    // identical inputs and (b) guarantee the value never matches the SHA of
+    // the eventual real run, misleading scripted callers. Use a stable
+    // placeholder so consumers know the field is projected, not authoritative.
     return {
       branch,
       previousParent,
-      newStackId: projectedNewStackId,
+      newStackId: '<would-create-new-stack>',
       trunk: trunkName,
       movedDescendants: options.orphanChildren ? [] : descendants,
       orphanedChildren: options.orphanChildren ? directChildren : [],
