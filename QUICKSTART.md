@@ -170,6 +170,10 @@ dub ss --branch feat/api
 
 # AI-generate PR description body
 dub submit --ai
+
+# queue GitHub auto-merge for submitted PRs
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method squash
 ```
 
 Open PR in browser:

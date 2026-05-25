@@ -20,8 +20,11 @@ import {
 import {
   checkGhAuth,
   createPr,
+  enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  isPrAutoMergeEnabled,
+  type MergeMethod,
   type PrInfo,
   updatePrBody,
 } from '../lib/github';
@@ -64,6 +67,8 @@ export interface SubmitOptions {
   stack?: boolean;
   branch?: string;
   fix?: boolean;
+  mergeWhenReady?: boolean;
+  method?: MergeMethod;
   summaryOverrides?: Map<string, string>;
 }
 
@@ -80,6 +85,8 @@ export interface SubmitResult {
   pushed: string[];
   created: string[];
   updated: string[];
+  autoMergeEnabled: string[];
+  autoMergeSkipped: string[];
   scope: SubmitScope;
   dryRun: boolean;
 }
@@ -114,6 +121,12 @@ export async function submit(
     throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
       "Pass '--ai' alone to force AI-generated PR descriptions.",
       "Pass '--no-ai' alone to skip AI generation for this run.",
+    ]);
+  }
+  if (options.method != null && !options.mergeWhenReady) {
+    throw new DubError("'--method' requires '--merge-when-ready'.", [
+      "Pass '--merge-when-ready --method squash' to queue auto-merge with a strategy.",
+      "Omit '--method' when submitting without GitHub auto-merge.",
     ]);
   }
 
@@ -155,6 +168,8 @@ export async function submit(
     pushed: [],
     created: [],
     updated: [],
+    autoMergeEnabled: [],
+    autoMergeSkipped: [],
     scope: plan.scope,
     dryRun,
   };
@@ -274,6 +289,35 @@ export async function submit(
         }
       }
       await writeState(plan.state, cwd);
+
+      if (options.mergeWhenReady) {
+        progress.start('🔁 Enabling auto-merge', plan.branches.length);
+        let autoMergeIndex = 0;
+        for (const branch of plan.branches) {
+          const pr = prMap.get(branch.name);
+          if (!pr) continue;
+          autoMergeIndex += 1;
+          progress.update(
+            '🔁 Enabling auto-merge',
+            autoMergeIndex,
+            subTreeTagger(branch.name),
+          );
+          const alreadyEnabled = await isPrAutoMergeEnabled(pr.number, cwd);
+          if (alreadyEnabled) {
+            result.autoMergeSkipped.push(branch.name);
+            continue;
+          }
+          await enablePrAutoMerge(pr.number, cwd, {
+            method: options.method ?? 'squash',
+          });
+          result.autoMergeEnabled.push(branch.name);
+        }
+        progress.complete('🔁 Enabling auto-merge');
+      }
+    } else if (dryRun && options.mergeWhenReady) {
+      console.log(
+        `[dry-run] would enable GitHub auto-merge with '${options.method ?? 'squash'}' strategy for each submitted PR`,
+      );
     }
 
     return result;
