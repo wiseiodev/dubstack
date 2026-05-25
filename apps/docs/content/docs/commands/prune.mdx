@@ -1,0 +1,39 @@
+---
+title: dub prune
+description: Preview or remove stale tracked branches from DubStack metadata.
+---
+
+## Usage
+
+```bash
+# Preview stale tracked branches (no changes)
+dub prune
+
+# Apply the prune and remove stale metadata
+dub prune --apply
+
+# Scan every tracked stack across trunks
+dub prune --all
+
+# Skip the remote fetch (offline / fast path)
+dub prune --no-fetch
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--apply` | Apply pruning changes (default is preview only) |
+| `-a, --all` | Prune stale tracked branches across all stacks |
+| `--no-fetch` | Skip remote fetch before pruning checks |
+
+## Notes
+
+- Stale branches are those whose local and/or remote ref is gone but whose
+  tracked metadata still lives in `.git/dubstack/state.json`. The output
+  reports the reason and whether the branch still has a local or remote
+  ref.
+- Preview mode (the default) prints each stale entry and a hint to re-run
+  with `--apply`.
+
+See also: `dub doctor`, `dub untrack`, `dub delete`.

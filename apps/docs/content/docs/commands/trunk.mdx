@@ -1,0 +1,70 @@
+---
+title: dub trunk
+description: Show or manage configured trunk branches for multi-trunk repos.
+---
+
+## Usage
+
+```bash
+# Show the trunk for the current stack
+dub trunk
+
+# Show the trunk for a specific branch
+dub trunk feat/auth-login
+
+# Emit trunk info as JSON
+dub trunk --json
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--json` | Output trunk info as JSON |
+
+## Subcommands
+
+### `dub trunk list`
+
+List every configured trunk, with the default marked.
+
+```bash
+dub trunk list
+```
+
+### `dub trunk add <name>`
+
+Register an additional trunk branch (e.g. a release line).
+
+```bash
+dub trunk add main
+dub trunk add release/24.x
+```
+
+### `dub trunk remove <name>`
+
+Unregister a configured trunk.
+
+```bash
+dub trunk remove release/24.x
+```
+
+### `dub trunk set-default <name>`
+
+Set the trunk used for new untracked stacks.
+
+```bash
+dub trunk set-default main
+dub trunk set-default release/24.x
+```
+
+## Notes
+
+- Multi-trunk repos let DubStack track stacks against multiple long-lived
+  branches (e.g. `main` plus release lines). Each stack records its trunk
+  in `.git/dubstack/state.json`.
+- `dub trunk` with no subcommand prints the trunk for the inspected
+  branch — defaulting to the current branch — which makes it useful in
+  shell prompts and scripts.
+
+See also: `dub sync --all`, `dub status`, `dub log`.

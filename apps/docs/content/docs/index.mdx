@@ -3,7 +3,13 @@ title: Introduction
 description: DubStack is a CLI for stacked diffs — dependent git branches that make code review faster and more focused.
 ---
 
-DubStack is a CLI tool for managing stacked diffs — dependent git branches that make code review faster and more focused. It stores all state locally in `.git/dubstack/`, uses GitHub PRs directly via the `gh` CLI, and includes built-in AI assistance for stack-aware guidance, branch naming, commit messages, PR descriptions, and end-to-end flow previews.
+DubStack is a CLI tool for managing **tree-shaped stacks** of dependent git branches that make code review faster and more focused. It stores all state locally in `.git/dubstack/` (with an optional SQLite backend for large stacks), uses GitHub PRs directly via the `gh` CLI, and includes:
+
+- **AI across the flow** — pluggable providers (Anthropic, Gemini, OpenAI, Bedrock, Ollama, Vercel AI Gateway) for branch names, commit messages, PR descriptions, conflict resolution, and stack-aware Q&A.
+- **Agent integration** — every read command emits `--json` with `schemaVersion: 1`, and a built-in `dub mcp` server exposes stack tools to MCP-aware agents under a per-repo security model.
+- **Safe merges and retargeting** — `dub merge-next` picks the next safe PR, `dub post-merge` repairs metadata after manual merges, and the [`wiseiodev/dubstack-retarget`](https://github.com/wiseiodev/dubstack-retarget) GitHub Action retargets dependent PR bases automatically.
+- **Multi-level undo & redo** — every mutating command is recorded in a 20-entry ring buffer; `dub undo`/`dub redo` step freely until the next new mutation.
+- **Shell and IDE integration** — `dub status` for prompts, `dub completion <shell>` for shell completions, `dub man` for a generated man page, themable terminal output.
 
 ## Prerequisites
 
@@ -162,6 +168,6 @@ dub flow --ai -a
 | `dub restack` | Rebase stack onto updated parents |
 | `dub merge-next` | Merge next safe PR + maintenance |
 | `dub continue` / `dub abort` | Resume/cancel operations |
-| `dub undo` | Undo last create/restack |
+| `dub undo` / `dub redo` | Multi-level undo and redo (20-entry ring) |
 | `dub ai ask "..."` | Ask AI assistant |
 | `dub flow --ai -a` | Stage, preview, create, and submit with AI |

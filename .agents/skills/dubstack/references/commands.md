@@ -109,7 +109,11 @@ This is a concise command reference for agents using `dub`.
 
 | Command | Purpose |
 |---|---|
-| `dub undo` | Undo last `create` or `restack` mutation |
+| `dub undo` | Undo the most recent mutating `dub` command (multi-level; 20-entry ring at `.git/dubstack/undo-log.json`) |
+| `dub undo --steps N` | Roll back the last `N` operations in sequence |
+| `dub undo --list` | Show what's on the ring (newest first) |
+| `dub redo` | Replay the most recently undone operation |
+| `dub continue` / `dub abort` | Resume/cancel an interrupted restack or rebase |
 
 ## Skills Management
 

@@ -58,6 +58,7 @@ state, or GitHub. They are available in every MCP mode when the repo has
 | `dubstack.submit` | Push the current path or stack and create/update GitHub PRs |
 | `dubstack.sync` | Sync tracked branches with the remote and reconcile divergence |
 | `dubstack.checkout` | Switch to a tracked branch (stack-aware) |
+| `dubstack.back` | Return to a previously checked-out branch (`steps` optional) |
 | `dubstack.delete` | Delete a local branch and update DubStack metadata |
 | `dubstack.reorder` | Reorder or drop commits on the current tracked branch from a supplied todo |
 | `dubstack.freeze` | Mark a branch or stack scope as frozen |
@@ -75,9 +76,6 @@ state, or GitHub. They are available in every MCP mode when the repo has
 | `dubstack.stash-pop` | Pop the most recent branch-aware stash |
 
 Mutating tools are gated by the configured **MCP mode** (see below).
-
-The Tier 3 command family is still landing incrementally. `dubstack.back` will
-be added to the MCP surface when its underlying CLI command lands.
 
 ## Return shapes
 

@@ -368,13 +368,23 @@ dub stash list
 
 Useful when you start working on the wrong branch and want to move the changes elsewhere.
 
-## 11) Undo Last Stack Mutation
+## 11) Undo and Redo
 
 ```bash
+# Undo the most recent mutating dub command
 dub undo
+
+# Roll back the last N operations
+dub undo --steps 3
+
+# Show what's on the ring (newest first)
+dub undo --list
+
+# Replay the most recently undone operation
+dub redo
 ```
 
-`dub undo` supports one level for `create` and `restack` operations.
+`dub undo` is backed by a 20-entry ring buffer at `.git/dubstack/undo-log.json`. It reverses `create`, `restack`, `move`, `reorder`, `absorb`, `unlink`, `rename`, `pop`, `modify`, `freeze`/`unfreeze`, `track`/`untrack`, `delete`, `sync`, `split`, and `submit` (PR body restore only — PR retargeting and pushes are not reverted). Any new mutating command clears the redo log; until then `dub undo` ↔ `dub redo` cycle freely.
 
 ## Fast Command List
 
@@ -401,7 +411,7 @@ dub undo
 | `dub delete` | Stack-aware branch deletion |
 | `dub freeze` / `dub unfreeze` | Set/clear the `frozen` flag; restack/sync/post-merge skip frozen branches |
 | `dub continue` / `dub abort` | Resume/cancel interrupted operations |
-| `dub undo` | Undo last create/restack |
+| `dub undo` / `dub redo` | Multi-level undo and redo (20-entry ring) |
 | `dub stash` / `dub stash pop` / `dub stash list` | Branch-aware stash (refuses pop on wrong branch) |
 | `dub config ai-assistant on` | Enable repo-local AI assistant |
 | `dub config ai-provider bedrock` | Pin the repo-local AI provider |
@@ -409,6 +419,26 @@ dub undo
 | `dub ai ask "..."` | Ask AI assistant (streaming + constrained read-only repo shell tool) |
 | `dub flow --ai -a` | Stage, preview, create, and submit with AI |
 | `dub history` | Show recent Dub command history |
+
+## Programmatic And Agent Use
+
+Every read-only command supports `--json`. Payloads carry `schemaVersion: 1` and a stable shape; failures emit `{ schemaVersion, error: { message, recovery } }` with non-zero exit. Covered: `log`, `info`, `branch info`, `status`, `doctor`, `history`, `parent`, `children`, `trunk`, `merge-check`, `ready`.
+
+For MCP-aware agents (Claude Code, Cursor):
+
+```bash
+claude mcp add dubstack dub mcp
+dub config mcp-mode interactive   # read-only | interactive (default) | trusted
+dub history                       # MCP calls are audited here
+```
+
+## Optional: Theming and Storage
+
+```bash
+dub config theme dark             # or: light, auto (default), none
+dub config storage-backend sqlite # opt into SQLite for large stacks
+dub migrate storage --to sqlite   # copy state.json → SQLite
+```
 
 ## Local AI Evals
 

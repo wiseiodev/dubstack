@@ -41,7 +41,7 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Show parent/children/trunk | `dub parent`, `dub children`, `dub trunk` |
 | Submit PR stack | `dub submit` / `dub ss` |
 | Open PR in browser | `dub pr [branch|number]` |
-| Undo last create/restack | `dub undo` |
+| Undo / redo | `dub undo` / `dub redo` (multi-level, 20-entry ring) |
 
 ## Command Notes
 

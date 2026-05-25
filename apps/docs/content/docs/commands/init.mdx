@@ -1,0 +1,32 @@
+---
+title: dub init
+description: Initialize DubStack in the current git repository.
+---
+
+## Usage
+
+```bash
+# Create .git/dubstack/ and update .gitignore
+dub init
+
+# Rebuild state.json from refs/dubstack/* (recovery)
+dub init --restore-from-refs
+```
+
+`dub init` is idempotent — safe to run again on a repo that's already initialized.
+It creates an empty `state.json` under `.git/dubstack/` and ensures `.git/dubstack` is
+listed in the repo `.gitignore`.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--restore-from-refs` | Rebuild `.git/dubstack/state.json` from `refs/dubstack/*` |
+
+## Notes
+
+- Fails with a clear DubStack error if the current directory is not inside a git repo.
+- The `--restore-from-refs` mode recovers stack state after a `.git/dubstack/` wipe,
+  using the per-branch refs DubStack writes alongside its state file.
+
+See also: `dub install`, `dub config`, `dub doctor`.

@@ -1,0 +1,39 @@
+---
+title: dub status
+description: One-line status snapshot for the current branch — designed for shell prompts and IDE integrations.
+---
+
+## Usage
+
+```bash
+# One-line status (cache-only, fast)
+dub status
+
+# Structured JSON for IDE/prompt integrations
+dub status --json
+
+# Refresh PR/CI data via gh (bypass cache)
+dub status --live
+
+# Skip the PR fetch for fast prompts without gh
+dub status --no-pr
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--json` | Output the status snapshot as JSON |
+| `--live` | Bypass the overview cache and hit `gh` fresh |
+| `--no-pr` | Skip PR fetch (for fast prompts without `gh`) |
+
+## Notes
+
+- The plain-text form is one short line — safe to embed in a shell prompt.
+- The JSON form is versioned (`schemaVersion: 1`) so editor extensions and
+  prompt tools can depend on the shape.
+- The default path uses a 30-second cached overview of PR/CI state. Use
+  `--live` only when you specifically need fresh data; the cached path is
+  what makes the command prompt-fast.
+
+See also: `dub log`, `dub doctor`, `dub watch`.

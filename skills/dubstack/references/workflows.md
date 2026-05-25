@@ -84,12 +84,16 @@ dub pr 123
 ## 6) Recover from Mistakes
 
 ```bash
-dub undo
+dub undo                # undo most recent mutation
+dub undo --steps 3      # roll back the last 3
+dub undo --list         # inspect the ring
+dub redo                # replay the most recently undone op
 ```
 
 Notes:
-- `undo` supports one level.
-- Intended for reverting last `create` or `restack`.
+- `undo`/`redo` is multi-level (20-entry ring at `.git/dubstack/undo-log.json`).
+- Covers `create`, `restack`, `move`, `reorder`, `absorb`, `unlink`, `rename`, `pop`, `modify`, `freeze`/`unfreeze`, `track`/`untrack`, `delete`, `sync`, `split`, and `submit` (PR body restore only — PR retargets and pushes are not reverted).
+- A new mutating command clears the redo log.
 
 ## 7) Repair Untracked Branch Metadata
 
