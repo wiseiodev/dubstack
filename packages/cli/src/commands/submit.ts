@@ -24,6 +24,7 @@ import {
   enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  getRepositoryWebUrl,
   isPrAutoMergeEnabled,
   type MergeMethod,
   openPrCreateWebFlow,
@@ -185,6 +186,7 @@ export async function submit(
     plan.stack.branches,
     plan.rootBranch,
   );
+  let webRepoUrl: string | null = null;
 
   try {
     if (!dryRun && plan.branches.length > 0) {
@@ -217,9 +219,8 @@ export async function submit(
       const base = branch.parent as string;
 
       if (dryRun) {
-        console.log(
-          `[dry-run] would check/create PR: ${branch.name} → ${base}`,
-        );
+        const prAction = options.web ? 'check/open PR form' : 'check/create PR';
+        console.log(`[dry-run] would ${prAction}: ${branch.name} → ${base}`);
         continue;
       }
       prIndex += 1;
@@ -233,6 +234,7 @@ export async function submit(
         const title = await getLastCommitMessage(branch.name, cwd);
         const body = await buildWebCreatePrBody(
           branch,
+          title,
           plan.stack.branches,
           prMap,
           cwd,
@@ -244,6 +246,7 @@ export async function submit(
             providerConfig: config.ai.provider,
           },
         );
+        webRepoUrl ??= await getRepositoryWebUrl(cwd);
         const opened = await openPrCreateWebFlow(
           {
             branch: branch.name,
@@ -252,10 +255,18 @@ export async function submit(
             body,
           },
           cwd,
+          { repoUrl: webRepoUrl },
         );
         if (!opened.bodyIncluded && opened.bodyFilePath) {
           console.log(
             `⚠ PR body for '${branch.name}' is too large for a GitHub create URL; copy it from ${opened.bodyFilePath} into the browser form.`,
+          );
+        } else if (!opened.bodyIncluded) {
+          const reason = opened.bodyFileError
+            ? ` (${opened.bodyFileError})`
+            : '';
+          console.log(
+            `⚠ PR body for '${branch.name}' is too large for a GitHub create URL and could not be written to a temp file${reason}; paste the body manually if needed.`,
           );
         }
         result.webOpened.push(branch.name);
@@ -369,6 +380,7 @@ export async function submit(
 
 async function buildWebCreatePrBody(
   branch: Branch,
+  commitMessage: string,
   stackBranches: Branch[],
   prMap: Map<string, PrInfo>,
   cwd: string,
@@ -407,7 +419,7 @@ async function buildWebCreatePrBody(
             {
               branch: branch.name,
               baseBranch: branch.parent as string,
-              commitMessage: await getLastCommitMessage(branch.name, cwd),
+              commitMessage,
               diff: await getDiffForPrDescription(
                 branch.name,
                 branch.parent as string,

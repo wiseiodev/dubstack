@@ -40,6 +40,7 @@ import {
   retargetPrBase,
   updatePrBody,
 } from './github';
+import { removeTempFile } from './temp-text-file';
 
 const mockExeca = execa as unknown as MockInstance;
 const mockOpenUrl = openUrl as unknown as MockInstance;
@@ -715,6 +716,46 @@ describe('openPrCreateWebFlow', () => {
     expect(mockOpenUrl).toHaveBeenCalledWith(
       'https://github.com/o/r/compare/main...feat/a?expand=1&title=feat%3A+a',
     );
+    if (result.bodyFilePath) {
+      removeTempFile(result.bodyFilePath);
+    }
+  });
+
+  it('preserves the temp body file path when browser opening fails', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('no upstream configured'))
+      .mockResolvedValueOnce({
+        stdout: 'https://github.com/o/r.git',
+      });
+    mockOpenUrl.mockRejectedValueOnce(new Error('Failed to open URL'));
+
+    let bodyFilePath: string | null = null;
+    try {
+      await openPrCreateWebFlow(
+        {
+          base: 'main',
+          branch: 'feat/a',
+          title: 'feat: a',
+          body: 'x'.repeat(4001),
+        },
+        '/repo',
+      );
+      throw new Error('Expected openPrCreateWebFlow to fail');
+    } catch (error) {
+      expect(error).toMatchObject({
+        recovery: expect.arrayContaining([
+          expect.stringContaining('dubstack-pr-body-'),
+        ]),
+      });
+      const recovery = (error as { recovery?: string[] }).recovery ?? [];
+      const fileHint = recovery.find((hint) =>
+        hint.includes('dubstack-pr-body-'),
+      );
+      bodyFilePath =
+        fileHint?.match(/'([^']*dubstack-pr-body-[^']+)'/)?.[1] ?? null;
+    } finally {
+      if (bodyFilePath) removeTempFile(bodyFilePath);
+    }
   });
 });
 

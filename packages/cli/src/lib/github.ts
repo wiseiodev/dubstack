@@ -55,6 +55,7 @@ export interface PrCreateWebResult {
   url: string;
   bodyIncluded: boolean;
   bodyFilePath: string | null;
+  bodyFileError: string | null;
 }
 
 let ghRetryOverrides: Partial<RetryOptions> = {};
@@ -1070,17 +1071,33 @@ export function buildPrCreateWebUrl(
 export async function openPrCreateWebFlow(
   input: PrCreateWebInput,
   cwd: string,
+  options: { repoUrl?: string } = {},
 ): Promise<PrCreateWebResult> {
-  const repoUrl = await getRepositoryWebUrl(cwd);
+  const repoUrl = options.repoUrl ?? (await getRepositoryWebUrl(cwd));
   const bodyIncluded = input.body.length <= WEB_PR_BODY_URL_LIMIT;
-  const bodyFilePath = bodyIncluded
-    ? null
-    : writeTempMarkdownFile('pr-body', input.body);
+  let bodyFilePath: string | null = null;
+  let bodyFileError: string | null = null;
+  if (!bodyIncluded) {
+    try {
+      bodyFilePath = writeTempMarkdownFile('pr-body', input.body);
+    } catch (error) {
+      bodyFileError = error instanceof Error ? error.message : String(error);
+    }
+  }
   const url = buildPrCreateWebUrl(repoUrl, input, {
     includeBody: bodyIncluded,
   });
-  await openUrl(url);
-  return { url, bodyIncluded, bodyFilePath };
+  try {
+    await openUrl(url);
+  } catch (error) {
+    if (!bodyFilePath) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new DubError(message, [
+      `Copy the URL '${url}' into your browser manually.`,
+      `Copy the PR body from '${bodyFilePath}' into the browser form.`,
+    ]);
+  }
+  return { url, bodyIncluded, bodyFilePath, bodyFileError };
 }
 
 /**
