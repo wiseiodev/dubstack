@@ -368,7 +368,7 @@ describe('dub fold', () => {
       await expect(
         fold(dir, { branch: 'feat/child', force: true }),
       ).rejects.toThrow(
-        /Cannot fold into 'feat\/base'.*checked out in another worktree/s,
+        /Cannot run 'dub fold': branch 'feat\/base' is checked out in another worktree/,
       );
     } finally {
       await gitInRepo(dir, ['worktree', 'remove', '--force', worktreePath]);

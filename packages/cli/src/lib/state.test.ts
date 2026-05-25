@@ -1,16 +1,23 @@
+import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTestRepo } from '../../test/helpers';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { DubError } from './errors';
 import {
   addBranchToStack,
   type DubState,
   findStackForBranch,
   initState,
+  migrateStateRefsIfNeeded,
   readState,
   writeState,
 } from './state';
+import {
+  acquireStateLock,
+  getStateLockPath,
+  withStateLock,
+} from './state-lock';
 
 let dir: string;
 let cleanup: () => Promise<void>;
@@ -87,6 +94,19 @@ describe('readState', () => {
   });
 });
 
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
 describe('writeState and readState roundtrip', () => {
   it('roundtrips correctly', async () => {
     await initState(dir);
@@ -119,6 +139,17 @@ describe('writeState and readState roundtrip', () => {
     expect(loaded.stacks[0].branches[0].last_submitted_version).toBeNull();
     expect(loaded.stacks[0].branches[0].last_synced_at).toBeNull();
     expect(loaded.stacks[0].branches[0].sync_source).toBeNull();
+
+    const diskState = JSON.parse(
+      fs.readFileSync(
+        path.join(dir, '.git', 'dubstack', 'state.json'),
+        'utf-8',
+      ),
+    ) as DubState;
+    expect(diskState.stacks[0].branches[0].last_submitted_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_reconciled_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_synced_at).toBeNull();
+    expect(diskState.stacks[0].branches[0].sync_source).toBeNull();
   });
 
   it('roundtrips parent_revision correctly', async () => {
@@ -246,6 +277,488 @@ describe('writeState and readState roundtrip', () => {
       defaultTrunk: 'main',
       stacks: [],
     });
+  });
+
+  it('mirrors state to git refs after writing JSON', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          ],
+        },
+      ],
+    };
+
+    await writeState(state, dir);
+
+    const stateRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/state',
+    ]);
+    const branchRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/branches/feat/a',
+    ]);
+    expect(JSON.parse(stateRef.stdout).stacks[0].id).toBe('test-id');
+    expect(JSON.parse(branchRef.stdout).name).toBe('feat/a');
+  });
+
+  it('prunes stale branch refs before writing new branch refs', async () => {
+    await writeState(
+      {
+        stacks: [
+          {
+            id: 'test-id',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              { name: 'feat', parent: 'main', pr_number: null, pr_link: null },
+            ],
+          },
+        ],
+      },
+      dir,
+    );
+
+    await writeState(
+      {
+        stacks: [
+          {
+            id: 'test-id',
+            branches: [
+              {
+                name: 'main',
+                type: 'root',
+                parent: null,
+                pr_number: null,
+                pr_link: null,
+              },
+              {
+                name: 'feat/a',
+                parent: 'main',
+                pr_number: null,
+                pr_link: null,
+              },
+            ],
+          },
+        ],
+      },
+      dir,
+    );
+
+    const branchRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/branches/feat/a',
+    ]);
+    expect(JSON.parse(branchRef.stdout).name).toBe('feat/a');
+    await expect(
+      gitInRepo(dir, ['show-ref', '--verify', 'refs/dubstack/branches/feat']),
+    ).rejects.toThrow();
+  });
+
+  it('falls back to refs when state JSON is missing', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            { name: 'feat/a', parent: 'main', pr_number: null, pr_link: null },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    fs.rmSync(path.join(dir, '.git', 'dubstack'), {
+      recursive: true,
+      force: true,
+    });
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+    expect(loaded.stacks[0].branches.map((branch) => branch.name)).toEqual([
+      'main',
+      'feat/a',
+    ]);
+  });
+
+  it('falls back to refs when state JSON is corrupt', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    fs.writeFileSync(
+      path.join(dir, '.git', 'dubstack', 'state.json'),
+      'not json{{{',
+    );
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+  });
+
+  it('keeps ref fallback consistent when branch refs are newer than state ref', async () => {
+    const oldState: DubState = {
+      stacks: [
+        {
+          id: 'old-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(oldState, dir);
+    const newerMain = {
+      name: 'main',
+      type: 'root',
+      parent: null,
+      pr_number: 123,
+      pr_link: 'https://example.test/pr/123',
+    };
+    const objectId = childProcess
+      .execFileSync('git', ['hash-object', '-w', '--stdin'], {
+        cwd: dir,
+        input: `${JSON.stringify(newerMain, null, 2)}\n`,
+        encoding: 'utf-8',
+      })
+      .trim();
+    await gitInRepo(dir, [
+      'update-ref',
+      'refs/dubstack/branches/main',
+      objectId,
+    ]);
+    fs.rmSync(path.join(dir, '.git', 'dubstack'), {
+      recursive: true,
+      force: true,
+    });
+
+    const loaded = await readState(dir);
+
+    expect(loaded.stacks[0].id).toBe('old-id');
+    expect(loaded.stacks[0].branches[0].pr_number).toBeNull();
+  });
+
+  it('does not fail JSON writes when ref mirroring fails', async () => {
+    await gitInRepo(dir, ['update-ref', 'refs/dubstack/state/locked', 'HEAD']);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'test-id',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+
+    await writeState(state, dir);
+    const loaded = JSON.parse(
+      fs.readFileSync(
+        path.join(dir, '.git', 'dubstack', 'state.json'),
+        'utf-8',
+      ),
+    );
+
+    expect(loaded.stacks[0].id).toBe('test-id');
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to mirror DubStack state to git refs'),
+    );
+    warn.mockRestore();
+  });
+});
+
+describe('migrateStateRefsIfNeeded', () => {
+  it('returns false without warning outside a git repository', async () => {
+    const tmpDir = await fs.promises.mkdtemp('/tmp/dubstack-nongit-');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(migrateStateRefsIfNeeded(tmpDir)).resolves.toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('creates refs and a marker once for existing JSON state', async () => {
+    const dubDir = path.join(dir, '.git', 'dubstack');
+    fs.mkdirSync(dubDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dubDir, 'state.json'),
+      JSON.stringify(
+        {
+          stacks: [
+            {
+              id: 'test-id',
+              branches: [
+                {
+                  name: 'main',
+                  type: 'root',
+                  parent: null,
+                  pr_number: null,
+                  pr_link: null,
+                },
+              ],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
+    await expect(migrateStateRefsIfNeeded(dir)).resolves.toBe(true);
+    await expect(migrateStateRefsIfNeeded(dir)).resolves.toBe(false);
+
+    const stateRef = await gitInRepo(dir, [
+      'cat-file',
+      'blob',
+      'refs/dubstack/state',
+    ]);
+    expect(JSON.parse(stateRef.stdout).stacks[0].id).toBe('test-id');
+    expect(
+      fs.readFileSync(path.join(dubDir, 'refs-mirror-version'), 'utf-8'),
+    ).toBe('1\n');
+  });
+});
+
+describe('state lock', () => {
+  it('creates and clears the lockfile around write boundaries', async () => {
+    const lockPath = await getStateLockPath(dir);
+
+    await withStateLock(dir, () => {
+      expect(fs.existsSync(lockPath)).toBe(true);
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')) as {
+        pid: number;
+        startedAt: string;
+        command: string;
+      };
+      expect(lock.pid).toBe(process.pid);
+      expect(lock.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(lock.command).toContain('dub');
+    });
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('waits with feedback while another live process owns the lock', async () => {
+    const messages: string[] = [];
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: process.pid,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const second = acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 1_000,
+      onWait: (message) => messages.push(message),
+      allowReentrant: false,
+    });
+
+    await waitUntil(() => messages.length > 0);
+    expect(messages).toContain(
+      'Another dub command (PID ' +
+        `${process.pid} running \`dub sync\` since 2026-05-23T10:15:00.000Z) is currently writing state. Waiting...`,
+    );
+
+    fs.unlinkSync(lockPath);
+    const secondLock = await second;
+    await secondLock.release();
+  });
+
+  it('fails fast when a non-reentrant lock is requested in the same process', async () => {
+    const first = await acquireStateLock(dir, { commandName: 'dub sync' });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow('already held by this process');
+
+    await first.release();
+  });
+
+  it('removes a newly created lockfile when writing lock metadata fails', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const writeError = new Error('metadata write failed');
+    vi.resetModules();
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      const realWriteFileSync = actual.writeFileSync as (
+        file: fs.PathOrFileDescriptor,
+        data: string | NodeJS.ArrayBufferView,
+        options?: fs.WriteFileOptions,
+      ) => void;
+
+      return {
+        ...actual,
+        writeFileSync: (
+          file: fs.PathOrFileDescriptor,
+          data: string | NodeJS.ArrayBufferView,
+          options?: fs.WriteFileOptions,
+        ) => {
+          if (typeof file === 'number') throw writeError;
+          return realWriteFileSync(file, data, options);
+        },
+      };
+    });
+
+    try {
+      const { acquireStateLock: acquireStateLockWithWriteFailure } =
+        await import('./state-lock');
+      await expect(
+        acquireStateLockWithWriteFailure(dir, { commandName: 'dub sync' }),
+      ).rejects.toThrow(writeError);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('reclaims stale locks whose owner process is gone', async () => {
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: 2_147_483_647,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const lock = await acquireStateLock(dir, {
+      commandName: 'dub create feat/a',
+      retryMs: 10,
+      timeoutMs: 100,
+      onWait: () => {
+        throw new Error('stale lock should not wait');
+      },
+    });
+
+    expect(lock.info.command).toBe('dub create feat/a');
+    await lock.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('times out with a clean DubError when a live lock never clears', async () => {
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        retryMs: 5,
+        timeoutMs: 20,
+        onWait: () => {},
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow(DubError);
+
+    await first.release();
+  });
+
+  it('allows nested state locks in one invocation and releases after the outer lock', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const outer = await acquireStateLock(dir, { commandName: 'dub create' });
+    const inner = await acquireStateLock(dir, { commandName: 'dub create' });
+
+    await inner.release();
+    expect(fs.existsSync(lockPath)).toBe(true);
+
+    await outer.release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it('allows read-only state reads while a write lock is held', async () => {
+    await initState(dir);
+    const first = await acquireStateLock(dir, {
+      commandName: 'dub sync',
+      retryMs: 5,
+      timeoutMs: 100,
+      onWait: () => {},
+    });
+
+    await expect(readState(dir)).resolves.toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
+
+    await first.release();
   });
 });
 

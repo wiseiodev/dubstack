@@ -20,6 +20,7 @@ import {
 } from '../lib/git';
 import { getParent, readState } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
 export interface SquashOptions {
@@ -114,6 +115,7 @@ export async function squash(
       "Run 'dub log' to inspect the stack and confirm tracking state.",
     ]);
   }
+  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub squash');
 
   const commitCount = await countCommitsAhead(branch, parent, cwd);
   if (commitCount <= 1) {

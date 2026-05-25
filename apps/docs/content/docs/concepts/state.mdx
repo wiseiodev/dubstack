@@ -1,0 +1,37 @@
+---
+title: State Refs
+description: How DubStack mirrors local state into git refs for recovery.
+---
+
+DubStack keeps `.git/dubstack/state.json` as the primary state file. After each
+state write, it also mirrors the same stack metadata into local git refs:
+
+```text
+refs/dubstack/branches/<branch-name>
+refs/dubstack/state
+```
+
+The JSON file stays the fast path for normal commands. If `state.json` is
+missing or corrupted, DubStack can read the refs mirror and reconstruct the
+state in memory.
+
+## Restore From Refs
+
+Run this when `.git/dubstack/` was removed but the repository still has the
+DubStack refs:
+
+```bash
+dub init --restore-from-refs
+```
+
+That command rebuilds `.git/dubstack/state.json` from `refs/dubstack/*` and
+keeps `.git/dubstack` ignored.
+
+## Migration
+
+Repos that already have `.git/dubstack/state.json` are migrated automatically on
+the next DubStack command. The migration writes the refs mirror once and records
+`.git/dubstack/refs-mirror-version` so later commands do not repeat the work.
+
+If ref mirroring fails, DubStack prints a warning and keeps the JSON write. The
+JSON state file remains authoritative.

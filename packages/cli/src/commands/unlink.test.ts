@@ -7,6 +7,7 @@ vi.mock('../lib/git.js', async () => {
     ...actual,
     getCurrentBranch: vi.fn(),
     isWorkingTreeClean: vi.fn(),
+    listWorktreeCheckouts: vi.fn(),
   };
 });
 
@@ -41,7 +42,11 @@ import {
   clearCleanupJournal,
   startCleanupJournal,
 } from '../lib/cleanup-journal';
-import { getCurrentBranch, isWorkingTreeClean } from '../lib/git';
+import {
+  getCurrentBranch,
+  isWorkingTreeClean,
+  listWorktreeCheckouts,
+} from '../lib/git';
 import {
   checkGhAuth,
   ensureGhInstalled,
@@ -76,6 +81,7 @@ function makeState(specs: BranchSpec[]): DubState {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
+  vi.mocked(listWorktreeCheckouts).mockResolvedValue(new Map());
   vi.mocked(getCurrentBranch).mockResolvedValue('main');
   vi.mocked(writeState).mockResolvedValue(undefined);
   vi.mocked(startCleanupJournal).mockResolvedValue({

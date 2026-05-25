@@ -24,6 +24,7 @@ import { detectActiveOperation } from '../lib/operation-state';
 import type { RebaseTodoEntry } from '../lib/rebase-todo';
 import type { ScopeMode } from '../lib/scope';
 import { getStackOverviewBatch } from '../lib/stack-overview';
+import { acquireStateLock } from '../lib/state-lock';
 import { absorb } from './absorb';
 import { back } from './back';
 import { branchInfo } from './branch';
@@ -1372,14 +1373,14 @@ async function callTool(
         await proposePrDescriptionTool(cwd, args, aiMetadataDeps),
       );
     case 'dubstack.create':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         create(optionalString(args.name), cwd, {
           message: optionalString(args.message),
           ai: optionalBoolean(args.ai),
         }),
       );
     case 'dubstack.modify':
-      return mutatingToolResult(async () => {
+      return mutatingToolResult(cwd, name, async () => {
         await modify(cwd, {
           message: optionalString(args.message),
           commit: optionalBoolean(args.commit),
@@ -1388,7 +1389,7 @@ async function callTool(
         return { ok: true };
       });
     case 'dubstack.submit':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         submit(cwd, optionalBoolean(args.dryRun) ?? false, {
           upstack: optionalBoolean(args.upstack),
           downstack: optionalBoolean(args.downstack),
@@ -1401,7 +1402,7 @@ async function callTool(
         }),
       );
     case 'dubstack.sync':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         sync(cwd, {
           force: optionalBoolean(args.force),
           all: optionalBoolean(args.all),
@@ -1416,15 +1417,17 @@ async function callTool(
           'Call dubstack.list-stacks to discover tracked branch names.',
         ]);
       }
-      return mutatingToolResult(() => checkout(branch, cwd));
+      return mutatingToolResult(cwd, name, () => checkout(branch, cwd));
     }
     case 'dubstack.back':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         back(cwd, optionalPositiveInteger(args.steps) ?? 1),
       );
     case 'dubstack.reorder': {
       const entries = parseReorderEntries(args.entries);
       return mutatingToolResult(
+        cwd,
+        name,
         async () =>
           reorder(cwd, {
             entries,
@@ -1461,7 +1464,7 @@ async function callTool(
           ],
         );
       }
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         revert(cwd, target, {
           branchName: optionalString(args.branch),
           submit: optionalBoolean(args.submit),
@@ -1469,7 +1472,7 @@ async function callTool(
       );
     }
     case 'dubstack.delete':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         deleteCommand(cwd, optionalString(args.branch), {
           upstack: optionalBoolean(args.upstack),
           downstack: optionalBoolean(args.downstack),
@@ -1486,7 +1489,7 @@ async function callTool(
           'Call dubstack.log to discover tracked branch names.',
         ]);
       }
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         unlink(cwd, target, {
           noRetarget: optionalBoolean(args.noRetarget),
           orphanChildren: optionalBoolean(args.orphanChildren),
@@ -1494,11 +1497,11 @@ async function callTool(
       );
     }
     case 'dubstack.stash':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         stashPush(cwd, { message: optionalString(args.message) }),
       );
     case 'dubstack.stash-pop':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         stashPop(cwd, {
           on: optionalString(args.on),
           force: optionalBoolean(args.force),
@@ -1507,21 +1510,21 @@ async function callTool(
     case 'dubstack.stash-list':
       return jsonToolResult(await stashList(cwd));
     case 'dubstack.freeze':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         freeze(cwd, optionalString(args.branch), {
           upstack: optionalBoolean(args.upstack),
           downstack: optionalBoolean(args.downstack),
         }),
       );
     case 'dubstack.unfreeze':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         unfreeze(cwd, optionalString(args.branch), {
           upstack: optionalBoolean(args.upstack),
           downstack: optionalBoolean(args.downstack),
         }),
       );
     case 'dubstack.absorb':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         absorb(cwd, {
           ai: optionalBoolean(args.ai),
           stack: optionalBoolean(args.stack),
@@ -1557,7 +1560,7 @@ async function callTool(
           ],
         );
       }
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         split(cwd, {
           mode,
           files: optionalStringArray(args.files),
@@ -1573,14 +1576,14 @@ async function callTool(
       );
     }
     case 'dubstack.squash':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         squash(cwd, {
           message: optionalString(args.message),
           ai: optionalBoolean(args.ai),
         }),
       );
     case 'dubstack.fold':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         fold(cwd, {
           squash: optionalBoolean(args.squash),
           force: optionalBoolean(args.force) ?? true,
@@ -1588,7 +1591,7 @@ async function callTool(
         }),
       );
     case 'dubstack.pop':
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         pop(cwd, { steps: optionalPositiveInteger(args.steps) }),
       );
     case 'dubstack.rename': {
@@ -1599,7 +1602,7 @@ async function callTool(
         ]);
       }
       const oldName = optionalString(args.oldName);
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         rename(cwd, oldName ?? newName, oldName ? newName : undefined, {
           noPush: optionalBoolean(args.noPush),
         }),
@@ -1612,7 +1615,7 @@ async function callTool(
           "Pass {'branch': '<name>', 'before': '<target>'} or {'branch': '<name>', 'after': '<target>'}.",
         ]);
       }
-      return mutatingToolResult(() =>
+      return mutatingToolResult(cwd, name, () =>
         move(cwd, branch, {
           before: optionalString(args.before),
           after: optionalString(args.after),
@@ -1766,6 +1769,8 @@ interface MutatingToolResultOptions<T> {
 }
 
 async function mutatingToolResult<T>(
+  cwd: string,
+  toolName: string,
   fn: () => Promise<T>,
   options: MutatingToolResultOptions<T> = {},
 ): Promise<ToolCallResult> {
@@ -1808,7 +1813,15 @@ async function mutatingToolResult<T>(
   process.stderr.write = captureShim as unknown as typeof process.stderr.write;
 
   try {
-    const value = await fn();
+    const lock = await acquireStateLock(cwd, {
+      commandName: `mcp ${toolName}`,
+    });
+    let value: T;
+    try {
+      value = await fn();
+    } finally {
+      await lock.release();
+    }
     const structuredContent = toJsonValue({
       result: value,
       output: captured.join(''),

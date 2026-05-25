@@ -85,3 +85,22 @@ export async function attachBareRemote(localDir: string): Promise<{
     },
   };
 }
+
+export async function withBranchWorktree<T>(
+  dir: string,
+  branch: string,
+  run: (worktreeDir: string) => Promise<T>,
+): Promise<T> {
+  const safeBranch = branch.replace(/[^a-zA-Z0-9_-]+/g, '-');
+  const worktreeDir = `${dir}-${safeBranch}-worktree`;
+
+  await gitInRepo(dir, ['worktree', 'add', '--force', worktreeDir, branch]);
+  try {
+    return await run(await fs.promises.realpath(worktreeDir));
+  } finally {
+    await gitInRepo(dir, ['worktree', 'remove', '--force', worktreeDir]).catch(
+      () => undefined,
+    );
+    await fs.promises.rm(worktreeDir, { recursive: true, force: true });
+  }
+}
