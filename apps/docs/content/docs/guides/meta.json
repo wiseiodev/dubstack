@@ -6,6 +6,7 @@
     "ai-assistant",
     "mcp",
     "shell-integration",
+    "multi-trunk",
     "github-action-retarget",
     "migration-from-graphite"
   ]

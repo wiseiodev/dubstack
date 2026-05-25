@@ -1,0 +1,98 @@
+---
+title: Multi-Trunk Repositories
+description: Configure DubStack for repositories with more than one long-lived trunk branch.
+---
+
+# Multi-Trunk Repositories
+
+Some repositories keep more than one long-lived base branch, such as `main`,
+`develop`, and `release/2.0`. DubStack can track stacks independently against
+each trunk so syncing one line of work does not accidentally mutate another.
+
+## Configure Trunks
+
+Use `dub trunk list` to inspect the configured trunks:
+
+```bash
+dub trunk list
+```
+
+Register additional trunks with `dub trunk add`:
+
+```bash
+dub trunk add develop
+dub trunk add release/2.0
+```
+
+Set the default trunk used when `dub create` starts a new stack from an
+untracked branch:
+
+```bash
+dub trunk set-default develop
+```
+
+Remove a trunk only after all stacks rooted there have been deleted, untracked,
+or moved elsewhere:
+
+```bash
+dub trunk remove release/2.0
+```
+
+DubStack refuses to remove a trunk while any stack still references it.
+
+## Creating Stacks
+
+When you run `dub create` from a tracked branch, the new branch stays in that
+branch's stack and inherits that stack's trunk.
+
+When you run `dub create` from an untracked branch, DubStack uses the configured
+default trunk as the stack root:
+
+```bash
+dub trunk set-default develop
+dub create feat/new-flow
+```
+
+That creates `feat/new-flow` as a stack rooted at `develop`, even if you were on
+an untracked scratch branch when you started.
+
+## Syncing
+
+Plain `dub sync` scopes itself to the current stack and its configured trunk:
+
+```bash
+dub sync
+```
+
+Use `--all` to refresh every configured trunk and every tracked stack:
+
+```bash
+dub sync --all
+```
+
+This keeps a `main` stack and a `develop` stack independent during normal work,
+while still giving you a full-repo maintenance command when you need it.
+
+## Health Checks
+
+`dub doctor` reports stacks whose saved trunk is no longer configured:
+
+```bash
+dub doctor --all
+```
+
+If doctor reports an orphaned stack, either re-add the trunk:
+
+```bash
+dub trunk add develop
+```
+
+or inspect the stacks with `dub log --all` before removing or repairing the
+affected metadata.
+
+## Migration
+
+Existing single-trunk repositories migrate automatically. DubStack infers each
+stack's trunk from its root branch, writes `trunks`, `defaultTrunk`, and
+per-stack `trunk` fields the next time state is saved, and keeps the previous
+single-trunk behavior intact.

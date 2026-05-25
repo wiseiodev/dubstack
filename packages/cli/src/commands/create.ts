@@ -18,6 +18,7 @@ import {
   commitStaged,
   commitStagedFromFile,
   createBranch,
+  createBranchFrom,
   getBranchTip,
   getCurrentBranch,
   getDiff,
@@ -30,7 +31,14 @@ import {
   stageUpdate,
 } from '../lib/git';
 import { readMetadataTemplates } from '../lib/metadata-templates';
-import { addBranchToStack, ensureState, writeState } from '../lib/state';
+import {
+  addBranchToStack,
+  ensureState,
+  findStackForBranch,
+  getDefaultTrunk,
+  getStackTrunk,
+  writeState,
+} from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
 import { saveUndoEntry } from '../lib/undo-log';
 
@@ -137,7 +145,12 @@ export async function create(
   }
 
   const state = await ensureState(cwd);
-  const parent = await getCurrentBranch(cwd);
+  const currentBranch = await getCurrentBranch(cwd);
+  const currentStack = findStackForBranch(state, currentBranch);
+  const stackTrunk = currentStack
+    ? getStackTrunk(currentStack)
+    : getDefaultTrunk(state);
+  const parent = currentStack ? currentBranch : stackTrunk;
   let branchName = name?.trim();
   let commitMessage = normalizedOptions.message?.trim();
 
@@ -241,8 +254,12 @@ export async function create(
   );
 
   const parentRevision = await getBranchTip(parent, cwd);
-  await createBranch(branchName, cwd);
-  addBranchToStack(state, branchName, parent, parentRevision);
+  if (currentStack) {
+    await createBranch(branchName, cwd);
+  } else {
+    await createBranchFrom(branchName, parent, cwd);
+  }
+  addBranchToStack(state, branchName, parent, parentRevision, stackTrunk);
   await writeState(state, cwd);
   await appendCheckoutHistory(cwd, branchName, { via: 'create' });
 

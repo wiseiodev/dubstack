@@ -67,7 +67,13 @@ import type { SubmitPathMode, SubmitScope } from './commands/submit';
 import { submit } from './commands/submit';
 import { sync } from './commands/sync';
 import { track } from './commands/track';
-import { trunk } from './commands/trunk';
+import {
+  addTrunk,
+  listTrunks,
+  removeTrunk,
+  setDefaultTrunk,
+  trunk,
+} from './commands/trunk';
 import { undo } from './commands/undo';
 import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
@@ -1000,13 +1006,65 @@ program
     }
   });
 
-program
+const trunkCommand = program
   .command('trunk')
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
-  .description('Show trunk/root branch for the active stack')
+  .description('Show or manage configured trunk branches')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk                         Show current stack trunk
+  $ dub trunk list                    List configured trunks
+  $ dub trunk add develop             Register another trunk
+  $ dub trunk set-default develop     Use develop for new untracked stacks`,
+  )
   .action(async (branch?: string) => {
     const result = await trunk(process.cwd(), branch);
     console.log(result.trunk);
+  });
+
+trunkCommand
+  .command('list')
+  .description('List configured trunk branches')
+  .action(async () => {
+    const result = await listTrunks(process.cwd());
+    for (const entry of result.trunks) {
+      console.log(entry.default ? `${entry.name} (default)` : entry.name);
+    }
+  });
+
+trunkCommand
+  .command('add')
+  .argument('<name>', 'Trunk branch name to register')
+  .description('Register a trunk branch')
+  .action(async (name: string) => {
+    const result = await addTrunk(process.cwd(), name);
+    if (result.status === 'already-exists') {
+      console.log(
+        chalk.yellow(`⚠ Trunk '${result.trunk}' is already configured`),
+      );
+    } else {
+      console.log(chalk.green(`✔ Added trunk '${result.trunk}'`));
+    }
+  });
+
+trunkCommand
+  .command('remove')
+  .argument('<name>', 'Trunk branch name to remove')
+  .description('Remove a configured trunk branch')
+  .action(async (name: string) => {
+    const result = await removeTrunk(process.cwd(), name);
+    console.log(chalk.green(`✔ Removed trunk '${result.trunk}'`));
+  });
+
+trunkCommand
+  .command('set-default')
+  .argument('<name>', 'Configured trunk to use by default')
+  .description('Set the default trunk for new stacks')
+  .action(async (name: string) => {
+    const result = await setDefaultTrunk(process.cwd(), name);
+    console.log(chalk.green(`✔ Default trunk is now '${result.trunk}'`));
   });
 
 program

@@ -27,7 +27,11 @@ describe('init', () => {
     const statePath = path.join(dir, '.git', 'dubstack', 'state.json');
     expect(fs.existsSync(statePath)).toBe(true);
     const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
-    expect(state).toEqual({ stacks: [] });
+    expect(state).toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
 
     const gitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8');
     expect(gitignore).toContain('.git/dubstack');

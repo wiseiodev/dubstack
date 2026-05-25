@@ -52,6 +52,8 @@ import { rollbackRestack } from '../lib/restack-rollback';
 import {
   type Branch,
   findStackForBranch,
+  getConfiguredTrunks,
+  getStackTrunk,
   readState,
   writeState,
 } from '../lib/state';
@@ -470,10 +472,15 @@ export async function sync(
   // and silently overwrite local commits when `--force` is set.
   const roots = Array.from(
     new Set(
-      scopeStacks
-        .flatMap((s) => s.branches)
-        .filter((b) => b.type === 'root' && !b.detached_root)
-        .map((b) => b.name),
+      options.all
+        ? getConfiguredTrunks(state)
+        : scopeStacks
+            .filter((stack) =>
+              stack.branches.some(
+                (branch) => branch.type === 'root' && !branch.detached_root,
+              ),
+            )
+            .map((stack) => getStackTrunk(stack)),
     ),
   );
   const stackBranches = Array.from(
@@ -1360,7 +1367,9 @@ export async function sync(
 
     if (options.restack) {
       console.log('🥞 Restacking branches...');
-      const rootsToRestack = options.all ? roots : [roots[0]].filter(Boolean);
+      const rootsToRestack = options.all
+        ? Array.from(new Set(scopeStacks.map((stack) => getStackTrunk(stack))))
+        : [roots[0]].filter(Boolean);
       for (const root of rootsToRestack) {
         if (recordWorktreeSkip(root)) continue;
         await checkoutBranch(root, cwd);
