@@ -55,6 +55,7 @@ import { rename } from './commands/rename';
 import { reorder } from './commands/reorder';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
+import { revert } from './commands/revert';
 import type { SplitMode } from './commands/split';
 import { split } from './commands/split';
 import { stashList, stashPop, stashPush } from './commands/stash';
@@ -2208,6 +2209,62 @@ Examples:
         console.log(
           chalk.dim(
             `  ℹ Old remote branch '${result.oldName}' may still exist. Run 'git push origin --delete ${result.oldName}' to clean it up.`,
+          ),
+        );
+      }
+    },
+  );
+
+program
+  .command('revert')
+  .argument('<target>', 'Merged PR number (e.g. 123) or commit SHA to revert')
+  .option('-b, --branch <name>', 'Override the auto-generated branch name')
+  .option('--submit', 'Push the revert branch and open a PR after creating it')
+  .option(
+    '--edit-message',
+    "Open the editor for the revert commit message instead of '--no-edit'",
+  )
+  .description(
+    'Create a branch on trunk that reverts a merged PR or commit and track it',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub revert 123                       Revert merged PR #123 onto trunk
+  $ dub revert abc1234                   Revert commit abc1234 onto trunk
+  $ dub revert 123 --submit              Revert + push + open a PR
+  $ dub revert 123 -b revert/api-rollback  Use a custom branch name`,
+  )
+  .action(
+    async (
+      target: string,
+      options: { branch?: string; submit?: boolean; editMessage?: boolean },
+    ) => {
+      const result = await revert(process.cwd(), target, {
+        branchName: options.branch,
+        submit: options.submit,
+        editMessage: options.editMessage,
+      });
+      const origin =
+        result.prNumber != null
+          ? `PR #${result.prNumber}`
+          : `commit ${result.revertedShortSha}`;
+      console.log(
+        chalk.green(
+          `✔ Created revert branch '${result.branch}' on '${result.trunk}' (reverts ${origin})`,
+        ),
+      );
+      if (result.submitResult) {
+        console.log(
+          chalk.dim(
+            `  ↳ Submitted: pushed ${result.submitResult.pushed.length}, created ${result.submitResult.created.length}, updated ${result.submitResult.updated.length}`,
+          ),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            `  ↳ Run 'dub submit' to push the branch and open a PR, or rerun with '--submit'.`,
           ),
         );
       }
