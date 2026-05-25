@@ -128,7 +128,13 @@ export async function submit(
   options: SubmitOptions = {},
   depsArg?: SubmitDependencies,
 ): Promise<SubmitResult> {
-  const deps = depsArg ?? (await loadAiDeps());
+  // Resolve AI deps lazily — non-AI submits (the common case) must not pay
+  // the @ai-sdk/* import cost.
+  let depsCache: SubmitDependencies | null = depsArg ?? null;
+  const getDeps = async (): Promise<SubmitDependencies> => {
+    if (!depsCache) depsCache = await loadAiDeps();
+    return depsCache;
+  };
   if (options.ai && options.noAi) {
     throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
       "Pass '--ai' alone to force AI-generated PR descriptions.",
@@ -308,7 +314,7 @@ export async function submit(
           cwd,
           {
             useAi,
-            deps,
+            getDeps,
             summaryOverrides: options.summaryOverrides,
             prTemplate: templates?.prTemplate ?? null,
             providerConfig: config.ai.provider,
@@ -401,7 +407,7 @@ export async function submit(
         cwd,
         {
           useAi,
-          deps,
+          getDeps,
           summaryOverrides: options.summaryOverrides,
           prTemplate: templates?.prTemplate ?? null,
           providerConfig: config.ai.provider,
@@ -515,7 +521,7 @@ async function buildWebCreatePrBody(
   cwd: string,
   options: {
     useAi: boolean;
-    deps: SubmitDependencies;
+    getDeps: () => Promise<SubmitDependencies>;
     summaryOverrides?: Map<string, string>;
     prTemplate: string | null;
     providerConfig: NonNullable<
@@ -555,7 +561,7 @@ async function buildWebCreatePrBody(
                 cwd,
               ),
             },
-            options.deps,
+            await options.getDeps(),
             {
               prTemplate: options.prTemplate,
             },
@@ -986,7 +992,7 @@ async function updateAllPrBodies(
   cwd: string,
   options: {
     useAi: boolean;
-    deps: SubmitDependencies;
+    getDeps: () => Promise<SubmitDependencies>;
     summaryOverrides?: Map<string, string>;
     prTemplate: string | null;
     providerConfig: NonNullable<
@@ -1083,7 +1089,7 @@ async function updateAllPrBodies(
                   cwd,
                 ),
               },
-              options.deps,
+              await options.getDeps(),
               {
                 prTemplate: options.prTemplate,
               },

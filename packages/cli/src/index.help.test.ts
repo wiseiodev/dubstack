@@ -15,17 +15,19 @@ function walk(
 }
 
 function renderHelp(cmd: Command): string {
+  // Use Commander's per-command `configureOutput` to redirect help output into
+  // a local buffer. Avoids mutating `process.stdout.write` globally, which
+  // would race with other vitest workers running in parallel.
   let buffer = '';
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    buffer +=
-      typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
-    return true;
-  }) as typeof process.stdout.write;
+  const writer = (text: string) => {
+    buffer += text;
+  };
+  const previous = cmd.configureOutput();
+  cmd.configureOutput({ writeOut: writer, writeErr: writer });
   try {
     cmd.outputHelp();
   } finally {
-    process.stdout.write = originalWrite;
+    cmd.configureOutput(previous);
   }
   return buffer;
 }

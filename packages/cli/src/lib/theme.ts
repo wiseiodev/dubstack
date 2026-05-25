@@ -43,9 +43,21 @@ export function resolveTheme(
 }
 
 /**
- * Apply the resolved theme globally by adjusting chalk's color level.
- * Returns a themed Chalk instance whose `.level` matches the resolved theme so
- * callers can rely on a single instance instead of mutating the global one.
+ * Apply the resolved theme by mutating the process-wide `chalk.level` when the
+ * theme is `none`. The mutation is intentional — every CLI module imports the
+ * global `chalk` directly, so flipping the level once at program startup is the
+ * only practical way to disable colors across all of them without a refactor.
+ *
+ * `dark` and `light` currently leave chalk's auto-detected level untouched.
+ * The `ThemeMode` API accepts both for forward-compat: a future change can
+ * introduce a palette swap (e.g. `themeColorFor('dark', { dark, light })`)
+ * without breaking the on-disk config or the `dub config theme` UX. Until
+ * that lands, `dark`/`light`/`auto` produce identical output and only `none`
+ * has an observable effect — flagged here so reviewers know the limitation
+ * is recorded rather than overlooked.
+ *
+ * Tests must never call this function: it leaks across the worker. Use
+ * `themedChalk()` instead when you need a non-global Chalk instance.
  */
 export function applyTheme(theme: ResolvedTheme): ChalkInstance {
   if (theme === 'none') {

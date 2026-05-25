@@ -21,7 +21,7 @@ description: Map Sapling (`sl`) commands to DubStack and migrate a Sapling stack
 | `sl pull --rebase` | `dub sync` | Fetch trunks, restack tracked stacks |
 | `sl status` | `dub status` | DubStack also surfaces stack context |
 | `sl uncommit` | `git reset --soft HEAD^` | DubStack does not own this primitive; use git |
-| `sl debugdiff` / `sl pr` | `dub pr` | Opens GitHub PR for current branch |
+| `sl pr` | `dub pr` | Opens GitHub PR for current branch |
 | `sl land` / `sl pr land` | `dub merge-next` / `dub land` | Refuses to land out-of-order PRs |
 
 ## Conceptual Differences

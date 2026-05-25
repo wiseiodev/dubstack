@@ -115,7 +115,6 @@ export async function absorb(
   options: AbsorbOptions = {},
   depsArg?: AbsorbDependencies,
 ): Promise<AbsorbResult> {
-  const deps = depsArg ?? (await defaultDeps());
   if (options.ai && options.stack) {
     throw new DubError("'--ai' cannot be combined with '--stack'.", [
       "Run 'dub absorb --ai' to resolve ambiguous WIP commits on the current branch.",
@@ -167,7 +166,14 @@ export async function absorb(
     return runAutoMode(cwd, originalBranch, state, stack, options);
   }
   if (mode === 'ai') {
-    return runAiMode(cwd, originalBranch, state, stack, options, deps);
+    return runAiMode(
+      cwd,
+      originalBranch,
+      state,
+      stack,
+      options,
+      depsArg ?? (await defaultDeps()),
+    );
   }
   return runStackMode(cwd, originalBranch, state, stack, options);
 }

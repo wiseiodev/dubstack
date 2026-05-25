@@ -14,9 +14,8 @@ This guide explains the model shift and walks through migrating an in-flight ghs
 | `ghstack` | `dub submit --stack` | Push everything in the stack and open/refresh PRs |
 | `ghstack land $URL` | `dub merge-next` / `dub land` | Land the next safe PR; retargets dependents |
 | `ghstack unlink` | `dub unlink <branch>` | Detach a branch from its parent |
-| `ghstack rage` | `dub doctor` | Diagnostic for misconfigured state |
-| `ghstack checkout $URL` | `dub co <branch>` | Charles will name the branch; pick it from the picker |
-| `ghstack hash` (n/a) | `dub info` | Stack-aware branch metadata |
+| `ghstack checkout $URL` | `dub co <branch>` | ghstack materialises a local branch from the PR's synthesised remote refs; with DubStack the PR's branch already exists locally, so just `dub co` it |
+| (no equivalent) | `dub info` | Stack-aware branch metadata is implicit in ghstack's commit-per-PR model |
 | Implicit rebase on push | `dub restack` | Explicit, undo-able restack |
 | Implicit PR description prefix | `dub submit --ai` or templated body | DubStack does not auto-prefix; configure via templates |
 

@@ -138,7 +138,6 @@ export async function split(
   options: SplitOptions,
   depsArg?: SplitDependencies,
 ): Promise<SplitResult> {
-  const deps = depsArg ?? (await loadAiDeps());
   if (!(await isWorkingTreeClean(cwd))) {
     throw new DubError('Working tree has uncommitted changes.', [
       "Run 'git status' to see uncommitted changes.",
@@ -232,7 +231,7 @@ export async function split(
       parentBranch,
       parentTip,
       sourceTip: sourceTipBefore,
-      deps,
+      deps: depsArg ?? (await loadAiDeps()),
       providerConfig: config.ai.provider,
     });
     if (options.dryRun) {

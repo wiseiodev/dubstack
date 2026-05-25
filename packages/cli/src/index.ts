@@ -18,6 +18,7 @@
  * @packageDocumentation
  */
 
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import chalk, { Chalk } from 'chalk';
@@ -4615,12 +4616,14 @@ export { program };
 
 // Only auto-run when this file is the entrypoint — when vitest (or any other
 // harness) imports it for introspection we leave the program constructed but
-// dormant.
+// dormant. Compare via `realpathSync` so the published bin works: pnpm/npm
+// installs `node_modules/.bin/dub` as a symlink to `dubstack/dist/index.js`,
+// and `import.meta.url` always resolves through the symlink.
 function isCliEntrypoint(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
   try {
-    return import.meta.url === pathToFileURL(entry).href;
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
   } catch {
     return false;
   }

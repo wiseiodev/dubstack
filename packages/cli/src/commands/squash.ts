@@ -80,7 +80,6 @@ export async function squash(
   options: SquashOptions = {},
   depsArg?: SquashDependencies,
 ): Promise<SquashResult> {
-  const deps = depsArg ?? (await loadAiDeps());
   if (options.ai && options.message) {
     throw new DubError("'--ai' cannot be combined with '-m'.", [
       "Drop '--ai' to use the message you supplied.",
@@ -134,6 +133,7 @@ export async function squash(
         `Rerun 'dub squash -m "<message>"' without '--ai'.`,
       ]);
     }
+    const deps = depsArg ?? (await loadAiDeps());
     message = await generateAiSquashMessage(
       { branch, originalMessages },
       deps,
