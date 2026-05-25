@@ -37,3 +37,10 @@ issue rather than a regression.
 ## Result
 
 No critical or major findings remain.
+
+## Review Follow-up
+
+Copilot later flagged one valid review nit: branch-protection recovery hints used
+the raw branch name while the actual API request URL-encoded the branch segment.
+The follow-up fix now builds the endpoint once and reuses it for both the `gh api`
+call and recovery hints, with regression coverage for `release/next`.

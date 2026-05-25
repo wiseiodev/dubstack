@@ -23,10 +23,11 @@ skill references. No `.tsx` files or browser-demoable UI surfaces changed.
 
 ## Evidence
 
-- `pnpm --filter dubstack exec vitest run src/commands/merge-next.test.ts src/lib/github.test.ts` passed: 2 files / 88 tests.
+- `pnpm --filter dubstack exec vitest run src/commands/merge-next.test.ts src/lib/github.test.ts` passed before review follow-up: 2 files / 88 tests.
+- `pnpm --filter dubstack exec vitest run src/lib/github.test.ts` passed after review follow-up: 1 file / 70 tests.
 - `pnpm checks` passed after `pnpm checks:fix` applied formatting/import ordering.
 - `pnpm typecheck` passed across `docs`, `dubstack`, and `dubstack-retarget-action`.
-- `pnpm test` passed across all repo packages: 6 tasks, 123 CLI test files, 1278 CLI tests, docs tests, and retarget-action tests.
+- `pnpm test` passed across all repo packages after review follow-up: 6 tasks, 123 CLI test files, 1279 CLI tests, docs tests, and retarget-action tests.
 
 ## Follow-up flag
 

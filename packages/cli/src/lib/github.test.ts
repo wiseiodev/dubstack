@@ -840,6 +840,23 @@ describe('getBranchMergeQueueStatus', () => {
       { cwd: '/repo' },
     );
   });
+
+  it('uses the encoded branch endpoint in branch-protection recovery hints', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: '{invalid-json',
+    });
+
+    await expect(
+      getBranchMergeQueueStatus('release/next', '/repo'),
+    ).rejects.toMatchObject({
+      message: "Failed to parse branch protection for 'release/next'.",
+      recovery: expect.arrayContaining([
+        expect.stringContaining(
+          'repos/{owner}/{repo}/branches/release%2Fnext/protection',
+        ),
+      ]),
+    });
+  });
 });
 
 describe('enqueuePrToMergeQueue', () => {

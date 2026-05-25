@@ -888,14 +888,9 @@ export async function getBranchMergeQueueStatus(
   cwd: string,
 ): Promise<BranchProtectionMergeQueueStatus> {
   let stdout: string;
+  const endpoint = branchProtectionEndpoint(branch);
   try {
-    const result = await runGh(
-      [
-        'api',
-        `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`,
-      ],
-      { cwd },
-    );
+    const result = await runGh(['api', endpoint], { cwd });
     stdout = result.stdout;
   } catch (error) {
     const root = unwrapRetryError(error);
@@ -906,7 +901,7 @@ export async function getBranchMergeQueueStatus(
     throw new DubError(
       `Failed to inspect branch protection for '${branch}': ${message}`,
       [
-        `Run 'gh api repos/{owner}/{repo}/branches/${branch}/protection' to inspect the response.`,
+        `Run 'gh api ${endpoint}' to inspect the response.`,
         "Run 'gh auth status' to verify authentication, then retry.",
       ],
     );
@@ -926,10 +921,14 @@ export async function getBranchMergeQueueStatus(
     };
   } catch {
     throw new DubError(`Failed to parse branch protection for '${branch}'.`, [
-      `Run 'gh api repos/{owner}/{repo}/branches/${branch}/protection' to inspect the response.`,
+      `Run 'gh api ${endpoint}' to inspect the response.`,
       'Retry once GitHub is healthy.',
     ]);
   }
+}
+
+function branchProtectionEndpoint(branch: string): string {
+  return `repos/{owner}/{repo}/branches/${encodeURIComponent(branch)}/protection`;
 }
 
 /**
