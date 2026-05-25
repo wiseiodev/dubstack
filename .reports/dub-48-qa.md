@@ -12,6 +12,7 @@ files changed and there is no browser-demoable interaction to record.
 
 - `dub ready` keeps the existing doctor + submit preflight behavior.
 - `dub ready --ai` gathers parent-relative diff, commit messages, optional PR body, and runs the AI readiness helper per scoped branch.
+- `dub ready --ai` does not treat a missing pre-submit PR description as a readiness failure.
 - Critical AI findings block readiness unless `--ai-skip-review` is set.
 - Major/minor AI findings remain warnings.
 - `--scope current|downstack|stack` continues to select the same branch set for the AI review.
@@ -22,7 +23,7 @@ files changed and there is no browser-demoable interaction to record.
 
 - `pnpm checks` passed.
 - `pnpm typecheck` passed.
-- `pnpm test` passed after merging `origin/main`: 116 files / 1160 tests.
+- `pnpm test` passed after the adversarial prompt fix: 116 files / 1161 tests.
 - Focused tests passed: `pnpm --filter dubstack exec vitest run src/commands/ready.test.ts src/lib/ai-readiness.test.ts`.
 - `pnpm evals` was attempted and failed before running assertions because no AI provider is configured in this environment.
 

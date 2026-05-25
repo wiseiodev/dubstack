@@ -76,4 +76,36 @@ describe('aiReviewBranch', () => {
       ),
     ).rejects.toThrow(DubError);
   });
+
+  it('tells the judge not to flag a missing pre-submit PR description', async () => {
+    process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
+    const generateText = vi.fn().mockResolvedValue({ text: '[]' });
+
+    await aiReviewBranch(
+      {
+        branch: 'feat/a',
+        baseBranch: 'main',
+        diff: '',
+        commitMessages: [],
+        prDescription: null,
+      },
+      {
+        generateText,
+        createGoogleGenerativeAI: vi.fn().mockReturnValue(vi.fn()),
+        createGateway: vi.fn(),
+      },
+      {
+        selected: 'gemini',
+        models: { gemini: null, gateway: null, bedrock: null },
+      },
+    );
+
+    expect(generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'Do not report a missing PR description',
+        ),
+      }),
+    );
+  });
 });
