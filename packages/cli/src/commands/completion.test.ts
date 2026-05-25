@@ -31,6 +31,13 @@ function buildFixtureProgram(): Command {
     .command('split')
     .option('--by-file <files...>', 'Move specific files')
     .description('Split branch');
+  // `revert <target>` — positional argName "target" must NOT trigger branch
+  // completion. `target` is a PR number or commit SHA.
+  program
+    .command('revert')
+    .argument('<target>', 'PR number or commit SHA')
+    .description('Revert a merged PR or commit');
+  // `trunk` has subcommands AND a `[branch]` positional. Subcommands win.
   const trunk = program.command('trunk').description('Show or manage trunks');
   trunk.command('list').description('List configured trunks');
   trunk.command('add').argument('<name>').description('Add a trunk');
@@ -88,6 +95,25 @@ describe('completion', () => {
       }
       expect(result.status, result.stderr?.toString()).toBe(0);
     });
+
+    it('does not branch-complete `revert` (positional is a PR/SHA, not a branch)', () => {
+      const out = completion(buildFixtureProgram(), 'bash');
+      // The branch-arg case enumerates a `|`-separated pattern list. `revert`
+      // must not appear inside it. We also make sure `revert` is in the
+      // top-level command list so the negative assertion is meaningful.
+      expect(out).toContain('revert');
+      const branchCase = out.split('Branch-arg subcommands')[1] ?? '';
+      const branchPattern = branchCase.split('esac')[0] ?? '';
+      expect(branchPattern).not.toMatch(/\brevert\b/);
+    });
+
+    it('does not branch-complete `trunk` (subcommands take priority)', () => {
+      const out = completion(buildFixtureProgram(), 'bash');
+      expect(out).toContain('trunk');
+      const branchCase = out.split('Branch-arg subcommands')[1] ?? '';
+      const branchPattern = branchCase.split('esac')[0] ?? '';
+      expect(branchPattern).not.toMatch(/\btrunk\b/);
+    });
   });
 
   describe('zsh', () => {
@@ -118,6 +144,26 @@ describe('completion', () => {
         return; // zsh not installed; skip syntax check
       }
       expect(result.status, result.stderr?.toString()).toBe(0);
+    });
+
+    it('prefers subcommand completion over branch completion for parents with both', () => {
+      const out = completion(buildFixtureProgram(), 'zsh');
+      // The `trunk` arm should resolve to a subcommand spec, not branches.
+      const trunkArm = out.split('trunk)')[1]?.split(';;')[0] ?? '';
+      expect(trunkArm).toContain('subcommand');
+      expect(trunkArm).not.toContain('__dub_branches');
+    });
+
+    it('does not route `revert` to __dub_branches', () => {
+      const out = completion(buildFixtureProgram(), 'zsh');
+      const revertArm = out.split('revert)')[1]?.split(';;')[0] ?? '';
+      expect(revertArm).not.toContain('__dub_branches');
+    });
+
+    it('guards __dub_branches against empty repos', () => {
+      const out = completion(buildFixtureProgram(), 'zsh');
+      // Empty `git for-each-ref` output should short-circuit before _describe.
+      expect(out).toMatch(/\[\[ -z \$raw \]\] && return/);
     });
   });
 
@@ -153,6 +199,22 @@ describe('completion', () => {
         return; // fish not installed; skip syntax check
       }
       expect(result.status, result.stderr?.toString()).toBe(0);
+    });
+
+    it('escapes backslashes in option descriptions', () => {
+      const program = new Command();
+      program.name('dub');
+      program
+        .command('weird')
+        .option('--path <p>', 'Windows-style path like C:\\Users\\foo');
+      const out = completion(program, 'fish');
+      // Backslash must be doubled so fish does not interpret it as an escape.
+      expect(out).toContain('C:\\\\Users\\\\foo');
+    });
+
+    it('does not branch-complete `revert`', () => {
+      const out = completion(buildFixtureProgram(), 'fish');
+      expect(out).not.toMatch(/__dub_using_command revert.*\(__dub_branches\)/);
     });
   });
 });

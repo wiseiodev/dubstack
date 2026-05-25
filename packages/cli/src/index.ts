@@ -3658,6 +3658,14 @@ program.hook('postAction', async () => {
 });
 
 async function main() {
+  // `dub completion bash | source /dev/stdin`, `dub man | head -1`, and
+  // similar pipelines close stdout before we finish writing. Without this
+  // listener Node 22 surfaces EPIPE as an unhandled error and exits 1.
+  // Treat a closed stdout as a normal early-exit signal.
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+  });
+
   try {
     const rawArgs = process.argv.slice(2);
     historyArgsForCapture = rawArgs;

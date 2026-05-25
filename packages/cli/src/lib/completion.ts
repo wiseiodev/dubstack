@@ -92,20 +92,28 @@ export function describeProgram(program: Command): ProgramSpec {
 
 function describeCommand(cmd: CommandLike, ancestors: string[]): CommandSpec {
   const name = cmd.name();
+  const aliases = cmd.aliases();
   const argSpecs = (cmd._args ?? []).map((arg) => {
     const argName =
       typeof arg.name === 'function' ? arg.name() : (arg._name ?? '');
     return argName;
   });
   const usageArgs = argSpecs.join(' ');
-  const lower = `${name} ${usageArgs}`.toLowerCase();
+  // Allow-list only. A broader regex over the description used to match
+  // `dub revert <target>` (a PR number / SHA) and `dub trunk` (which has
+  // subcommands), producing misleading branch completions.
   const branchPositional =
     BRANCH_ARG_COMMANDS.includes(
       name as (typeof BRANCH_ARG_COMMANDS)[number],
-    ) || /\b(branch|target|trunk)\b/.test(lower);
+    ) ||
+    aliases.some((alias) =>
+      BRANCH_ARG_COMMANDS.includes(
+        alias as (typeof BRANCH_ARG_COMMANDS)[number],
+      ),
+    );
   return {
     name,
-    aliases: cmd.aliases(),
+    aliases,
     description: cmd.description(),
     options: cmd.options.map(describeOption),
     subcommands: cmd.commands.map((c) =>
@@ -314,12 +322,18 @@ export function generateZshCompletion(program: Command): string {
 # dub zsh completion
 #
 # Usage:
-#   dub completion zsh > "\${fpath[1]}/_dub"
-#   # then restart your shell or run: compinit
+#   mkdir -p ~/.zsh/completions
+#   dub completion zsh > ~/.zsh/completions/_dub
+#   # ensure ~/.zshrc has, before compinit:
+#   #   fpath=(~/.zsh/completions $fpath)
+#   #   autoload -Uz compinit && compinit
 
 __dub_branches() {
   local -a branches
-  branches=("\${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)}")
+  local raw
+  raw=$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)
+  [[ -z $raw ]] && return
+  branches=("\${(@f)raw}")
   _describe -t branches 'branch' branches
 }
 
@@ -369,23 +383,33 @@ function zshOptionSpec(option: OptionSpec): string {
 }
 
 function zshArgSpec(cmd: CommandSpec): string {
-  if (cmd.takesBranchArg) {
-    return `'*::branch:__dub_branches'`;
-  }
-  if (cmd.takesFileArg) {
-    return `'*::file:_files'`;
-  }
+  // Subcommands take priority: `dub trunk <Tab>` must offer list/add/remove,
+  // not branch names, even if the parent declares a [branch] positional.
   if (cmd.subcommands.length > 0) {
     const subs = cmd.subcommands
       .map((s) => `'${s.name}:${escapeZsh(s.description)}'`)
       .join(' ');
     return `'1:subcommand:((${subs}))'`;
   }
+  if (cmd.takesBranchArg) {
+    return `'*::branch:__dub_branches'`;
+  }
+  if (cmd.takesFileArg) {
+    return `'*::file:_files'`;
+  }
   return `':: :->done'`;
 }
 
 function escapeZsh(value: string): string {
-  return value.replace(/'/g, "'\\''").replace(/[[\]:]/g, '\\$&');
+  // Single-quoted zsh strings are mostly literal — the only character that
+  // needs special treatment is `'` itself (close-quote-then-reopen idiom).
+  // Escape `[`, `]`, and `:` because they are syntactically meaningful inside
+  // _arguments option specs and _describe candidate strings. Also escape
+  // backticks and dollar signs defensively: even inside single quotes they
+  // do not expand, but when an _arguments spec is reconstructed by zsh some
+  // contexts re-evaluate the description, so neutralising them keeps the
+  // generator output robust against future zsh quirks.
+  return value.replace(/'/g, "'\\''").replace(/[[\]:`$]/g, '\\$&');
 }
 
 export function generateFishCompletion(program: Command): string {
@@ -466,6 +490,13 @@ export function generateFishCompletion(program: Command): string {
 }
 
 function escapeFish(value: string): string {
-  // Strip newlines and escape single quotes for the surrounding fish string.
-  return value.replace(/[\r\n]+/g, ' ').replace(/'/g, "\\'");
+  // Fish single-quoted strings honor `\\` and `\'` as escapes, so a literal
+  // backslash in a description must be doubled before any single-quote
+  // escaping happens. Order matters: backslash first, then quote, then
+  // collapse newlines so a multi-line description never breaks the
+  // surrounding `complete -d '...'`.
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/[\r\n]+/g, ' ');
 }

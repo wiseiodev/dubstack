@@ -124,12 +124,21 @@ the location your shell loads completions from:
 # bash
 dub completion bash > ~/.local/share/bash-completion/completions/dub
 
-# zsh — drop into any directory on $fpath, then restart your shell
-dub completion zsh > "${fpath[1]}/_dub"
+# zsh — write to a user-owned directory you put on $fpath before compinit
+mkdir -p ~/.zsh/completions
+dub completion zsh > ~/.zsh/completions/_dub
+# then ensure these two lines are in ~/.zshrc before any `compinit` call:
+#   fpath=(~/.zsh/completions $fpath)
+#   autoload -Uz compinit && compinit
 
 # fish
 dub completion fish > ~/.config/fish/completions/dub.fish
 ```
+
+`${fpath[1]}` on most systems points at a root-owned directory like
+`/usr/local/share/zsh/site-functions`. Writing there works for system-wide
+installs (with `sudo`), but the user-owned path above is the recommended
+default.
 
 The generated script completes:
 
