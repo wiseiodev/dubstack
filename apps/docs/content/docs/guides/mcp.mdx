@@ -32,6 +32,22 @@ The agent can call `dubstack.log` and receive structured JSON for the tracked st
 | `dubstack.children` | Returns direct children for a branch |
 | `dubstack.trunk` | Returns the trunk/root branch for a branch |
 | `dubstack.history` | Returns recent Dub command history |
+| `dubstack.branch` | Returns single-branch stack metadata |
+| `dubstack.diff` | Returns a branch diff vs its parent or an explicit base |
+| `dubstack.ready` | Returns a pre-submit readiness checklist |
+| `dubstack.merge_check` | Returns a PR/branch/stack mergeability snapshot |
+
+## AI-cooperative tools
+
+These tools call the configured AI provider but do not mutate git, DubStack
+state, or GitHub. They are available in every MCP mode when the repo has
+`dub config ai-assistant on` and a provider configured.
+
+| Tool | Description |
+|---|---|
+| `dubstack.propose_branch_name` | Suggests a branch name from a diff |
+| `dubstack.propose_commit_message` | Suggests a Conventional Commit message from a diff |
+| `dubstack.propose_pr_description` | Suggests PR markdown from branch/base/message/diff context |
 
 ## Mutating tools
 
@@ -43,8 +59,54 @@ The agent can call `dubstack.log` and receive structured JSON for the tracked st
 | `dubstack.sync` | Sync tracked branches with the remote and reconcile divergence |
 | `dubstack.checkout` | Switch to a tracked branch (stack-aware) |
 | `dubstack.delete` | Delete a local branch and update DubStack metadata |
+| `dubstack.split` | Split the current branch by file, commit, or AI proposal (`by-hunk` remains terminal-only) |
+| `dubstack.absorb` | Distribute fixup commits to their targets |
+| `dubstack.squash` | Collapse branch commits into one commit |
+| `dubstack.fold` | Combine the current branch into its parent |
+| `dubstack.pop` | Pop recent commits into staged changes |
+| `dubstack.rename` | Rename a tracked branch and update stack metadata |
+| `dubstack.move` | Move a branch before/after another branch in the stack |
+| `dubstack.unlink` | Detach a branch from its parent without deleting branches |
+| `dubstack.revert` | Create a tracked revert branch on trunk |
+| `dubstack.stash` | Create a branch-aware stash entry |
+| `dubstack.stash-pop` | Pop the most recent branch-aware stash |
 
 Mutating tools are gated by the configured **MCP mode** (see below).
+
+The Tier 3 command family is still landing incrementally. `dubstack.freeze`,
+`dubstack.unfreeze`, `dubstack.back`, and `dubstack.reorder` will be added to
+the MCP surface when their underlying CLI commands land.
+
+## Return shapes
+
+Read-only and AI-cooperative tools return JSON as both MCP text content and
+`structuredContent`:
+
+```json
+{
+  "content": [{ "type": "text", "text": "{ ... }" }],
+  "structuredContent": {
+    "branch": "feat/example",
+    "base": "main",
+    "diff": "..."
+  }
+}
+```
+
+Mutating tools wrap the command result and captured terminal output:
+
+```json
+{
+  "content": [{ "type": "text", "text": "{ ... }" }],
+  "structuredContent": {
+    "result": { "branch": "feat/example" },
+    "output": "..."
+  }
+}
+```
+
+Refusals and user-facing command failures return `isError: true` with a
+text payload suitable for agent display.
 
 ## Security model
 
@@ -90,7 +152,9 @@ Every MCP tool invocation — successful, refused, or failed — is appended to 
 dub history
 ```
 
-This gives teams a local audit trail for agent-driven stack operations.
+For mutating tools, the audit command includes redacted arguments plus an
+`args_sha256` fingerprint so reviewers can compare what an agent passed without
+exposing secrets in history.
 
 ## Protocol
 

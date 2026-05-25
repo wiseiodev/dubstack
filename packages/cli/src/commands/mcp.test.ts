@@ -3,6 +3,8 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
+import type { AiMetadataDependencies } from '../lib/ai-metadata';
+import { writeConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { readHistory } from '../lib/history';
 import { type DubState, initState, writeState } from '../lib/state';
@@ -25,6 +27,7 @@ afterEach(async () => {
     await stopMcpChild(child);
   }
   child = null;
+  vi.unstubAllEnvs();
   await cleanup();
 });
 
@@ -96,6 +99,13 @@ describe('mcp command', () => {
       'dubstack.children',
       'dubstack.trunk',
       'dubstack.history',
+      'dubstack.branch',
+      'dubstack.diff',
+      'dubstack.ready',
+      'dubstack.merge_check',
+      'dubstack.propose_branch_name',
+      'dubstack.propose_commit_message',
+      'dubstack.propose_pr_description',
       'dubstack.create',
       'dubstack.modify',
       'dubstack.submit',
@@ -103,6 +113,12 @@ describe('mcp command', () => {
       'dubstack.checkout',
       'dubstack.revert',
       'dubstack.absorb',
+      'dubstack.split',
+      'dubstack.squash',
+      'dubstack.fold',
+      'dubstack.pop',
+      'dubstack.rename',
+      'dubstack.move',
       'dubstack.unlink',
       'dubstack.delete',
       'dubstack.stash',
@@ -165,6 +181,101 @@ describe('mcp command', () => {
       postShutdownEntries.some((entry) => entry.command === 'dub mcp'),
     ).toBe(false);
   });
+
+  it('calls additional read-only tools', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+
+    const branchResponse = await runMcpCall(dir, vi.fn<ConfirmMutatingFn>(), {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.branch',
+        arguments: { branch: 'feat/a' },
+      },
+    });
+    expect(branchResponse.result).toMatchObject({
+      structuredContent: {
+        currentBranch: 'feat/a',
+        tracked: true,
+        parent: 'main',
+      },
+    });
+
+    const diffResponse = await runMcpCall(dir, vi.fn<ConfirmMutatingFn>(), {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.diff',
+        arguments: { branch: 'feat/a' },
+      },
+    });
+    expect(diffResponse.result).toMatchObject({
+      structuredContent: {
+        branch: 'feat/a',
+        base: 'main',
+      },
+    });
+  });
+
+  it('runs AI proposal tools without mutating confirmation', async () => {
+    vi.stubEnv('DUBSTACK_GEMINI_API_KEY', 'test-key');
+    await writeConfig({ aiAssistantEnabled: true, mcpMode: 'read-only' }, dir);
+    const confirm = vi.fn<ConfirmMutatingFn>();
+    const generateTextMock = vi.fn().mockResolvedValue({
+      text: '{"branch":"feat/mcp","message":"feat: add mcp"}',
+    });
+    const aiMetadataDeps = {
+      generateText: generateTextMock,
+      createGoogleGenerativeAI: vi.fn(() => vi.fn(() => 'model')),
+      createGateway: vi.fn(),
+    } as unknown as AiMetadataDependencies;
+
+    const response = await runMcpCall(
+      dir,
+      confirm,
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'dubstack.propose_branch_name',
+          arguments: { diff: 'diff --git a/file b/file' },
+        },
+      },
+      { aiMetadataDeps },
+    );
+
+    expect(response.result).toMatchObject({
+      structuredContent: { branchName: 'feat/mcp' },
+    });
+    expect(confirm).not.toHaveBeenCalled();
+  });
 });
 
 describe('mcp mutating tools', () => {
@@ -222,7 +333,29 @@ describe('mcp mutating tools', () => {
       entries.some(
         (entry) =>
           entry.status === 'error' &&
-          entry.command.startsWith('dub mcp tools/call dubstack.create'),
+          entry.command.startsWith('dub mcp tools/call dubstack.create') &&
+          entry.command.includes('args_sha256='),
+      ),
+    ).toBe(true);
+
+    await runMcpCall(dir, confirm, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.squash',
+        arguments: {},
+      },
+    });
+
+    const entriesAfterEmptyArgs = await readHistory(dir, { limit: 5 });
+    expect(
+      entriesAfterEmptyArgs.some(
+        (entry) =>
+          entry.status === 'error' &&
+          entry.command.startsWith(
+            'dub mcp tools/call dubstack.squash {} args_sha256=',
+          ),
       ),
     ).toBe(true);
   });
@@ -384,6 +517,7 @@ async function runMcpCall(
   cwd: string,
   confirmMutating: ConfirmMutatingFn,
   message: unknown,
+  options: { aiMetadataDeps?: AiMetadataDependencies } = {},
 ): Promise<Record<string, unknown>> {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -402,7 +536,12 @@ async function runMcpCall(
     }
   });
 
-  const done = mcp(cwd, { input, output, confirmMutating });
+  const done = mcp(cwd, {
+    input,
+    output,
+    confirmMutating,
+    aiMetadataDeps: options.aiMetadataDeps,
+  });
 
   input.write(`${JSON.stringify(message)}\n`);
   input.end();
