@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
 import { DubError } from '../lib/errors';
+import { type DubState, readState, writeState } from '../lib/state';
 import { init } from './init';
 
 let dir: string;
@@ -70,6 +71,43 @@ describe('init', () => {
     await init(dir);
     const gitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8');
     expect(gitignore).toBe('node_modules\n.git/dubstack\n');
+  });
+
+  it('restores state JSON from refs when requested', async () => {
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'restore-me',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    fs.rmSync(path.join(dir, '.git', 'dubstack'), {
+      recursive: true,
+      force: true,
+    });
+
+    const result = await init(dir, { restoreFromRefs: true });
+
+    expect(result.status).toBe('restored');
+    const restored = await readState(dir);
+    expect(restored.stacks[0].id).toBe('restore-me');
+  });
+
+  it('throws when restore is requested without refs', async () => {
+    await expect(init(dir, { restoreFromRefs: true })).rejects.toThrow(
+      'No DubStack refs mirror found',
+    );
+    expect(fs.existsSync(path.join(dir, '.gitignore'))).toBe(false);
   });
 
   it('throws when not in a git repo', async () => {

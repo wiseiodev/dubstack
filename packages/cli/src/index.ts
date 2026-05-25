@@ -98,6 +98,7 @@ import {
 import { rollbackRestack } from './lib/restack-rollback';
 import { parseScope, type ScopeMode } from './lib/scope';
 import { getStackOverviewBatch } from './lib/stack-overview';
+import { migrateStateRefsIfNeeded } from './lib/state';
 import { acquireStateLock, type StateLockHandle } from './lib/state-lock';
 
 const require = createRequire(import.meta.url);
@@ -141,16 +142,25 @@ Examples:
 program
   .command('init')
   .description('Initialize DubStack in the current git repository')
+  .option(
+    '--restore-from-refs',
+    'Rebuild .git/dubstack/state.json from refs/dubstack/*',
+  )
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub init    Initialize DubStack, creating .git/dubstack/ and updating .gitignore`,
+  $ dub init                       Initialize DubStack, creating .git/dubstack/ and updating .gitignore
+  $ dub init --restore-from-refs   Restore state.json from refs/dubstack/*`,
   )
-  .action(async () => {
-    const result = await init(process.cwd());
+  .action(async (options: { restoreFromRefs?: boolean }) => {
+    const result = await init(process.cwd(), {
+      restoreFromRefs: options.restoreFromRefs,
+    });
     if (result.status === 'created') {
       console.log(chalk.green('✔ DubStack initialized'));
+    } else if (result.status === 'restored') {
+      console.log(chalk.green('✔ DubStack state restored from refs'));
     } else {
       console.log(chalk.yellow('⚠ DubStack already initialized'));
     }
@@ -3320,7 +3330,7 @@ let invocationMetadata: ShortcutMetadata & {
 } = {};
 let invocationStateLock: StateLockHandle | null = null;
 
-program.hook('preAction', async () => {
+program.hook('preAction', async (_thisCommand, actionCommand) => {
   setVerbose(Boolean(program.opts().verbose));
   beginHistoryCapture();
   if (shouldAcquireInvocationStateLock()) {
@@ -3328,6 +3338,12 @@ program.hook('preAction', async () => {
       commandName: `dub ${(historyArgsForCapture ?? process.argv.slice(2)).join(' ')}`,
     });
   }
+
+  const isRestoreFromRefs =
+    actionCommand.name() === 'init' &&
+    Boolean(actionCommand.opts().restoreFromRefs);
+  if (isRestoreFromRefs) return;
+  await migrateStateRefsIfNeeded(process.cwd());
 });
 
 program.hook('postAction', async () => {
