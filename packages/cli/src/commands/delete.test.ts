@@ -19,6 +19,7 @@ describe('delete command', () => {
     vi.mocked(deleteTrackedBranch).mockResolvedValue({
       deleted: ['feat/a'],
       reparented: [],
+      dryRun: false,
     });
   });
 
@@ -32,6 +33,7 @@ describe('delete command', () => {
       upstack: false,
       downstack: false,
       force: true,
+      dryRun: false,
     });
   });
 
@@ -50,6 +52,7 @@ describe('delete command', () => {
       upstack: true,
       downstack: true,
       force: true,
+      dryRun: false,
     });
   });
 

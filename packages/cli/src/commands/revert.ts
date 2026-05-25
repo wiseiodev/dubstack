@@ -20,6 +20,7 @@ import {
   type DubState,
   ensureState,
   findStackForBranch,
+  readStateForDryRun,
   writeState,
 } from '../lib/state';
 import { clearUndoEntry, saveUndoEntry } from '../lib/undo-log';
@@ -32,6 +33,8 @@ export interface RevertOptions {
   submit?: boolean;
   /** Open the editor for the revert commit message instead of `--no-edit`. */
   editMessage?: boolean;
+  /** Preview the planned revert without creating branches or committing. */
+  dryRun?: boolean;
 }
 
 export interface RevertResult {
@@ -45,6 +48,8 @@ export interface RevertResult {
   /** PR number when invoked with a PR number; null when invoked with a SHA. */
   prNumber: number | null;
   submitResult: SubmitResult | null;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 const PR_NUMBER_PATTERN = /^#?\d+$/;
@@ -84,7 +89,13 @@ export async function revert(
     ]);
   }
 
-  const state = await ensureState(cwd);
+  const dryRun = options.dryRun ?? false;
+  // Dry-run uses the read-only loader so corrupted state (or any error other
+  // than "not initialized") still surfaces — preserves the invariant that a
+  // successful dry-run plan corresponds to something a real run could do.
+  const state: DubState = dryRun
+    ? await readStateForDryRun(cwd)
+    : await ensureState(cwd);
   const currentBranch = await getCurrentBranch(cwd);
   const trunk = await resolveRevertTrunk(state, currentBranch, cwd);
 
@@ -118,6 +129,20 @@ export async function revert(
   }
 
   const startBranch = currentBranch;
+
+  if (dryRun) {
+    return {
+      branch: branchName,
+      trunk,
+      revertedSha: resolved.sha,
+      revertedShortSha: resolved.shortSha,
+      sourceLabel: resolved.sourceLabel,
+      prNumber: resolved.prNumber,
+      submitResult: null,
+      dryRun: true,
+    };
+  }
+
   const trunkStartPoint = await resolveTrunkStartPoint(trunk, cwd);
 
   // Save undo BEFORE the first git mutation. If we crash between `git
@@ -248,6 +273,7 @@ export async function revert(
       sourceLabel: resolved.sourceLabel,
       prNumber: resolved.prNumber,
       submitResult,
+      dryRun: false,
     };
   } catch (error) {
     progress.stop();

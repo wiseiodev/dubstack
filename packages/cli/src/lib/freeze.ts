@@ -19,6 +19,7 @@ interface FreezeOptions {
   branch?: string;
   upstack?: boolean;
   downstack?: boolean;
+  dryRun?: boolean;
 }
 
 export interface FreezeResult {
@@ -28,6 +29,8 @@ export interface FreezeResult {
   unchanged: string[];
   /** Tracked branches skipped because they are checked out in another worktree. */
   skipped: Array<{ branch: string; worktree: string }>;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 interface ApplyFreezeOptions {
@@ -112,8 +115,19 @@ export async function applyFreezeFlag(
     }
   }
 
+  const dryRun = options.dryRun ?? false;
+
   if (changedBranches.length === 0) {
-    return { changed: [], unchanged, skipped };
+    return { changed: [], unchanged, skipped, dryRun };
+  }
+
+  if (dryRun) {
+    return {
+      changed: changedBranches.map((b) => b.name),
+      unchanged,
+      skipped,
+      dryRun,
+    };
   }
 
   await saveUndoEntry(
@@ -143,6 +157,7 @@ export async function applyFreezeFlag(
     changed: changedBranches.map((b) => b.name),
     unchanged,
     skipped,
+    dryRun,
   };
 }
 

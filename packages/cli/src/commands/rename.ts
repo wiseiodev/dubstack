@@ -20,6 +20,7 @@ interface RenameOptions {
    * Defaults to pushing when the tracked branch has a PR number recorded.
    */
   noPush?: boolean;
+  dryRun?: boolean;
 }
 
 export interface RenameResult {
@@ -30,6 +31,7 @@ export interface RenameResult {
   pushed: boolean;
   /** True when the old branch was previously pushed and may linger on the remote. */
   oldRemoteCleanupHint: boolean;
+  dryRun: boolean;
 }
 
 /**
@@ -119,13 +121,28 @@ export async function rename(
     ]);
   }
 
-  await assertBranchesNotCheckedOutElsewhere(cwd, [oldName], 'dub rename');
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(cwd, [oldName], 'dub rename');
+  }
 
   const childBranches = sourceStack.branches.filter(
     (b) => b.parent === oldName,
   );
   const prNumber = sourceBranch.pr_number;
   const hadRemote = sourceBranch.last_submitted_version != null;
+
+  if (dryRun) {
+    return {
+      oldName,
+      newName,
+      reparentedChildren: childBranches.map((c) => c.name),
+      prNumber,
+      pushed: false,
+      oldRemoteCleanupHint: hadRemote || prNumber != null,
+      dryRun: true,
+    };
+  }
 
   await saveUndoEntry(
     {
@@ -182,5 +199,6 @@ export async function rename(
     prNumber,
     pushed,
     oldRemoteCleanupHint: hadRemote || pushed,
+    dryRun: false,
   };
 }

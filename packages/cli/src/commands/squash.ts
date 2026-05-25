@@ -32,6 +32,8 @@ export interface SquashOptions {
   message?: string;
   /** Generate a summary commit message from the squashed commits via AI. */
   ai?: boolean;
+  /** Preview the planned squash without resetting/committing/restacking. */
+  dryRun?: boolean;
 }
 
 export interface SquashResult {
@@ -45,6 +47,8 @@ export interface SquashResult {
   restacked: boolean;
   /** Set when the squash was a no-op for 0/1 commits. */
   noopReason?: 'no-commits' | 'single-commit';
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 interface SquashDependencies {
@@ -107,7 +111,10 @@ export async function squash(
       "Run 'dub log' to inspect the stack and confirm tracking state.",
     ]);
   }
-  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub squash');
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub squash');
+  }
 
   const commitCount = await countCommitsAhead(branch, parent, cwd);
   if (commitCount <= 1) {
@@ -117,6 +124,31 @@ export async function squash(
       squashedCommits: 0,
       restacked: false,
       noopReason: commitCount === 0 ? 'no-commits' : 'single-commit',
+      dryRun,
+    };
+  }
+
+  if (dryRun) {
+    const originalMessages = await getCommitMessagesBetween(
+      parent,
+      branch,
+      cwd,
+    );
+    let plannedMessage: string;
+    if (options.message?.trim()) {
+      plannedMessage = options.message.trim();
+    } else if (options.ai) {
+      plannedMessage = '<ai-generated message>';
+    } else {
+      plannedMessage = originalMessages.join('\n\n');
+    }
+    return {
+      branch,
+      parent,
+      squashedCommits: commitCount,
+      message: plannedMessage,
+      restacked: false,
+      dryRun: true,
     };
   }
 
@@ -187,6 +219,7 @@ export async function squash(
     squashedCommits: commitCount,
     message,
     restacked,
+    dryRun: false,
   };
 }
 

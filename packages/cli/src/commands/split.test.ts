@@ -241,28 +241,19 @@ describe('split --ai', () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
   });
 
-  it('dry-run returns the proposal without touching branches', async () => {
+  it('dry-run skips the AI call and returns no proposal', async () => {
+    // Per DUB-70 (Copilot review on split.ts:286): `--ai --dry-run` must
+    // bail BEFORE invoking the AI provider so previews never bill. The
+    // result intentionally omits `aiProposal` — callers who want the
+    // model's proposed shape re-run without --dry-run.
     await create('feat/source', dir);
     await writeAndCommit('runtime.ts', 'r1\n', 'feat: runtime');
     await writeAndCommit('docs.md', 'docs\n', 'docs: notes');
 
     const before = await getBranchTip('feat/source', dir);
-
-    const fakeProposal = JSON.stringify({
-      splits: [
-        {
-          branch: 'feat/runtime',
-          files: ['runtime.ts'],
-          summary: 'runtime changes',
-        },
-        {
-          branch: 'docs/notes',
-          files: ['docs.md'],
-          summary: 'docs only',
-        },
-      ],
+    const generateText = vi.fn().mockImplementation(() => {
+      throw new Error('AI provider must not be called in dry-run');
     });
-    const generateText = vi.fn().mockResolvedValueOnce({ text: fakeProposal });
     const deps = {
       generateText,
       createGoogleGenerativeAI: vi.fn().mockReturnValue(() => 'model'),
@@ -271,7 +262,6 @@ describe('split --ai', () => {
       fromIni: vi.fn(),
       fromNodeProviderChain: vi.fn(),
     };
-    process.env.DUBSTACK_GEMINI_API_KEY = 'test-key';
 
     const result = await split(
       dir,
@@ -280,11 +270,9 @@ describe('split --ai', () => {
       deps as any,
     );
 
-    delete process.env.DUBSTACK_GEMINI_API_KEY;
-
-    expect(result.aiProposal).toBeDefined();
-    expect(result.aiProposal).toHaveLength(2);
-    expect(result.aiProposal?.[0].branch).toBe('feat/runtime');
+    expect(generateText).not.toHaveBeenCalled();
+    expect(result.dryRun).toBe(true);
+    expect(result.aiProposal).toBeUndefined();
     expect(result.created).toHaveLength(0);
     const after = await getBranchTip('feat/source', dir);
     expect(after).toBe(before);

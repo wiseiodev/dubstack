@@ -16,6 +16,7 @@ describe('track command', () => {
       branch: 'feat/a',
       parent: 'main',
       status: 'tracked',
+      dryRun: false,
     });
   });
 
@@ -28,6 +29,7 @@ describe('track command', () => {
     expect(trackBranch).toHaveBeenCalledWith(cwd, {
       branch: 'feat/a',
       parent: 'main',
+      dryRun: false,
     });
   });
 
@@ -40,6 +42,7 @@ describe('track command', () => {
     expect(trackBranch).toHaveBeenCalledWith(cwd, {
       branch: 'feat/a',
       parent: 'feat/base',
+      dryRun: false,
     });
   });
 
@@ -51,6 +54,7 @@ describe('track command', () => {
     expect(trackBranch).toHaveBeenCalledWith(cwd, {
       branch: 'feat/a',
       parent: 'develop',
+      dryRun: false,
     });
   });
 });

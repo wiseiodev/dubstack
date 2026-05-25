@@ -19,6 +19,7 @@ import { restack } from './restack';
 export interface FoldCommandOptions extends FoldOptions {
   force?: boolean;
   interactive?: boolean;
+  dryRun?: boolean;
 }
 
 export interface FoldCommandResult extends FoldResult {
@@ -29,6 +30,7 @@ export interface FoldCommandResult extends FoldResult {
    * PR was (or wasn't) closed. */
   prPriorState: BranchPrLifecycleState | null;
   restacked: boolean;
+  dryRun: boolean;
 }
 
 function isInteractiveShell(): boolean {
@@ -73,6 +75,23 @@ export async function fold(
   options: FoldCommandOptions = {},
 ): Promise<FoldCommandResult> {
   const interactive = options.interactive ?? isInteractiveShell();
+  const dryRun = options.dryRun ?? false;
+
+  if (dryRun) {
+    const preview = await getFoldPreview(cwd, options);
+    return {
+      ...EMPTY_FOLD_RESULT_BASE,
+      branch: preview.branch,
+      parent: preview.parent,
+      foldedCommits: preview.foldedCommits,
+      childrenReparented: preview.childrenReparented,
+      cancelled: false,
+      prClosed: false,
+      prPriorState: null,
+      restacked: false,
+      dryRun: true,
+    };
+  }
 
   if (!options.force) {
     if (!interactive) {
@@ -100,6 +119,7 @@ export async function fold(
         prClosed: false,
         prPriorState: null,
         restacked: false,
+        dryRun: false,
       };
     }
   }
@@ -155,5 +175,6 @@ export async function fold(
     prClosed,
     prPriorState,
     restacked,
+    dryRun: false,
   };
 }

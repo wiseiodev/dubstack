@@ -5,22 +5,26 @@ import { getDescendants } from './graph';
 import { assertStateInvariants } from './invariants';
 import {
   addBranchToStack,
+  type DubState,
   ensureConfiguredTrunk,
   ensureState,
   findStackForBranch,
   getStackTrunk,
+  readStateForDryRun,
   writeState,
 } from './state';
 
 export interface TrackBranchOptions {
   branch: string;
   parent: string;
+  dryRun?: boolean;
 }
 
 export interface TrackBranchResult {
   branch: string;
   parent: string;
   status: 'tracked' | 'reparented' | 'unchanged';
+  dryRun: boolean;
 }
 
 export async function validateTrackParent(
@@ -49,6 +53,7 @@ export async function trackBranch(
   options: TrackBranchOptions,
 ): Promise<TrackBranchResult> {
   const { branch, parent } = options;
+  const dryRun = options.dryRun ?? false;
   if (!(await branchExists(branch, cwd))) {
     throw new DubError(`Branch '${branch}' does not exist locally.`, [
       `Run 'git checkout -b ${branch}' to create the branch first.`,
@@ -57,15 +62,20 @@ export async function trackBranch(
   }
   await validateTrackParent(cwd, branch, parent);
 
-  const state = await ensureState(cwd);
+  // Dry-run must never create state on disk but must surface corruption /
+  // IO errors that a real run would hit. `readStateForDryRun` narrows the
+  // fallback to the "not initialized" case only.
+  const state: DubState = dryRun
+    ? await readStateForDryRun(cwd)
+    : await ensureState(cwd);
   const sourceStack = findStackForBranch(state, branch);
   const destinationStack = findStackForBranch(state, parent);
 
   if (!sourceStack) {
     addBranchToStack(state, branch, parent);
     assertStateInvariants(state.stacks);
-    await writeState(state, cwd);
-    return { branch, parent, status: 'tracked' };
+    if (!dryRun) await writeState(state, cwd);
+    return { branch, parent, status: 'tracked', dryRun };
   }
 
   const branchEntry = sourceStack.branches.find(
@@ -87,7 +97,7 @@ export async function trackBranch(
     );
   }
   if (branchEntry.parent === parent) {
-    return { branch, parent, status: 'unchanged' };
+    return { branch, parent, status: 'unchanged', dryRun };
   }
 
   const descendants = new Set(getDescendants(sourceStack, branch));
@@ -104,8 +114,8 @@ export async function trackBranch(
   if (sourceStack.id === destinationStack?.id) {
     branchEntry.parent = parent;
     assertStateInvariants(state.stacks);
-    await writeState(state, cwd);
-    return { branch, parent, status: 'reparented' };
+    if (!dryRun) await writeState(state, cwd);
+    return { branch, parent, status: 'reparented', dryRun };
   }
 
   const movingNames = new Set([branch, ...descendants]);
@@ -152,6 +162,6 @@ export async function trackBranch(
 
   state.stacks = state.stacks.filter((stack) => stack.branches.length > 0);
   assertStateInvariants(state.stacks);
-  await writeState(state, cwd);
-  return { branch, parent, status: 'reparented' };
+  if (!dryRun) await writeState(state, cwd);
+  return { branch, parent, status: 'reparented', dryRun };
 }

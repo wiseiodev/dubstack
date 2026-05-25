@@ -23,6 +23,7 @@ describe('continue command', () => {
     vi.mocked(restackContinue).mockResolvedValue({
       status: 'success',
       rebased: ['feat/a'],
+      dryRun: false,
     });
     vi.mocked(rebaseContinue).mockResolvedValue(undefined);
     vi.mocked(aiResolve).mockResolvedValue(undefined);

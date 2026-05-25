@@ -58,6 +58,7 @@ export interface SyncOptions {
   all: boolean;
   interactive: boolean;
   fresh: boolean;
+  dryRun: boolean;
 }
 
 export interface BranchSyncOutcome {
@@ -83,4 +84,8 @@ export interface SyncResult {
   branches: BranchSyncOutcome[];
   restacked: boolean;
   reconcileSources: ReconcileSourceHistogram;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
+  /** Branches in the planned sync scope (set on `--dry-run`). */
+  plannedScope?: { roots: string[]; branches: string[] };
 }

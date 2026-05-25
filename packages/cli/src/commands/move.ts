@@ -32,6 +32,7 @@ import { restack } from './restack';
 export interface MoveOptions {
   before?: string;
   after?: string;
+  dryRun?: boolean;
 }
 
 export type MovePosition = 'before' | 'after';
@@ -48,12 +49,21 @@ export interface MoveResult {
   rebased: string[];
   /** Branches whose PR base was retargeted. */
   retargeted: string[];
+  /**
+   * Branches that *would* have their PR base retargeted (dry-run only).
+   * Listed as "candidates" rather than "would-retarget" because dry-run does
+   * not call `gh pr view` to confirm each PR is open and has the wrong base,
+   * so this is an upper bound on what a real run would touch.
+   */
+  retargetCandidates?: string[];
   /** True when nothing changed (target was already in the requested position). */
   noOp: boolean;
   /** Human-readable explanation set when `noOp` is true. */
   noOpReason?: string;
   /** Set when the cascading restack hit a conflict and needs `dub continue`. */
   conflictBranch?: string;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 interface ReparentPlan {
@@ -179,6 +189,7 @@ export async function move(
     position,
   });
 
+  const dryRun = options.dryRun ?? false;
   if (reparents.length === 0) {
     const reason =
       position === 'before'
@@ -194,13 +205,16 @@ export async function move(
       retargeted: [],
       noOp: true,
       noOpReason: reason,
+      dryRun,
     };
   }
-  await assertBranchesNotCheckedOutElsewhere(
-    cwd,
-    [branch, target, ...reparents.map((reparent) => reparent.branch)],
-    'dub move',
-  );
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(
+      cwd,
+      [branch, target, ...reparents.map((reparent) => reparent.branch)],
+      'dub move',
+    );
+  }
 
   // Validate the planned mutation is acyclic on a clone before touching disk.
   const probeStack: Stack = structuredClone(stack);
@@ -238,7 +252,7 @@ export async function move(
     .filter((entry): entry is Branch => Boolean(entry?.pr_number));
 
   const plannedRetargets: Array<{ branch: string; newBase: string }> = [];
-  if (candidateRetargetBranches.length > 0) {
+  if (!dryRun && candidateRetargetBranches.length > 0) {
     await ensureGhInstalled();
     await checkGhAuth();
 
@@ -253,6 +267,28 @@ export async function move(
         newBase: reparent.newParent,
       });
     }
+  }
+
+  if (dryRun) {
+    return {
+      branch,
+      target,
+      position,
+      newParent:
+        reparents.find((r) => r.branch === branch)?.newParent ??
+        branchEntry.parent ??
+        '',
+      reparented: reparents.map((r) => r.branch),
+      rebased: [],
+      // No retarget actually ran — that requires a live `gh pr view` to
+      // confirm the PR is OPEN with a stale base. Surface the candidates
+      // separately so callers can distinguish "did happen" from "might
+      // happen".
+      retargeted: [],
+      retargetCandidates: candidateRetargetBranches.map((entry) => entry.name),
+      noOp: false,
+      dryRun: true,
+    };
   }
 
   // The journal lets `dub continue` resume a half-applied move. We journal
@@ -322,6 +358,7 @@ export async function move(
     ...(restackResult.status === 'conflict'
       ? { conflictBranch: restackResult.conflictBranch }
       : {}),
+    dryRun: false,
   };
 }
 

@@ -19,6 +19,8 @@ import { ensureState } from '../lib/state';
 export interface StashPushOptions {
   /** Optional user-supplied message. When omitted, a default with branch + timestamp is used. */
   message?: string;
+  /** Preview the planned stash without invoking `git stash push`. */
+  dryRun?: boolean;
 }
 
 export interface StashPushResult {
@@ -26,6 +28,7 @@ export interface StashPushResult {
   sha: string;
   message: string;
   createdAt: string;
+  dryRun: boolean;
 }
 
 /**
@@ -40,7 +43,8 @@ export async function stashPush(
   cwd: string,
   options: StashPushOptions = {},
 ): Promise<StashPushResult> {
-  await ensureState(cwd);
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) await ensureState(cwd);
   const branch = await getCurrentBranch(cwd);
 
   if (await isWorkingTreeClean(cwd)) {
@@ -53,6 +57,10 @@ export async function stashPush(
   const createdAt = new Date().toISOString();
   const message =
     options.message?.trim() || `dub stash: ${branch} @ ${createdAt}`;
+
+  if (dryRun) {
+    return { branch, sha: '<would-stash>', message, createdAt, dryRun: true };
+  }
 
   const sha = await gitStashPushIncludeUntracked(message, cwd);
   if (!sha) {
@@ -75,7 +83,7 @@ export async function stashPush(
     );
   }
 
-  return { branch, sha, message, createdAt };
+  return { branch, sha, message, createdAt, dryRun: false };
 }
 
 export interface StashPopOptions {
@@ -83,6 +91,8 @@ export interface StashPopOptions {
   on?: string;
   /** Allow popping onto the current branch even when it differs from the source branch. */
   force?: boolean;
+  /** Preview the planned pop without checking out or applying the stash. */
+  dryRun?: boolean;
 }
 
 export interface StashPopResult {
@@ -96,6 +106,7 @@ export interface StashPopResult {
   message: string;
   /** True when the user passed `--on` and we checked out before popping. */
   checkedOut: boolean;
+  dryRun: boolean;
 }
 
 /**
@@ -113,7 +124,8 @@ export async function stashPop(
   cwd: string,
   options: StashPopOptions = {},
 ): Promise<StashPopResult> {
-  await ensureState(cwd);
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) await ensureState(cwd);
   const log = await readStashLog(cwd);
   if (log.length === 0) {
     throw new DubError('No dub stash entries to pop.', [
@@ -129,10 +141,12 @@ export async function stashPop(
     // Clean up the dangling log entry so the user can move forward, but
     // never let a log-write error mask the actionable "no longer present"
     // DubError below — the log cleanup is best-effort.
-    try {
-      await removeStashLogEntry(entry.sha, cwd);
-    } catch {
-      // best-effort: leave the dangling entry; the user can re-pop later.
+    if (!dryRun) {
+      try {
+        await removeStashLogEntry(entry.sha, cwd);
+      } catch {
+        // best-effort: leave the dangling entry; the user can re-pop later.
+      }
     }
     throw new DubError(
       `Recorded stash for '${entry.branch}' (${entry.sha.slice(0, 7)}) is no longer in 'git stash list'.`,
@@ -162,7 +176,7 @@ export async function stashPop(
       ]);
     }
     if (desired !== currentBranch) {
-      await checkoutBranch(desired, cwd);
+      if (!dryRun) await checkoutBranch(desired, cwd);
       checkedOut = true;
     }
     targetBranch = desired;
@@ -175,6 +189,17 @@ export async function stashPop(
         "Run 'dub stash list' to see the recorded branch context.",
       ],
     );
+  }
+
+  if (dryRun) {
+    return {
+      branch: targetBranch,
+      sourceBranch: entry.branch,
+      sha: entry.sha,
+      message: entry.message,
+      checkedOut,
+      dryRun: true,
+    };
   }
 
   await gitStashPop(match.ref, cwd);
@@ -196,6 +221,7 @@ export async function stashPop(
     sha: entry.sha,
     message: entry.message,
     checkedOut,
+    dryRun: false,
   };
 }
 

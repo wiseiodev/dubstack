@@ -23,6 +23,7 @@ describe('untrack command', () => {
     vi.mocked(untrackBranch).mockResolvedValue({
       removed: ['feat/a'],
       reparented: [],
+      dryRun: false,
     });
   });
 
@@ -34,6 +35,7 @@ describe('untrack command', () => {
     expect(untrackBranch).toHaveBeenCalledWith(cwd, {
       branch: 'feat/a',
       downstack: false,
+      dryRun: false,
     });
   });
 
@@ -53,6 +55,7 @@ describe('untrack command', () => {
     expect(untrackBranch).toHaveBeenCalledWith(cwd, {
       branch: 'feat/a',
       downstack: true,
+      dryRun: false,
     });
   });
 

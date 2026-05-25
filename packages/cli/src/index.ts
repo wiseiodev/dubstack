@@ -138,6 +138,36 @@ function emitJsonError(error: DubError): void {
   );
 }
 
+/**
+ * Emits the dry-run plan for a mutating command. Used by every command that
+ * supports `--dry-run --json` to serialise the plan with the standard schema
+ * envelope.
+ */
+function emitDryRunPlan(plan: object): void {
+  // JSON mode should already be active (see `maybeActivateDryRunJsonMode`)
+  // so any pre-emit error has already been envelope-formatted. We still call
+  // it here for safety in case a caller bypassed the early-activation hook.
+  activateJsonMode();
+  console.log(JSON.stringify(withSchemaVersion(plan), null, 2));
+}
+
+/**
+ * Switch the top-level error handler to JSON-envelope output whenever an
+ * action sees `--dry-run --json`. Called at the head of each mutating
+ * command's action so a `DubError` thrown during validation (before
+ * `emitDryRunPlan` would otherwise fire) still emits the standard
+ * `jsonErrorEnvelope` shape for scripted callers, instead of the human
+ * red-error formatting that breaks JSON parsers.
+ */
+function maybeActivateDryRunJsonMode(options: {
+  dryRun?: boolean;
+  json?: boolean;
+}): void {
+  if (options.dryRun && options.json) {
+    activateJsonMode();
+  }
+}
+
 async function canShowAiPrompt(cwd: string): Promise<boolean> {
   try {
     return await isAiPromptOptionEnabled(cwd);
@@ -390,6 +420,11 @@ program
     'AI-generate branch + conventional commit from staged changes',
   )
   .option('--no-ai', 'Disable AI generation for this invocation')
+  .option(
+    '--dry-run',
+    'Print the planned create without mutating refs or state',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -399,6 +434,7 @@ Examples:
   $ dub create feat/api -am "feat: add API"   Stage all + create + commit
   $ dub create --ai                            AI-generate branch + commit from staged
   $ dub create --no-ai feat/api                Override repo AI defaults for one create
+  $ dub create feat/api --dry-run              Preview the plan without mutating
 
 See also:
   dub modify, dub flow, dub track, dub log`,
@@ -413,6 +449,8 @@ See also:
         patch?: boolean;
         ai?: boolean;
         noAi?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
       },
     ) => {
       const result = await create(branchName, process.cwd(), {
@@ -422,7 +460,20 @@ See also:
         patch: options.patch,
         ai: options.ai,
         noAi: options.noAi,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would create '${result.branch}' on '${result.parent}'${result.committed ? ` • ${result.committed}` : ''}`,
+          ),
+        );
+        return;
+      }
       if (result.committed) {
         console.log(
           chalk.green(
@@ -759,13 +810,16 @@ program
     '--no-interactive',
     'Disable parent prompt and require deterministic behavior',
   )
+  .option('--dry-run', 'Print the planned track without mutating state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description('Track a branch or update its parent relationship')
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub track                       Adopt the current branch (DubStack picks the parent)
-  $ dub track feat/a --parent main  Adopt feat/a with main as the explicit parent
+  $ dub track                                  Adopt the current branch (DubStack picks the parent)
+  $ dub track feat/a --parent main             Adopt feat/a with main as the explicit parent
+  $ dub track feat/a --parent main --dry-run   Preview the plan without mutating
 
 See also:
   dub untrack, dub create, dub log, dub doctor`,
@@ -773,12 +827,30 @@ See also:
   .action(
     async (
       branch: string | undefined,
-      options: { parent?: string; interactive?: boolean },
+      options: {
+        parent?: string;
+        interactive?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
     ) => {
       const result = await track(process.cwd(), branch, {
         parent: options.parent,
         interactive: options.interactive,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would ${result.status} '${result.branch}' on '${result.parent}'`,
+          ),
+        );
+        return;
+      }
       if (result.status === 'tracked') {
         console.log(
           chalk.green(`✔ Tracking '${result.branch}' on '${result.parent}'`),
@@ -811,6 +883,8 @@ program
   .argument('[branch]', 'Branch to untrack (defaults to current branch)')
   .option('--downstack', 'Also untrack descendants recursively')
   .option('--no-interactive', 'Disable prompts and require explicit flags')
+  .option('--dry-run', 'Print the planned untrack without mutating state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     'Remove branch metadata from DubStack without deleting git branches',
   )
@@ -820,6 +894,7 @@ program
 Examples:
   $ dub untrack                       Drop tracking metadata for the current branch
   $ dub untrack feat/a --downstack    Untrack feat/a and its ancestors toward trunk
+  $ dub untrack feat/a --dry-run      Preview the plan without mutating
 
 See also:
   dub track, dub delete, dub prune`,
@@ -827,12 +902,30 @@ See also:
   .action(
     async (
       branch: string | undefined,
-      options: { downstack?: boolean; interactive?: boolean },
+      options: {
+        downstack?: boolean;
+        interactive?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
     ) => {
       const result = await untrack(process.cwd(), branch, {
         downstack: options.downstack,
         interactive: options.interactive,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would untrack ${result.removed.length} branch(es): ${result.removed.join(', ')}`,
+          ),
+        );
+        return;
+      }
       console.log(
         chalk.green(
           `✔ Untracked ${result.removed.length} branch(es): ${result.removed.join(', ')}`,
@@ -856,6 +949,11 @@ program
   .option('-f, --force', 'Delete branches even when not merged')
   .option('-q, --quiet', 'Skip confirmation prompts')
   .option('--no-interactive', 'Disable prompts and require explicit flags')
+  .option(
+    '--dry-run',
+    'Print the planned delete without mutating refs or state',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description('Delete local branches and update DubStack metadata')
   .addHelpText(
     'after',
@@ -863,6 +961,7 @@ program
 Examples:
   $ dub delete feat/a                       Delete feat/a (with confirmation)
   $ dub delete feat/a --upstack -f -q       Delete feat/a + descendants, force, quiet
+  $ dub delete feat/a --dry-run             Preview the plan without mutating
 
 See also:
   dub untrack, dub prune, dub fold`,
@@ -876,6 +975,8 @@ See also:
         force?: boolean;
         quiet?: boolean;
         interactive?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
       },
     ) => {
       const result = await deleteCommand(process.cwd(), branch, {
@@ -884,7 +985,20 @@ See also:
         force: options.force,
         quiet: options.quiet,
         interactive: options.interactive,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would delete ${result.deleted.length} branch(es): ${result.deleted.join(', ')}`,
+          ),
+        );
+        return;
+      }
       if (result.cancelled) {
         console.log(chalk.yellow('⚠ Delete cancelled.'));
         return;
@@ -919,6 +1033,8 @@ program
     'Preserve commits as separate commits on the parent (default)',
   )
   .option('--no-interactive', 'Disable prompts and require --force')
+  .option('--dry-run', 'Print the planned fold without mutating refs or state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -926,6 +1042,7 @@ Examples:
   $ dub fold                Fold current branch into parent (keeps commits)
   $ dub fold --squash       Collapse current branch into a single commit on parent
   $ dub fold --force        Skip the confirmation prompt
+  $ dub fold --dry-run      Preview the plan without mutating
 
 See also:
   dub squash, dub delete, dub move`,
@@ -936,6 +1053,8 @@ See also:
       squash?: boolean;
       keepCommits?: boolean;
       interactive?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
     }) => {
       if (options.squash && options.keepCommits) {
         throw new DubError(
@@ -950,7 +1069,20 @@ See also:
         force: options.force,
         squash: options.squash,
         interactive: options.interactive,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would fold '${result.branch}' (${result.foldedCommits} commit(s)) into '${result.parent}'`,
+          ),
+        );
+        return;
+      }
       if (result.cancelled) {
         console.log(chalk.yellow('⚠ Fold cancelled.'));
         return;
@@ -994,6 +1126,8 @@ program
   .argument('<branch>', 'Branch to move within the stack')
   .option('--before <target>', 'Insert <branch> as the new parent of <target>')
   .option('--after <target>', 'Insert <branch> as the new child of <target>')
+  .option('--dry-run', 'Print the planned move without mutating refs or state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     'Reorder a tracked branch within its stack (insert before or after another branch)',
   )
@@ -1003,13 +1137,45 @@ program
 Examples:
   $ dub move feat/inserted --before feat/auth-login    Insert before <target>
   $ dub move feat/inserted --after feat/auth-base      Insert after <target>
+  $ dub move feat/x --after feat/y --dry-run           Preview the plan without mutating
 
 See also:
   dub reorder, dub unlink, dub restack`,
   )
   .action(
-    async (branch: string, options: { before?: string; after?: string }) => {
-      const result = await move(process.cwd(), branch, options);
+    async (
+      branch: string,
+      options: {
+        before?: string;
+        after?: string;
+        dryRun?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      const result = await move(process.cwd(), branch, {
+        before: options.before,
+        after: options.after,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would move '${result.branch}' ${result.position} '${result.target}' (new parent: '${result.newParent}')`,
+          ),
+        );
+        if (result.retargetCandidates && result.retargetCandidates.length > 0) {
+          console.log(
+            chalk.dim(
+              `  ↳ retarget candidates (PRs with pr_number; real run verifies state): ${result.retargetCandidates.join(', ')}`,
+            ),
+          );
+        }
+        return;
+      }
       if (result.noOp) {
         console.log(
           chalk.yellow(
@@ -1066,6 +1232,7 @@ program
     'Move fixup commits whose target lives on a different branch in the stack',
   )
   .option('--dry-run', 'Print what would be absorbed without mutating')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -1079,8 +1246,17 @@ See also:
   dub modify, dub squash, dub restack`,
   )
   .action(
-    async (options: { ai?: boolean; stack?: boolean; dryRun?: boolean }) => {
+    async (options: {
+      ai?: boolean;
+      stack?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
+    }) => {
       const result = await absorb(process.cwd(), options);
+      if (result.dryRun && options.json) {
+        emitDryRunPlan(result);
+        return;
+      }
       if (result.conflict) {
         console.log(
           chalk.yellow(
@@ -1132,6 +1308,11 @@ program
     '--orphan-children',
     'Re-parent direct children onto the original parent instead of moving them',
   )
+  .option(
+    '--dry-run',
+    'Print the planned unlink without mutating refs or state',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     'Detach a tracked branch from its parent, splitting it into its own stack',
   )
@@ -1142,6 +1323,7 @@ Examples:
   $ dub unlink feat/auth-login                Promote feat/auth-login to a new stack root
   $ dub unlink feat/auth-login --orphan-children  Leave descendants on the original parent
   $ dub unlink feat/auth-login --no-retarget  Skip PR retarget (warns about drift)
+  $ dub unlink feat/auth-login --dry-run      Preview the plan without mutating
 
 See also:
   dub move, dub track, dub untrack`,
@@ -1153,6 +1335,8 @@ See also:
         retarget?: boolean;
         keepChildren?: boolean;
         orphanChildren?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
       },
     ) => {
       if (options.keepChildren && options.orphanChildren) {
@@ -1167,7 +1351,20 @@ See also:
       const result = await unlink(process.cwd(), branch, {
         noRetarget: options.retarget === false,
         orphanChildren: options.orphanChildren ?? false,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would unlink '${result.branch}' from '${result.previousParent}'`,
+          ),
+        );
+        return;
+      }
       console.log(
         chalk.green(
           `✔ Unlinked '${result.branch}' from '${result.previousParent}'`,
@@ -1414,6 +1611,11 @@ program
     '--fresh',
     'Force a full fetch of every tracked branch (skip 5-minute freshness cache)',
   )
+  .option(
+    '--dry-run',
+    'Print the planned sync scope without fetching or mutating',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -1423,6 +1625,7 @@ Examples:
   $ dub sync --no-restack   Sync without restacking (manual fix-up later)
   $ dub sync --fresh        Force-fetch each branch even if cached
   $ dub sync -f             Skip prompts on reset/reconcile decisions
+  $ dub sync --dry-run      Preview the planned scope without fetching
 
 See also:
   dub restack, dub post-merge, dub merge-next`,
@@ -1434,8 +1637,29 @@ See also:
       all?: boolean;
       interactive?: boolean;
       fresh?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
     }) => {
-      await sync(process.cwd(), options);
+      const result = await sync(process.cwd(), {
+        restack: options.restack,
+        force: options.force,
+        all: options.all,
+        interactive: options.interactive,
+        fresh: options.fresh,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        const scope = result.plannedScope;
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would sync ${scope?.roots.length ?? 0} trunk(s) and ${scope?.branches.length ?? 0} branch(es)`,
+          ),
+        );
+      }
     },
   );
 
@@ -1443,79 +1667,123 @@ program
   .command('restack')
   .description('Rebase all branches in the stack onto their updated parents')
   .option('--continue', 'Continue restacking after resolving conflicts')
+  .option(
+    '--dry-run',
+    'Print the planned restack without rebasing or mutating state',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
 Examples:
   $ dub restack              Rebase the current stack onto its updated parents
   $ dub restack --continue   Continue after resolving conflicts
+  $ dub restack --dry-run    Preview which branches would be rebased
 
 See also:
   dub continue, dub abort, dub sync, dub post-merge`,
   )
-  .action(async (options: { continue?: boolean }) => {
-    const result = options.continue
-      ? await restackContinue(process.cwd())
-      : await restack(process.cwd());
-
-    if (result.status === 'up-to-date') {
-      console.log(chalk.green('✔ Stack is already up to date'));
-    } else if (result.status === 'conflict') {
-      const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-      const conflictBranch = result.conflictBranch ?? 'unknown';
-      const showAiOption = interactive
-        ? await canShowAiPrompt(process.cwd())
-        : false;
-      const decision = await resolveRestackConflictDecision({
-        branch: conflictBranch,
-        interactive,
-        showAiOption,
-        promptChoice: (branchName) =>
-          restackConflictPrompt({ branch: branchName, showAiOption }),
-      });
-      if (decision === 'ai') {
-        await continueCommand(process.cwd(), { ai: true });
-        return;
+  .action(
+    async (options: {
+      continue?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
+    }) => {
+      if (options.continue && options.dryRun) {
+        // `--continue` resumes an in-flight rebase mid-conflict — there is
+        // no non-mutating preview for it. Refuse the combination instead of
+        // silently ignoring one flag.
+        throw new DubError(
+          "'--continue' cannot be combined with '--dry-run'.",
+          [
+            "Run 'dub restack --continue' to resume the in-flight restack after resolving conflicts.",
+            "Run 'dub restack --dry-run' to preview the planned rebases (no in-flight restack required).",
+          ],
+        );
       }
-      if (decision === 'cancel') {
-        const rollback = await rollbackRestack(process.cwd());
+      const result = options.continue
+        ? await restackContinue(process.cwd())
+        : await restack(process.cwd(), { dryRun: options.dryRun });
+
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        const planned = result.plannedRebases ?? [];
+        const skipped = result.plannedSkips ?? [];
         console.log(
           chalk.green(
-            `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+            `✔ Dry-run: would rebase ${planned.length} branch(es); skip ${skipped.length}`,
           ),
         );
+        for (const branch of planned) {
+          console.log(chalk.dim(`  ↳ rebase: ${branch}`));
+        }
         return;
       }
-      if (decision === 'exit') {
+
+      if (result.status === 'up-to-date') {
+        console.log(chalk.green('✔ Stack is already up to date'));
+      } else if (result.status === 'conflict') {
+        const interactive = Boolean(
+          process.stdout.isTTY && process.stdin.isTTY,
+        );
+        const conflictBranch = result.conflictBranch ?? 'unknown';
+        const showAiOption = interactive
+          ? await canShowAiPrompt(process.cwd())
+          : false;
+        const decision = await resolveRestackConflictDecision({
+          branch: conflictBranch,
+          interactive,
+          showAiOption,
+          promptChoice: (branchName) =>
+            restackConflictPrompt({ branch: branchName, showAiOption }),
+        });
+        if (decision === 'ai') {
+          await continueCommand(process.cwd(), { ai: true });
+          return;
+        }
+        if (decision === 'cancel') {
+          const rollback = await rollbackRestack(process.cwd());
+          console.log(
+            chalk.green(
+              `✔ Rolled back ${rollback.branchesRestored} branch(es) to pre-restack state.`,
+            ),
+          );
+          return;
+        }
+        if (decision === 'exit') {
+          console.log(
+            chalk.yellow(
+              `⚠ Restack left in its current state on '${conflictBranch}'.`,
+            ),
+          );
+          console.log(
+            chalk.dim(
+              '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
+            ),
+          );
+          return;
+        }
         console.log(
-          chalk.yellow(
-            `⚠ Restack left in its current state on '${conflictBranch}'.`,
-          ),
+          chalk.yellow(`⚠ Conflict while restacking '${conflictBranch}'`),
         );
         console.log(
           chalk.dim(
-            '  Run: dub continue (or dub continue --ai), or dub abort to roll back.',
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub restack --continue)',
           ),
         );
-        return;
+      } else {
+        console.log(
+          chalk.green(`✔ Restacked ${result.rebased.length} branch(es)`),
+        );
+        for (const branch of result.rebased) {
+          console.log(chalk.dim(`  ↳ ${branch}`));
+        }
       }
-      console.log(
-        chalk.yellow(`⚠ Conflict while restacking '${conflictBranch}'`),
-      );
-      console.log(
-        chalk.dim(
-          '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub restack --continue)',
-        ),
-      );
-    } else {
-      console.log(
-        chalk.green(`✔ Restacked ${result.rebased.length} branch(es)`),
-      );
-      for (const branch of result.rebased) {
-        console.log(chalk.dim(`  ↳ ${branch}`));
-      }
-    }
-  });
+    },
+  );
 
 program
   .command('continue')
@@ -3265,6 +3533,11 @@ program
     '--interactive-rebase',
     'Start an interactive rebase on the branch commits',
   )
+  .option(
+    '--dry-run',
+    'Print the planned modify without staging, committing, or restacking',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   // .option("--into <branch>", "Amend staged changes to the specified branch") // TODO: Implement --into
   // .option("--reset-author", "Set the author to the current user") // TODO: Implement --reset-author
   // .option("-v, --verbose", "Show unified diff") // TODO: Implement verbose
@@ -3289,7 +3562,25 @@ See also:
           ? options.message[0]
           : options.message,
     };
-    await modify(process.cwd(), normalizedOptions);
+    const result = await modify(process.cwd(), normalizedOptions);
+    if (result && 'dryRun' in result && result.dryRun) {
+      if (options.json) {
+        emitDryRunPlan(result);
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Dry-run: would ${result.action} on '${result.branch}'${result.message ? ` • ${result.message.split('\n')[0]}` : ''}`,
+        ),
+      );
+      if (result.descendantsToRestack.length > 0) {
+        console.log(
+          chalk.dim(
+            `  ↳ would restack ${result.descendantsToRestack.length} descendant(s)`,
+          ),
+        );
+      }
+    }
   });
 
 program
@@ -3302,6 +3593,11 @@ program
     '--ai',
     'Generate a Conventional Commit summary from the squashed commits',
   )
+  .option(
+    '--dry-run',
+    'Print the planned squash without resetting or committing',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -3309,42 +3605,72 @@ Examples:
   $ dub squash                          Squash and concatenate original messages
   $ dub squash -m "feat: rewrite api"   Squash with a custom commit message
   $ dub squash --ai                     Squash with an AI-generated summary
+  $ dub squash --dry-run                Preview the plan without mutating
 
 See also:
   dub fold, dub modify, dub absorb`,
   )
-  .action(async (options: { message?: string; ai?: boolean }) => {
-    const result = await squash(process.cwd(), {
-      message: options.message,
-      ai: options.ai,
-    });
+  .action(
+    async (options: {
+      message?: string;
+      ai?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
+    }) => {
+      const result = await squash(process.cwd(), {
+        message: options.message,
+        ai: options.ai,
+        dryRun: options.dryRun,
+      });
 
-    if (result.noopReason === 'no-commits') {
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        if (result.noopReason) {
+          console.log(
+            chalk.dim(
+              `Dry-run: nothing to squash on '${result.branch}' (${result.noopReason}).`,
+            ),
+          );
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would squash ${result.squashedCommits} commit(s) on '${result.branch}' into '${result.parent}'`,
+          ),
+        );
+        return;
+      }
+
+      if (result.noopReason === 'no-commits') {
+        console.log(
+          chalk.dim(
+            `Nothing to squash — '${result.branch}' has no commits above '${result.parent}'.`,
+          ),
+        );
+        return;
+      }
+      if (result.noopReason === 'single-commit') {
+        console.log(
+          chalk.dim(
+            `Nothing to squash — '${result.branch}' already has a single commit above '${result.parent}'.`,
+          ),
+        );
+        return;
+      }
+
       console.log(
-        chalk.dim(
-          `Nothing to squash — '${result.branch}' has no commits above '${result.parent}'.`,
+        chalk.green(
+          `✔ Squashed ${result.squashedCommits} commit(s) on '${result.branch}' into one.`,
         ),
       );
-      return;
-    }
-    if (result.noopReason === 'single-commit') {
-      console.log(
-        chalk.dim(
-          `Nothing to squash — '${result.branch}' already has a single commit above '${result.parent}'.`,
-        ),
-      );
-      return;
-    }
-
-    console.log(
-      chalk.green(
-        `✔ Squashed ${result.squashedCommits} commit(s) on '${result.branch}' into one.`,
-      ),
-    );
-    if (result.restacked) {
-      console.log(chalk.dim('  ↳ Descendants restacked.'));
-    }
-  });
+      if (result.restacked) {
+        console.log(chalk.dim('  ↳ Descendants restacked.'));
+      }
+    },
+  );
 
 program
   .command('split')
@@ -3379,8 +3705,9 @@ program
   )
   .option(
     '--dry-run',
-    'AI mode only: show the proposal and exit without applying',
+    'Preview the planned split without mutating refs, state, or PRs',
   )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .option('-y, --yes', 'AI mode only: skip the approval prompt')
   .option('--no-interactive', 'Disable interactive prompts and require flags')
   .addHelpText(
@@ -3418,6 +3745,8 @@ program
     'Number of commits to pop (default: 1)',
     parsePositiveInt,
   )
+  .option('--dry-run', 'Print the planned pop without resetting HEAD')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -3425,41 +3754,78 @@ Examples:
   $ dub pop                Pop last commit into staged changes
   $ dub pop --steps 3      Squash last 3 commits into staged changes
   $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)
+  $ dub pop --dry-run      Preview the plan without mutating
 
 See also:
   dub modify, dub split, dub undo`,
   )
-  .action(async (options: { steps?: number }) => {
-    const result = await pop(process.cwd(), { steps: options.steps });
-    const noun = result.steps === 1 ? 'commit' : 'commits';
-    console.log(
-      chalk.green(
-        `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
-      ),
-    );
-    console.log(
-      chalk.dim(
-        '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
-      ),
-    );
-  });
+  .action(
+    async (options: { steps?: number; dryRun?: boolean; json?: boolean }) => {
+      const result = await pop(process.cwd(), {
+        steps: options.steps,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would pop ${result.steps} commit(s) from '${result.branch}'`,
+          ),
+        );
+        return;
+      }
+      const noun = result.steps === 1 ? 'commit' : 'commits';
+      console.log(
+        chalk.green(
+          `✔ Popped ${result.steps} ${noun} from '${result.branch}' into staged changes`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          '  Edit, then run \'dub modify -a -m "<message>"\' to recommit. Descendants restack on next modify.',
+        ),
+      );
+    },
+  );
 
 program
   .command('reorder')
   .description(
     'Interactively reorder or drop commits within the current branch',
   )
+  .option(
+    '--dry-run',
+    'Print the reorderable commits without launching the picker',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub reorder    Open the picker for the current branch's commits
+  $ dub reorder              Open the picker for the current branch's commits
+  $ dub reorder --dry-run    Preview the reorderable commits without launching the picker
 
 See also:
   dub modify, dub split, dub move`,
   )
-  .action(async () => {
-    const result = await reorder(process.cwd());
+  .action(async (options: { dryRun?: boolean; json?: boolean }) => {
+    const result = await reorder(process.cwd(), { dryRun: options.dryRun });
+
+    if (result.dryRun) {
+      if (options.json) {
+        emitDryRunPlan(result);
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Dry-run: ${result.reorderableCommits?.length ?? 0} commit(s) eligible to reorder.`,
+        ),
+      );
+      return;
+    }
 
     if (result.status === 'no-op') {
       console.log(
@@ -3546,6 +3912,8 @@ program
   .argument('[branch]', 'Branch to freeze (defaults to current branch)')
   .option('--downstack', 'Also freeze ancestors toward trunk')
   .option('--upstack', 'Also freeze descendants')
+  .option('--dry-run', 'Print the planned freeze without mutating state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     "Set the 'frozen' flag on a tracked branch so restack/sync/post-merge skip it",
   )
@@ -3557,6 +3925,7 @@ Examples:
   $ dub freeze feat/auth-login       Freeze a specific tracked branch
   $ dub freeze feat/auth-login --downstack   Freeze the branch and its ancestors
   $ dub freeze --upstack             Freeze the current branch and its descendants
+  $ dub freeze --dry-run             Preview the plan without mutating
 
 See also:
   dub unfreeze, dub restack`,
@@ -3564,9 +3933,30 @@ See also:
   .action(
     async (
       branch: string | undefined,
-      options: { downstack?: boolean; upstack?: boolean },
+      options: {
+        downstack?: boolean;
+        upstack?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
     ) => {
-      const result = await freeze(process.cwd(), branch, options);
+      const result = await freeze(process.cwd(), branch, {
+        downstack: options.downstack,
+        upstack: options.upstack,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would freeze ${result.changed.length} branch(es): ${result.changed.join(', ') || '(none)'}`,
+          ),
+        );
+        return;
+      }
       printFreezeResult(result, 'frozen');
     },
   );
@@ -3576,6 +3966,8 @@ program
   .argument('[branch]', 'Branch to unfreeze (defaults to current branch)')
   .option('--downstack', 'Also unfreeze ancestors toward trunk')
   .option('--upstack', 'Also unfreeze descendants')
+  .option('--dry-run', 'Print the planned unfreeze without mutating state')
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     "Clear the 'frozen' flag so restack/sync/post-merge can mutate the branch again",
   )
@@ -3585,6 +3977,7 @@ program
 Examples:
   $ dub unfreeze                     Unfreeze the current branch
   $ dub unfreeze feat/auth-login --upstack    Unfreeze a branch and its descendants
+  $ dub unfreeze --dry-run           Preview the plan without mutating
 
 See also:
   dub freeze, dub restack`,
@@ -3592,9 +3985,30 @@ See also:
   .action(
     async (
       branch: string | undefined,
-      options: { downstack?: boolean; upstack?: boolean },
+      options: {
+        downstack?: boolean;
+        upstack?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
     ) => {
-      const result = await unfreeze(process.cwd(), branch, options);
+      const result = await unfreeze(process.cwd(), branch, {
+        downstack: options.downstack,
+        upstack: options.upstack,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would unfreeze ${result.changed.length} branch(es): ${result.changed.join(', ') || '(none)'}`,
+          ),
+        );
+        return;
+      }
       printFreezeResult(result, 'unfrozen');
     },
   );
@@ -3607,6 +4021,11 @@ program
     'Rename a tracked branch and propagate the change through state, children, and remote',
   )
   .option('--no-push', 'Skip pushing the renamed branch even if a PR exists')
+  .option(
+    '--dry-run',
+    'Print the planned rename without mutating refs, state, or remote',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
@@ -3614,6 +4033,7 @@ Examples:
   $ dub rename feat/new-name              Rename the current tracked branch
   $ dub rename feat/old feat/new          Rename a specific tracked branch
   $ dub rename --no-push feat/new-name    Rename without pushing the renamed branch
+  $ dub rename feat/new --dry-run         Preview the plan without mutating
 
 See also:
   dub track, dub submit, dub pr`,
@@ -3622,11 +4042,24 @@ See also:
     async (
       firstName: string,
       secondName: string | undefined,
-      options: { push?: boolean },
+      options: { push?: boolean; dryRun?: boolean; json?: boolean },
     ) => {
       const result = await rename(process.cwd(), firstName, secondName, {
         noPush: options.push === false,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would rename '${result.oldName}' to '${result.newName}'`,
+          ),
+        );
+        return;
+      }
       console.log(
         chalk.green(`✔ Renamed '${result.oldName}' to '${result.newName}'`),
       );
@@ -3663,6 +4096,11 @@ program
     '--edit-message',
     "Open the editor for the revert commit message instead of '--no-edit'",
   )
+  .option(
+    '--dry-run',
+    'Print the planned revert without creating branches or committing',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .description(
     'Create a branch on trunk that reverts a merged PR or commit and track it',
   )
@@ -3674,6 +4112,7 @@ Examples:
   $ dub revert abc1234                   Revert commit abc1234 onto trunk
   $ dub revert 123 --submit              Revert + push + open a PR
   $ dub revert 123 -b revert/api-rollback  Use a custom branch name
+  $ dub revert 123 --dry-run             Preview the plan without mutating
 
 See also:
   dub submit, dub merge-next, dub log`,
@@ -3681,13 +4120,36 @@ See also:
   .action(
     async (
       target: string,
-      options: { branch?: string; submit?: boolean; editMessage?: boolean },
+      options: {
+        branch?: string;
+        submit?: boolean;
+        editMessage?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
     ) => {
       const result = await revert(process.cwd(), target, {
         branchName: options.branch,
         submit: options.submit,
         editMessage: options.editMessage,
+        dryRun: options.dryRun,
       });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        const origin =
+          result.prNumber != null
+            ? `PR #${result.prNumber}`
+            : `commit ${result.revertedShortSha}`;
+        console.log(
+          chalk.green(
+            `✔ Dry-run: would create revert branch '${result.branch}' on '${result.trunk}' (reverts ${origin})`,
+          ),
+        );
+        return;
+      }
       const origin =
         result.prNumber != null
           ? `PR #${result.prNumber}`
@@ -3723,12 +4185,18 @@ const stashCommand = program
     'Override the default stash message (default: branch + timestamp)',
   )
   .option('--list', "Alias for 'dub stash list' — show recorded stashes")
+  .option(
+    '--dry-run',
+    'Print the planned stash without invoking git stash push',
+  )
+  .option('--json', 'Pair with --dry-run to emit the plan as JSON')
   .addHelpText(
     'after',
     `
 Examples:
   $ dub stash                                Stash on current branch
   $ dub stash -m "wip: refactor"             Stash with custom message
+  $ dub stash --dry-run                      Preview the plan
   $ dub stash pop                            Pop most recent (same branch only)
   $ dub stash pop --on feat/other            Checkout feat/other, then pop
   $ dub stash pop --force                    Pop onto current branch regardless
@@ -3737,24 +4205,44 @@ Examples:
 See also:
   dub stash pop, dub stash list, git stash`,
   )
-  .action(async (options: { message?: string; list?: boolean }) => {
-    if (options.list) {
-      await runStashList();
-      return;
-    }
-    const result = await stashPush(process.cwd(), { message: options.message });
-    console.log(
-      chalk.green(
-        `✔ Stashed on '${result.branch}' (${result.sha.slice(0, 7)})`,
-      ),
-    );
-    console.log(chalk.dim(`  ↳ message: ${result.message}`));
-    console.log(
-      chalk.dim(
-        `  ↳ run 'dub stash pop' on '${result.branch}' to restore, or 'dub stash pop --on <branch>' to move it.`,
-      ),
-    );
-  });
+  .action(
+    async (options: {
+      message?: string;
+      list?: boolean;
+      dryRun?: boolean;
+      json?: boolean;
+    }) => {
+      if (options.list) {
+        await runStashList();
+        return;
+      }
+      const result = await stashPush(process.cwd(), {
+        message: options.message,
+        dryRun: options.dryRun,
+      });
+      if (result.dryRun) {
+        if (options.json) {
+          emitDryRunPlan(result);
+          return;
+        }
+        console.log(
+          chalk.green(`✔ Dry-run: would stash on '${result.branch}'`),
+        );
+        return;
+      }
+      console.log(
+        chalk.green(
+          `✔ Stashed on '${result.branch}' (${result.sha.slice(0, 7)})`,
+        ),
+      );
+      console.log(chalk.dim(`  ↳ message: ${result.message}`));
+      console.log(
+        chalk.dim(
+          `  ↳ run 'dub stash pop' on '${result.branch}' to restore, or 'dub stash pop --on <branch>' to move it.`,
+        ),
+      );
+    },
+  );
 
 stashCommand.addCommand(
   new Command('pop')
@@ -3764,6 +4252,11 @@ stashCommand.addCommand(
       '--force',
       "Pop onto the current branch even if it doesn't match the recorded branch",
     )
+    .option(
+      '--dry-run',
+      'Print the planned pop without checking out or applying',
+    )
+    .option('--json', 'Pair with --dry-run to emit the plan as JSON')
     .addHelpText(
       'after',
       `
@@ -3771,25 +4264,46 @@ Examples:
   $ dub stash pop                            Pop most recent (same branch only)
   $ dub stash pop --on feat/other            Checkout feat/other, then pop
   $ dub stash pop --force                    Pop onto current branch regardless
+  $ dub stash pop --dry-run                  Preview the plan without mutating
 
 See also:
   dub stash, dub stash list`,
     )
-    .action(async (options: { on?: string; force?: boolean }) => {
-      const result = await stashPop(process.cwd(), {
-        on: options.on,
-        force: options.force,
-      });
-      if (result.checkedOut) {
-        console.log(chalk.green(`✔ Switched to '${result.branch}'`));
-      }
-      const label =
-        result.sourceBranch === result.branch
-          ? `'${result.branch}'`
-          : `'${result.branch}' (originally on '${result.sourceBranch}')`;
-      console.log(chalk.green(`✔ Popped stash on ${label}`));
-      console.log(chalk.dim(`  ↳ message: ${result.message}`));
-    }),
+    .action(
+      async (options: {
+        on?: string;
+        force?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      }) => {
+        const result = await stashPop(process.cwd(), {
+          on: options.on,
+          force: options.force,
+          dryRun: options.dryRun,
+        });
+        if (result.dryRun) {
+          if (options.json) {
+            emitDryRunPlan(result);
+            return;
+          }
+          console.log(
+            chalk.green(
+              `✔ Dry-run: would pop stash ${result.sha.slice(0, 7)} on '${result.branch}'`,
+            ),
+          );
+          return;
+        }
+        if (result.checkedOut) {
+          console.log(chalk.green(`✔ Switched to '${result.branch}'`));
+        }
+        const label =
+          result.sourceBranch === result.branch
+            ? `'${result.branch}'`
+            : `'${result.branch}' (originally on '${result.sourceBranch}')`;
+        console.log(chalk.green(`✔ Popped stash on ${label}`));
+        console.log(chalk.dim(`  ↳ message: ${result.message}`));
+      },
+    ),
 );
 
 stashCommand.addCommand(
@@ -3950,6 +4464,7 @@ async function runSplit(options: {
   closeOldPr?: boolean;
   restack?: boolean;
   dryRun?: boolean;
+  json?: boolean;
   yes?: boolean;
   interactive?: boolean;
 }) {
@@ -3991,13 +4506,29 @@ async function runSplit(options: {
     interactive: options.interactive,
   });
 
-  if (mode === 'ai' && options.dryRun) {
-    console.log(chalk.green('✔ Dry-run: AI proposed the following split:'));
-    for (const [i, p] of (result.aiProposal ?? []).entries()) {
-      console.log(chalk.dim(`  ${i + 1}. ${p.branch}`));
-      if (p.summary) console.log(chalk.dim(`     ${p.summary}`));
-      for (const f of p.files) console.log(chalk.dim(`       • ${f}`));
+  if (result.dryRun) {
+    if (options.json) {
+      emitDryRunPlan(result);
+      return;
     }
+    if (mode === 'ai') {
+      console.log(
+        chalk.green(
+          `✔ Dry-run: would propose an AI split of '${result.sourceBranch}' against '${result.parentBranch}'.`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "  ↳ AI call skipped to avoid billing. Re-run without --dry-run to see the model's proposed slices.",
+        ),
+      );
+      return;
+    }
+    console.log(
+      chalk.green(
+        `✔ Dry-run: would split '${result.sourceBranch}' into ${result.plannedBranches?.length ?? 0} new branch(es).`,
+      ),
+    );
     return;
   }
 
@@ -4335,6 +4866,16 @@ program.hook('preAction', async (_thisCommand, actionCommand) => {
       commandName: `dub ${(historyArgsForCapture ?? process.argv.slice(2)).join(' ')}`,
     });
   }
+
+  // For `--dry-run --json` we must flip the top-level error handler to JSON
+  // envelopes BEFORE the action runs — otherwise a DubError thrown during
+  // validation (before `emitDryRunPlan` would fire) leaks human-formatted
+  // red text and breaks scripted JSON parsers.
+  const actionOpts = actionCommand.opts();
+  maybeActivateDryRunJsonMode({
+    dryRun: Boolean(actionOpts.dryRun),
+    json: Boolean(actionOpts.json),
+  });
 
   const isRestoreFromRefs =
     actionCommand.name() === 'init' &&

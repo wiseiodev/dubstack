@@ -92,6 +92,8 @@ export interface AbsorbResult {
   restacked: string[];
   /** True when the rebase paused on a conflict; user must `dub continue`. */
   conflict: boolean;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
 }
 
 const WIP_SUBJECT_RE = /^(wip\b|fix\b|tmp\b|tweak\b|address|feedback)/i;
@@ -150,17 +152,19 @@ export async function absorb(
     );
   }
 
-  await saveUndoEntry(
-    {
-      operation: 'absorb',
-      timestamp: new Date().toISOString(),
-      previousBranch: originalBranch,
-      previousState: structuredClone(state),
-      branchTips: await snapshotStackTips(stack, cwd),
-      createdBranches: [],
-    },
-    cwd,
-  );
+  if (!options.dryRun) {
+    await saveUndoEntry(
+      {
+        operation: 'absorb',
+        timestamp: new Date().toISOString(),
+        previousBranch: originalBranch,
+        previousState: structuredClone(state),
+        branchTips: await snapshotStackTips(stack, cwd),
+        createdBranches: [],
+      },
+      cwd,
+    );
+  }
 
   if (mode === 'auto') {
     return runAutoMode(cwd, originalBranch, state, stack, options);
@@ -201,6 +205,7 @@ async function runAutoMode(
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -213,6 +218,7 @@ async function runAutoMode(
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -235,6 +241,7 @@ async function runAutoMode(
         movedTo: [],
         restacked: [],
         conflict: true,
+        dryRun: options.dryRun ?? false,
       };
     }
     await clearAbsorbProgress(cwd);
@@ -271,6 +278,7 @@ async function runAiMode(
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -285,6 +293,22 @@ async function runAiMode(
     );
   }
 
+  // Bail before the AI call in dry-run so the preview does not bill against
+  // the user's provider. The plan reports the candidate WIP commits as the
+  // upper bound on what would be absorbed.
+  if (options.dryRun) {
+    return {
+      mode: 'ai',
+      branch: originalBranch,
+      absorbed: wipCommits.length,
+      skipped: 0,
+      movedTo: [],
+      restacked: [],
+      conflict: false,
+      dryRun: true,
+    };
+  }
+
   const config = await deps.readConfig(cwd);
   const assignments = await aiPickTargets(
     wipCommits,
@@ -293,18 +317,6 @@ async function runAiMode(
     deps,
     config.ai.provider,
   );
-
-  if (options.dryRun) {
-    return {
-      mode: 'ai',
-      branch: originalBranch,
-      absorbed: assignments.filter((a) => a.targetSha !== null).length,
-      skipped: assignments.filter((a) => a.targetSha === null).length,
-      movedTo: [],
-      restacked: [],
-      conflict: false,
-    };
-  }
 
   const todo = buildCustomRebaseTodo(commits, assignments);
   const assignedCount = assignments.filter((a) => a.targetSha !== null).length;
@@ -319,6 +331,7 @@ async function runAiMode(
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -341,6 +354,7 @@ async function runAiMode(
         movedTo: [],
         restacked: [],
         conflict: true,
+        dryRun: options.dryRun ?? false,
       };
     }
     await clearAbsorbProgress(cwd);
@@ -381,6 +395,7 @@ async function runStackMode(
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -393,6 +408,7 @@ async function runStackMode(
       movedTo: Array.from(new Set(crossFixups.map((f) => f.targetBranch))),
       restacked: [],
       conflict: false,
+      dryRun: options.dryRun ?? false,
     };
   }
 
@@ -460,6 +476,7 @@ async function runStackMode(
         movedTo: Array.from(movedTo),
         restacked: [],
         conflict: true,
+        dryRun: options.dryRun ?? false,
       };
     }
     await clearAbsorbProgress(cwd);
@@ -496,7 +513,13 @@ async function finishAbsorbWithRestack(
   try {
     const restacked = await restackAfterAbsorb(cwd, state, stack);
     await clearAbsorbProgress(cwd);
-    return { mode, ...fields, restacked, conflict: false };
+    return {
+      mode,
+      ...fields,
+      restacked,
+      conflict: false,
+      dryRun: false,
+    };
   } catch (error) {
     if (error instanceof RestackConflictDuringAbsorb) {
       await clearAbsorbProgress(cwd);
@@ -505,6 +528,7 @@ async function finishAbsorbWithRestack(
         ...fields,
         restacked: error.rebased,
         conflict: true,
+        dryRun: false,
       };
     }
     await clearAbsorbProgress(cwd);
@@ -640,6 +664,7 @@ export async function absorbContinue(cwd: string): Promise<AbsorbResult> {
       movedTo: [],
       restacked: [],
       conflict: false,
+      dryRun: false,
     };
   }
 

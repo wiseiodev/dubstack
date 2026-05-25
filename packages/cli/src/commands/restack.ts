@@ -45,6 +45,12 @@ interface RestackResult {
   status: 'success' | 'conflict' | 'up-to-date';
   rebased: string[];
   conflictBranch?: string;
+  /** True when invoked with `--dry-run`; no rebase ran and no state was written. */
+  dryRun: boolean;
+  /** Branches that would be rebased onto their parent's new tip. */
+  plannedRebases?: string[];
+  /** Branches that would be skipped (frozen, frozen ancestor, worktree checkout, or already current). */
+  plannedSkips?: string[];
 }
 
 export interface RestackOptions {
@@ -54,6 +60,8 @@ export interface RestackOptions {
    * or conflict inside restack doesn't overwrite the outer operation's entry.
    */
   skipUndoEntry?: boolean;
+  /** Preview the planned rebases without mutating refs or state. */
+  dryRun?: boolean;
 }
 
 /**
@@ -119,9 +127,48 @@ export async function restack(
   }
 
   const steps = await buildRestackSteps(targetStacks, cwd, worktreeCheckouts);
+  const dryRun = options.dryRun ?? false;
 
   if (steps.length === 0) {
-    return { status: 'up-to-date', rebased: [] };
+    return {
+      status: 'up-to-date',
+      rebased: [],
+      dryRun,
+      ...(dryRun ? { plannedRebases: [], plannedSkips: [] } : {}),
+    };
+  }
+
+  if (dryRun) {
+    const plannedRebases: string[] = [];
+    const plannedSkips: string[] = [];
+    for (const step of steps) {
+      if (step.status === 'skipped') {
+        plannedSkips.push(step.branch);
+        continue;
+      }
+      const parentNewTip = await getBranchTip(step.parent, cwd);
+      if (parentNewTip === step.parentOldTip) {
+        plannedSkips.push(step.branch);
+        continue;
+      }
+      const hasUniquePatches = await hasUniquePatchCommits(
+        parentNewTip,
+        step.branch,
+        cwd,
+      );
+      if (!hasUniquePatches) {
+        plannedSkips.push(step.branch);
+        continue;
+      }
+      plannedRebases.push(step.branch);
+    }
+    return {
+      status: plannedRebases.length === 0 ? 'up-to-date' : 'success',
+      rebased: [],
+      dryRun: true,
+      plannedRebases,
+      plannedSkips,
+    };
   }
 
   for (const step of steps) {
@@ -150,7 +197,7 @@ export async function restack(
   }
 
   if (steps.every((step) => step.status === 'skipped')) {
-    return { status: 'up-to-date', rebased: [] };
+    return { status: 'up-to-date', rebased: [], dryRun };
   }
 
   if (!options.skipUndoEntry) {
@@ -270,7 +317,12 @@ async function executeRestackSteps(
           step.status = 'conflicted';
           step.parentNewTip = parentNewTip;
           await writeProgress(progress, cwd);
-          return { status: 'conflict', rebased, conflictBranch: step.branch };
+          return {
+            status: 'conflict',
+            rebased,
+            conflictBranch: step.branch,
+            dryRun: false,
+          };
         }
         throw error;
       }
@@ -290,6 +342,7 @@ async function executeRestackSteps(
     return {
       status: rebased.length === 0 && allSkipped ? 'up-to-date' : 'success',
       rebased,
+      dryRun: false,
     };
   } finally {
     bar?.stop();

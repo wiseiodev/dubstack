@@ -48,6 +48,8 @@ export interface ReorderOptions {
    * conflict-path branches are covered without a TTY.
    */
   promptConflict?: (branch: string) => Promise<'continue' | 'cancel' | 'exit'>;
+  /** Preview the reorderable commits without launching the picker. */
+  dryRun?: boolean;
 }
 
 /**
@@ -56,7 +58,7 @@ export interface ReorderOptions {
  * dispatch shape it uses for `dub restack` and `dub move`.
  */
 export interface ReorderResult {
-  status: 'success' | 'conflict' | 'cancelled' | 'no-op' | 'exit';
+  status: 'success' | 'conflict' | 'cancelled' | 'no-op' | 'exit' | 'dry-run';
   /** Commits in the new order (oldest-first), excluding dropped commits. */
   finalPicks: string[];
   /** Commits the user marked as `drop`. */
@@ -65,6 +67,10 @@ export interface ReorderResult {
   rebased: string[];
   /** Set when the cascading restack hit a conflict. */
   conflictBranch?: string;
+  /** True when invoked with `--dry-run`; no mutations were performed. */
+  dryRun: boolean;
+  /** Reorderable commits (oldest-first) returned by `--dry-run`. */
+  reorderableCommits?: string[];
   /**
    * Discriminates between the reorder rebase itself producing a conflict
    * (`'reorder'`) and the cascading descendant restack producing one
@@ -174,11 +180,14 @@ export async function reorder(
     );
   }
 
-  await assertBranchesNotCheckedOutElsewhere(
-    cwd,
-    [currentBranch],
-    'dub reorder',
-  );
+  const dryRun = options.dryRun ?? false;
+  if (!dryRun) {
+    await assertBranchesNotCheckedOutElsewhere(
+      cwd,
+      [currentBranch],
+      'dub reorder',
+    );
+  }
 
   const parent = getParent(state, currentBranch);
   if (!parent) {
@@ -215,6 +224,22 @@ export async function reorder(
     );
   }
 
+  if (dryRun) {
+    const reorderableCommits = commits
+      .slice()
+      .reverse()
+      .map((c) => c.sha);
+    return {
+      status: 'dry-run',
+      finalPicks: reorderableCommits,
+      dropped: [],
+      rebased: [],
+      noOpReason: `Would launch picker for ${commits.length} commit(s) on '${currentBranch}'.`,
+      dryRun: true,
+      reorderableCommits,
+    };
+  }
+
   const pickerResult = options.entries
     ? {
         kind: 'done' as const,
@@ -229,6 +254,7 @@ export async function reorder(
       dropped: [],
       rebased: [],
       noOpReason: 'Cancelled in picker',
+      dryRun: false,
     };
   }
 
@@ -246,6 +272,7 @@ export async function reorder(
       dropped: [],
       rebased: [],
       noOpReason: 'No reorder or drop changes were made in the picker',
+      dryRun: false,
     };
   }
 
@@ -289,6 +316,7 @@ export async function reorder(
           rebased: [],
           noOpReason:
             'Cancelled mid-conflict; rolled back to pre-reorder state',
+          dryRun: false,
         };
       }
       if (decision === 'exit') {
@@ -299,6 +327,7 @@ export async function reorder(
           rebased: [],
           conflictBranch: currentBranch,
           conflictSource: 'reorder',
+          dryRun: false,
         };
       }
       // 'continue' — user resolves manually then runs `git rebase --continue`
@@ -312,6 +341,7 @@ export async function reorder(
         rebased: [],
         conflictBranch: currentBranch,
         conflictSource: 'reorder',
+        dryRun: false,
       };
     }
     throw error;
@@ -355,6 +385,7 @@ export async function reorder(
           conflictSource: 'restack' as const,
         }
       : {}),
+    dryRun: false,
   };
 }
 

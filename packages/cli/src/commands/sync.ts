@@ -458,10 +458,14 @@ export async function sync(
     all?: boolean;
     interactive?: boolean;
     fresh?: boolean;
+    dryRun?: boolean;
   } = {},
 ): Promise<SyncResult> {
-  await ensureGhInstalled();
-  await checkGhAuth();
+  const dryRun = rawOptions.dryRun ?? false;
+  if (!dryRun) {
+    await ensureGhInstalled();
+    await checkGhAuth();
+  }
 
   const options: SyncOptions = {
     restack: rawOptions.restack ?? true,
@@ -469,6 +473,7 @@ export async function sync(
     all: rawOptions.all ?? false,
     interactive: rawOptions.interactive ?? isInteractiveShell(),
     fresh: rawOptions.fresh ?? false,
+    dryRun,
   };
   const showAiPromptOptions = options.interactive
     ? await canShowAiPrompt(cwd)
@@ -539,7 +544,18 @@ export async function sync(
     branches: [],
     restacked: false,
     reconcileSources: {},
+    dryRun,
   };
+
+  if (dryRun) {
+    return {
+      ...result,
+      plannedScope: {
+        roots: Array.from(roots),
+        branches: Array.from(stackBranches),
+      },
+    };
+  }
   const rootHasRemote = new Map<string, boolean>();
   let pendingError: Error | null = null;
   let restoreTarget = originalBranch;
