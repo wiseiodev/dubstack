@@ -36,6 +36,10 @@ export async function init(
   }
 
   const status = options.restoreFromRefs ? 'restored' : await initState(cwd);
+  if (options.restoreFromRefs) {
+    await restoreStateFromRefs(cwd);
+  }
+
   const repoRoot = await getRepoRoot(cwd);
   const gitignorePath = path.join(repoRoot, '.gitignore');
   const entry = '.git/dubstack';
@@ -52,10 +56,6 @@ export async function init(
   } else {
     fs.writeFileSync(gitignorePath, `${entry}\n`);
     gitignoreUpdated = true;
-  }
-
-  if (options.restoreFromRefs) {
-    await restoreStateFromRefs(cwd);
   }
 
   return { status, gitignoreUpdated };

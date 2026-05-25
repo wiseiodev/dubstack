@@ -107,6 +107,7 @@ describe('init', () => {
     await expect(init(dir, { restoreFromRefs: true })).rejects.toThrow(
       'No DubStack refs mirror found',
     );
+    expect(fs.existsSync(path.join(dir, '.gitignore'))).toBe(false);
   });
 
   it('throws when not in a git repo', async () => {

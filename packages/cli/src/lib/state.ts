@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { execa } from './exec';
-import { getRepoRoot } from './git';
+import { getRepoRoot, isGitRepo } from './git';
 import {
   RECONCILE_SOURCES,
   type ReconcileSource,
@@ -144,10 +144,11 @@ export async function writeState(state: DubState, cwd: string): Promise<void> {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  const normalized = normalizeState(state);
   // Write-temp-then-rename so a process kill mid-write can never leave a
   // partially-truncated state.json. fs.renameSync is atomic on the same
   // filesystem (.git/dubstack lives next to the temp file).
-  const payload = `${JSON.stringify(state, null, 2)}\n`;
+  const payload = `${JSON.stringify(normalized, null, 2)}\n`;
   const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpPath, payload);
   try {
@@ -162,7 +163,7 @@ export async function writeState(state: DubState, cwd: string): Promise<void> {
   }
 
   try {
-    await mirrorStateToRefs(normalizeState(state), cwd);
+    await mirrorStateToRefs(normalized, cwd);
     writeRefsMirrorVersionMarker(dir);
   } catch (error) {
     warnRefsMirrorFailure(error);
@@ -211,6 +212,8 @@ export async function restoreStateFromRefs(cwd: string): Promise<DubState> {
  * Mirrors existing JSON state once for repos created before the refs mirror.
  */
 export async function migrateStateRefsIfNeeded(cwd: string): Promise<boolean> {
+  if (!(await isGitRepo(cwd))) return false;
+
   try {
     const dubDir = await getDubDir(cwd);
     const markerPath = path.join(dubDir, REFS_MIRROR_VERSION_FILE);
@@ -230,12 +233,6 @@ export async function migrateStateRefsIfNeeded(cwd: string): Promise<boolean> {
     writeRefsMirrorVersionMarker(dubDir);
     return true;
   } catch (error) {
-    if (
-      error instanceof DubError &&
-      error.message === 'Not a git repository.'
-    ) {
-      return false;
-    }
     warnRefsMirrorFailure(error);
     return false;
   }

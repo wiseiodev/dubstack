@@ -113,6 +113,17 @@ describe('writeState and readState roundtrip', () => {
     expect(loaded.stacks[0].branches[0].last_submitted_version).toBeNull();
     expect(loaded.stacks[0].branches[0].last_synced_at).toBeNull();
     expect(loaded.stacks[0].branches[0].sync_source).toBeNull();
+
+    const diskState = JSON.parse(
+      fs.readFileSync(
+        path.join(dir, '.git', 'dubstack', 'state.json'),
+        'utf-8',
+      ),
+    ) as DubState;
+    expect(diskState.stacks[0].branches[0].last_submitted_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_reconciled_version).toBeNull();
+    expect(diskState.stacks[0].branches[0].last_synced_at).toBeNull();
+    expect(diskState.stacks[0].branches[0].sync_source).toBeNull();
   });
 
   it('roundtrips parent_revision correctly', async () => {
@@ -478,6 +489,18 @@ describe('writeState and readState roundtrip', () => {
 });
 
 describe('migrateStateRefsIfNeeded', () => {
+  it('returns false without warning outside a git repository', async () => {
+    const tmpDir = await fs.promises.mkdtemp('/tmp/dubstack-nongit-');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await expect(migrateStateRefsIfNeeded(tmpDir)).resolves.toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it('creates refs and a marker once for existing JSON state', async () => {
     const dubDir = path.join(dir, '.git', 'dubstack');
     fs.mkdirSync(dubDir, { recursive: true });
