@@ -4,12 +4,19 @@ import * as path from 'node:path';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
 import {
+  initSQLiteState,
+  readSQLiteState,
+  sqliteStateExists,
+  writeSQLiteState,
+} from './state-sqlite';
+import {
   RECONCILE_SOURCES,
   type ReconcileSource,
   type ReconcileSourceHistogram,
 } from './sync/types';
 
 const VALID_RECONCILE_SOURCES = new Set<string>(RECONCILE_SOURCES);
+type StorageBackend = 'json' | 'sqlite';
 
 /** A branch within a stack. */
 export interface Branch {
@@ -107,6 +114,14 @@ export async function getDubDir(cwd: string): Promise<string> {
  * @throws {DubError} If the state file is missing or contains invalid JSON.
  */
 export async function readState(cwd: string): Promise<DubState> {
+  const backend = await readConfiguredStorageBackend(cwd);
+  if (backend === 'sqlite') {
+    return normalizeState(await readSQLiteState(cwd));
+  }
+  return readJsonState(cwd);
+}
+
+export async function readJsonState(cwd: string): Promise<DubState> {
   const statePath = await getStatePath(cwd);
   if (!fs.existsSync(statePath)) {
     throw new DubError('DubStack is not initialized.', [
@@ -129,6 +144,18 @@ export async function readState(cwd: string): Promise<DubState> {
  * Creates the parent directory if it doesn't exist.
  */
 export async function writeState(state: DubState, cwd: string): Promise<void> {
+  const backend = await readConfiguredStorageBackend(cwd);
+  if (backend === 'sqlite') {
+    await writeSQLiteState(state, cwd);
+    return;
+  }
+  await writeJsonState(state, cwd);
+}
+
+export async function writeJsonState(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
   const statePath = await getStatePath(cwd);
   const dir = path.dirname(statePath);
   if (!fs.existsSync(dir)) {
@@ -161,6 +188,15 @@ export async function writeState(state: DubState, cwd: string): Promise<void> {
 export async function initState(
   cwd: string,
 ): Promise<'created' | 'already_exists'> {
+  const backend = await readConfiguredStorageBackend(cwd);
+  if (backend === 'sqlite') {
+    if (await sqliteStateExists(cwd)) {
+      return 'already_exists';
+    }
+    await initSQLiteState(cwd);
+    return 'created';
+  }
+
   const statePath = await getStatePath(cwd);
   const dir = path.dirname(statePath);
 
@@ -172,6 +208,24 @@ export async function initState(
   const emptyState: DubState = { stacks: [] };
   fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
   return 'created';
+}
+
+export async function readConfiguredStorageBackend(
+  cwd: string,
+): Promise<StorageBackend> {
+  const configPath = path.join(await getDubDir(cwd), 'config.json');
+  if (!fs.existsSync(configPath)) return 'json';
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+      storageBackend?: unknown;
+    };
+    return parsed.storageBackend === 'sqlite' ? 'sqlite' : 'json';
+  } catch {
+    throw new DubError('Config file is corrupted.', [
+      "Run 'rm .git/dubstack/config.json' to delete the corrupted file.",
+      "Run 'dub config storage-backend json' to reset the storage backend after deleting it.",
+    ]);
+  }
 }
 
 /**

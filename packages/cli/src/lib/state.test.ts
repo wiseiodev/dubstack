@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
+import { writeConfig } from './config';
 import { DubError } from './errors';
 import {
   addBranchToStack,
@@ -272,6 +273,86 @@ describe('initState', () => {
 
     const loaded = await readState(dir);
     expect(loaded.stacks[0].id).toBe('keep-me');
+  });
+});
+
+describe('SQLite storage backend', () => {
+  it('initializes SQLite state when configured', async () => {
+    await writeConfig({ storageBackend: 'sqlite' }, dir);
+
+    const result = await initState(dir);
+
+    expect(result).toBe('created');
+    expect(
+      fs.existsSync(path.join(dir, '.git', 'dubstack', 'state.sqlite')),
+    ).toBe(true);
+    expect(
+      fs.existsSync(path.join(dir, '.git', 'dubstack', 'state.json')),
+    ).toBe(false);
+    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+  });
+
+  it('roundtrips full branch metadata through SQLite', async () => {
+    await writeConfig({ storageBackend: 'sqlite' }, dir);
+    await initState(dir);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              detached_root: true,
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+              last_submitted_version: null,
+              last_reconciled_version: null,
+              last_synced_at: null,
+              sync_source: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              parent_revision: 'base-sha',
+              pr_number: 42,
+              pr_link: 'https://github.com/wiseiodev/dubstack/pull/42',
+              last_submitted_version: {
+                head_sha: 'head',
+                base_sha: 'base',
+                base_branch: 'main',
+                version_number: 3,
+                source: 'sync-adopt-remote-safe',
+              },
+              last_reconciled_version: {
+                head_sha: 'head',
+                base_sha: 'base',
+                base_branch: 'main',
+                source: 'sync-no-change',
+              },
+              last_synced_at: '2026-05-25T04:00:00.000Z',
+              sync_source: 'sync-no-change',
+              frozen: true,
+            },
+          ],
+        },
+      ],
+      last_sync: {
+        timestamp: '2026-05-25T04:01:00.000Z',
+        reconcile_sources: {
+          'sync-no-change': 1,
+          'sync-adopt-remote-safe': 0,
+          'sync-rebase-onto-remote': 0,
+          imported: 0,
+          submit: 0,
+        },
+      },
+    };
+
+    await writeState(state, dir);
+
+    expect(await readState(dir)).toEqual(state);
   });
 });
 

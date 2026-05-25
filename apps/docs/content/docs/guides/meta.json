@@ -5,6 +5,7 @@
     "conflict-resolution",
     "ai-assistant",
     "mcp",
+    "sqlite-backend",
     "shell-integration",
     "github-action-retarget",
     "migration-from-graphite"

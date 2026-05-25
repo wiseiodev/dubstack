@@ -1,0 +1,46 @@
+---
+title: SQLite Backend
+description: Opt in to SQLite-backed DubStack state storage for large repositories.
+---
+
+DubStack uses `state.json` by default. That keeps the small-repo path simple and easy to inspect.
+
+For repositories with large stacks or many active branches, you can opt in to SQLite-backed state storage:
+
+```bash
+dub migrate storage --to sqlite
+```
+
+The migration copies the current JSON state into `.git/dubstack/state.sqlite` and sets the repo-local config value:
+
+```bash
+dub config storage-backend sqlite
+```
+
+## When To Use It
+
+Use SQLite when state reads or writes are showing up in real command timing on a large repository. JSON remains the default because it is portable, debuggable, and fast enough for most projects.
+
+SQLite helps most when:
+
+- the repository has roughly 100 or more tracked branches
+- stack metadata is read repeatedly during automation
+- JSON parse or rewrite time is a measurable part of command latency
+
+## Switch Back To JSON
+
+You can reverse the migration at any time:
+
+```bash
+dub migrate storage --to json
+```
+
+This copies SQLite state back into `.git/dubstack/state.json` and resets the storage backend config to `json`.
+
+## Files
+
+- `.git/dubstack/config.json` stores the selected backend.
+- `.git/dubstack/state.json` is the default JSON state file.
+- `.git/dubstack/state.sqlite` is the opt-in SQLite state database.
+
+Both backends are local-only. Nothing in DubStack state is pushed to your remote repository.

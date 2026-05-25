@@ -25,6 +25,7 @@ describe('readConfig', () => {
       aiAssistantEnabled: false,
       mcpMode: 'interactive',
       reviewers: [],
+      storageBackend: 'json',
       submitDefault: 'auto',
       ai: {
         defaults: {

@@ -11,6 +11,7 @@ const baseConfig: DubConfig = {
   aiAssistantEnabled: true,
   mcpMode: 'interactive',
   reviewers: [],
+  storageBackend: 'json',
   submitDefault: 'auto',
   ai: {
     defaults: {

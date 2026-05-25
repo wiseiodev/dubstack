@@ -4,12 +4,14 @@ import { DubError } from './errors';
 import { getDubDir } from './state';
 
 export type McpMode = 'read-only' | 'interactive' | 'trusted';
+export type StorageBackend = 'json' | 'sqlite';
 export type SubmitDefault = 'auto' | 'draft' | 'publish';
 
 export interface DubConfig {
   aiAssistantEnabled: boolean;
   mcpMode: McpMode;
   reviewers: string[];
+  storageBackend: StorageBackend;
   submitDefault: SubmitDefault;
   ai: {
     defaults: {
@@ -68,6 +70,7 @@ const DEFAULT_CONFIG: DubConfig = {
   aiAssistantEnabled: false,
   mcpMode: 'interactive',
   reviewers: [],
+  storageBackend: 'json',
   submitDefault: 'auto',
   ai: {
     defaults: {
@@ -159,6 +162,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
         : DEFAULT_CONFIG.aiAssistantEnabled,
     mcpMode: normalizeMcpMode(config.mcpMode),
     reviewers: normalizeReviewers(config.reviewers),
+    storageBackend: normalizeStorageBackend(config.storageBackend),
     submitDefault: normalizeSubmitDefault(config.submitDefault),
     ai: {
       defaults: {
@@ -236,6 +240,11 @@ function normalizeReviewers(value: unknown): string[] {
   return value.filter((entry): entry is string => {
     return typeof entry === 'string' && entry.trim().length > 0;
   });
+}
+
+function normalizeStorageBackend(value: unknown): StorageBackend {
+  if (value === 'json' || value === 'sqlite') return value;
+  return DEFAULT_CONFIG.storageBackend;
 }
 
 function normalizeAiPromptMode(
