@@ -1196,6 +1196,37 @@ export async function getCommitSubjectsBetween(
 }
 
 /**
+ * Returns full commit messages on `headRef` that are not on `baseRef`, oldest
+ * first. Used by AI readiness checks so the judge can inspect both subject
+ * quality and body usefulness.
+ */
+export async function getCommitMessagesBetween(
+  baseRef: string,
+  headRef: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '--reverse', '--format=%B%x1e', `${baseRef}..${headRef}`],
+      { cwd },
+    );
+    return stdout
+      .split('\x1e')
+      .map((message) => message.trim())
+      .filter((message) => message.length > 0);
+  } catch {
+    throw new DubError(
+      `Failed to read commit messages between '${baseRef}' and '${headRef}'.`,
+      [
+        `Run 'git log ${baseRef}..${headRef}' manually to inspect the failure.`,
+        `Run 'git fetch origin' to fetch missing history, then retry.`,
+      ],
+    );
+  }
+}
+
+/**
  * Squash-merges `branch` into the currently checked-out branch and writes a
  * single commit with the provided message. Used by `dub fold --squash` to
  * collapse a child's history into one commit on its parent.

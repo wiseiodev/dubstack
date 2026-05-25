@@ -50,7 +50,7 @@ import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
-import { ready } from './commands/ready';
+import { type ReadyAiReviewResult, ready } from './commands/ready';
 import { rename } from './commands/rename';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
@@ -1451,6 +1451,13 @@ Examples:
 program
   .command('ready')
   .description('Run health + submit preflight checks for the current branch')
+  .option('--ai', 'Run an AI review-readiness check before submit')
+  .option(
+    '--ai-skip-review',
+    'Warn but do not block when the AI readiness check finds critical issues',
+  )
+  .option('--json', 'Output ready status as JSON')
+  .option('--verbose', 'Show the full AI readiness issue list')
   .option(
     '--scope <mode>',
     'Validation scope: current | downstack (default) | stack',
@@ -1463,27 +1470,52 @@ program
 Examples:
   $ dub ready                    Check current branch + ancestors (downstack)
   $ dub ready --scope current    Check just the current branch
-  $ dub ready --scope stack      Check every branch in the stack`,
+  $ dub ready --scope stack      Check every branch in the stack
+  $ dub ready --ai               Run AI review-readiness checks
+  $ dub ready --ai --scope stack Run AI checks for every branch in the stack`,
   )
-  .action(async (options: { scope: ScopeMode }) => {
-    const result = await ready(process.cwd(), { scope: options.scope });
-    console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
-    if (result.submitBranches.length > 0) {
-      console.log(
-        chalk.dim(
-          `Submit scope (${result.scope}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
-        ),
-      );
-    }
-    if (result.ready) {
-      console.log(chalk.green('✔ Ready to submit.'));
-      return;
-    }
-    console.log(chalk.yellow('⚠ Not ready to submit yet.'));
-    for (const blocker of result.blockers) {
-      console.log(chalk.yellow(`  - ${blocker}`));
-    }
-  });
+  .action(
+    async (options: {
+      scope: ScopeMode;
+      ai?: boolean;
+      aiSkipReview?: boolean;
+      json?: boolean;
+      verbose?: boolean;
+    }) => {
+      const result = await ready(process.cwd(), {
+        scope: options.scope,
+        ai: options.ai,
+        aiSkipReview: options.aiSkipReview,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        if (result.blockers.includes('ai-review')) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+      console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
+      if (result.submitBranches.length > 0) {
+        console.log(
+          chalk.dim(
+            `Submit scope (${result.scope}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
+          ),
+        );
+      }
+      printReadyAiReview(result.aiReview, Boolean(options.verbose));
+      if (result.ready) {
+        console.log(chalk.green('✔ Ready to submit.'));
+        return;
+      }
+      console.log(chalk.yellow('⚠ Not ready to submit yet.'));
+      for (const blocker of result.blockers) {
+        console.log(chalk.yellow(`  - ${blocker}`));
+      }
+      if (result.blockers.includes('ai-review')) {
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program
   .command('prune')
@@ -2567,6 +2599,49 @@ function describeScopeLabel(scope: SubmitScope): string {
       return 'downstack';
     case 'branch':
       return `branch ${scope.branch}`;
+  }
+}
+
+function printReadyAiReview(
+  aiReview: ReadyAiReviewResult | null,
+  verbose: boolean,
+): void {
+  if (!aiReview) return;
+
+  const issueCount = aiReview.branches.reduce(
+    (sum, branch) => sum + branch.issues.length,
+    0,
+  );
+  if (issueCount === 0) {
+    console.log(chalk.green('✔ AI review found no readiness issues.'));
+    return;
+  }
+
+  if (aiReview.skipped) {
+    console.log(
+      chalk.yellow('⚠ AI review gate bypassed with --ai-skip-review.'),
+    );
+  }
+
+  for (const branch of aiReview.branches) {
+    if (branch.issues.length === 0) {
+      console.log(chalk.green(`✔ AI review (${branch.branch}): no issues.`));
+      continue;
+    }
+
+    const visibleIssues = verbose ? branch.issues : branch.issues.slice(0, 3);
+    console.log(chalk.yellow(`AI review (${branch.branch}):`));
+    for (const issue of visibleIssues) {
+      console.log(chalk.yellow(`  - [${issue.severity}] ${issue.message}`));
+      console.log(chalk.dim(`    Action: ${issue.action}`));
+    }
+    if (!verbose && branch.issues.length > visibleIssues.length) {
+      console.log(
+        chalk.dim(
+          `    ${branch.issues.length - visibleIssues.length} more issue(s); rerun with --ai --verbose to show all.`,
+        ),
+      );
+    }
   }
 }
 
