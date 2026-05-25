@@ -31,6 +31,7 @@ import {
   resolveCheckoutTrunk,
 } from './commands/checkout';
 import { children } from './commands/children';
+import { completion } from './commands/completion';
 import { continueCommand } from './commands/continue';
 import { create } from './commands/create';
 import { deleteCommand } from './commands/delete';
@@ -42,6 +43,7 @@ import { freeze } from './commands/freeze';
 import { init } from './commands/init';
 import { type InstallRecipe, install } from './commands/install';
 import { log, logJson, styleLogOutput } from './commands/log';
+import { man } from './commands/man';
 import { mcp } from './commands/mcp';
 import { mergeCheck, runMergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
@@ -284,6 +286,36 @@ Examples:
       }
     },
   );
+
+program
+  .command('completion')
+  .argument('<shell>', 'Shell to generate completions for: bash, zsh, or fish')
+  .description('Print a shell completion script to stdout')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub completion bash >> ~/.bashrc
+  $ dub completion zsh > "\${fpath[1]}/_dub"
+  $ dub completion fish > ~/.config/fish/completions/dub.fish`,
+  )
+  .action((shell: string) => {
+    process.stdout.write(completion(program, shell));
+  });
+
+program
+  .command('man')
+  .description('Print a roff-formatted man page for `dub` to stdout')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub man > ~/.local/share/man/man1/dub.1
+  $ mandb --user-db    # then 'man dub' renders the page`,
+  )
+  .action(() => {
+    process.stdout.write(man(program, { version }));
+  });
 
 program
   .command('docs')
@@ -3626,6 +3658,14 @@ program.hook('postAction', async () => {
 });
 
 async function main() {
+  // `dub completion bash | source /dev/stdin`, `dub man | head -1`, and
+  // similar pipelines close stdout before we finish writing. Without this
+  // listener Node 22 surfaces EPIPE as an unhandled error and exits 1.
+  // Treat a closed stdout as a normal early-exit signal.
+  process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') process.exit(0);
+  });
+
   try {
     const rawArgs = process.argv.slice(2);
     historyArgsForCapture = rawArgs;
