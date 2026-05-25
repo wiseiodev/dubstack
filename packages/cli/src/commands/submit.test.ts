@@ -17,12 +17,14 @@ vi.mock('../lib/github.js', () => ({
   checkGhAuth: vi.fn(),
   getPr: vi.fn(),
   getRepositoryWebUrl: vi.fn(),
+  getPrReviewers: vi.fn(),
   createPr: vi.fn(),
   markPrReady: vi.fn(),
   updatePrBody: vi.fn(),
   isPrAutoMergeEnabled: vi.fn(),
   enablePrAutoMerge: vi.fn(),
   openPrCreateWebFlow: vi.fn(),
+  rerequestPrReviewers: vi.fn(),
 }));
 
 vi.mock('../lib/state.js', async (importOriginal) => {
@@ -57,10 +59,12 @@ import {
   enablePrAutoMerge,
   ensureGhInstalled,
   getPr,
+  getPrReviewers,
   getRepositoryWebUrl,
   isPrAutoMergeEnabled,
   markPrReady,
   openPrCreateWebFlow,
+  rerequestPrReviewers,
   updatePrBody,
 } from '../lib/github';
 import { readMetadataTemplates } from '../lib/metadata-templates';
@@ -80,6 +84,7 @@ const mockEnsureGhInstalled = ensureGhInstalled as ReturnType<typeof vi.fn>;
 const mockCheckGhAuth = checkGhAuth as ReturnType<typeof vi.fn>;
 const mockGetPr = getPr as ReturnType<typeof vi.fn>;
 const mockGetRepositoryWebUrl = getRepositoryWebUrl as ReturnType<typeof vi.fn>;
+const mockGetPrReviewers = getPrReviewers as ReturnType<typeof vi.fn>;
 const mockCreatePr = createPr as ReturnType<typeof vi.fn>;
 const mockMarkPrReady = markPrReady as ReturnType<typeof vi.fn>;
 const mockUpdatePrBody = updatePrBody as ReturnType<typeof vi.fn>;
@@ -88,6 +93,9 @@ const mockIsPrAutoMergeEnabled = isPrAutoMergeEnabled as ReturnType<
 >;
 const mockEnablePrAutoMerge = enablePrAutoMerge as ReturnType<typeof vi.fn>;
 const mockOpenPrCreateWebFlow = openPrCreateWebFlow as ReturnType<typeof vi.fn>;
+const mockRerequestPrReviewers = rerequestPrReviewers as ReturnType<
+  typeof vi.fn
+>;
 const mockReadState = readState as ReturnType<typeof vi.fn>;
 const mockWriteState = writeState as ReturnType<typeof vi.fn>;
 const mockReadConfig = readConfig as ReturnType<typeof vi.fn>;
@@ -182,6 +190,7 @@ beforeEach(() => {
   mockGetRepositoryWebUrl.mockResolvedValue('https://github.com/o/r');
   mockMarkPrReady.mockResolvedValue(undefined);
   mockUpdatePrBody.mockResolvedValue(undefined);
+  mockGetPrReviewers.mockResolvedValue({ requested: [], reviewed: [] });
   mockIsPrAutoMergeEnabled.mockResolvedValue(false);
   mockEnablePrAutoMerge.mockResolvedValue({ method: 'squash' });
   mockOpenPrCreateWebFlow.mockResolvedValue({
@@ -190,6 +199,7 @@ beforeEach(() => {
     bodyFilePath: null,
     bodyFileError: null,
   });
+  mockRerequestPrReviewers.mockResolvedValue([]);
   mockReadMetadataTemplates.mockResolvedValue({
     prTemplate: null,
     commitTemplate: null,
@@ -903,6 +913,107 @@ describe('submit', () => {
 
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('EACCES'));
     logSpy.mockRestore();
+  });
+
+  it('re-requests existing reviewers on updated PRs when requested', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+    });
+    mockGetPrReviewers.mockResolvedValue({
+      requested: [{ login: 'monalisa' }],
+      reviewed: [{ login: 'hubot' }],
+    });
+    mockRerequestPrReviewers.mockResolvedValue(['monalisa', 'hubot']);
+
+    const result = await submit('/repo', false, { rerequestReview: true });
+
+    expect(mockGetPrReviewers).toHaveBeenCalledWith(42, '/repo');
+    expect(mockRerequestPrReviewers).toHaveBeenCalledWith(
+      42,
+      {
+        requested: [{ login: 'monalisa' }],
+        reviewed: [{ login: 'hubot' }],
+      },
+      '/repo',
+    );
+    expect(result.reviewRerequests).toEqual([
+      {
+        branch: 'feat/a',
+        prNumber: 42,
+        reviewers: ['monalisa', 'hubot'],
+      },
+    ]);
+    expect(logSpy).toHaveBeenCalledWith(
+      'Re-requested review for PR #42 (feat/a): monalisa, hubot',
+    );
+    logSpy.mockRestore();
+  });
+
+  it('filters re-requested reviewers with --rerequest-review-only', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: existing',
+      body: 'old body',
+    });
+    mockGetPrReviewers.mockResolvedValue({
+      requested: [{ login: 'monalisa' }, { login: 'octocat' }],
+      reviewed: [{ login: 'hubot' }],
+    });
+    mockRerequestPrReviewers.mockResolvedValue(['hubot']);
+
+    await submit('/repo', false, { rerequestReviewOnly: ['hubot'] });
+
+    expect(mockRerequestPrReviewers).toHaveBeenCalledWith(
+      42,
+      {
+        requested: [],
+        reviewed: [{ login: 'hubot' }],
+      },
+      '/repo',
+    );
+  });
+
+  it('does not re-request review for newly created PRs', async () => {
+    mockGetCurrentBranch.mockResolvedValue('feat/a');
+    mockReadState.mockResolvedValue(
+      makeState([
+        { name: 'main', parent: null, type: 'root' },
+        { name: 'feat/a', parent: 'main' },
+      ]),
+    );
+    mockGetPr.mockResolvedValue(null);
+    mockGetLastCommitMessage.mockResolvedValue('feat: new feature');
+    mockCreatePr.mockResolvedValue({
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      title: 'feat: new feature',
+      body: '',
+    });
+
+    const result = await submit('/repo', false, { rerequestReview: true });
+
+    expect(result.created).toEqual(['feat/a']);
+    expect(mockGetPrReviewers).not.toHaveBeenCalled();
+    expect(mockRerequestPrReviewers).not.toHaveBeenCalled();
   });
 
   it('enables auto-merge on every PR in the submit scope', async () => {

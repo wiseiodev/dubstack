@@ -39,6 +39,10 @@ dub submit --web
 # Queue GitHub auto-merge for submitted PRs
 dub submit --merge-when-ready
 dub submit --merge-when-ready --method rebase
+
+# Re-request existing reviewers after updating PRs
+dub submit --rerequest-review
+dub submit --rerequest-review-only monalisa,hubot
 ```
 
 ## Flags
@@ -58,12 +62,16 @@ dub submit --merge-when-ready --method rebase
 | `--web` | Open GitHub PR create forms in the browser for branches without open PRs |
 | `--merge-when-ready` | Queue GitHub auto-merge for every submitted PR |
 | `--method <method>` | Auto-merge strategy: `squash` (default), `merge`, or `rebase` |
+| `--rerequest-review` | Re-request review from existing reviewers on updated PRs |
+| `--rerequest-review-only <users>` | Re-request review only from comma-separated reviewers on updated PRs |
 | `--path <mode>` | _[deprecated]_ `current` maps to `--downstack`; `stack` maps to `--stack`. Removed in v2. |
 | `--fix` | _[deprecated]_ No-op alias retained for script compatibility |
 
 Scope flags are mutually exclusive. Passing more than one (or combining a scope flag with `--path`) is a validation error.
 
 `--draft` and `--publish` are mutually exclusive. `--draft` only affects newly created PRs; existing PRs stay in their current lifecycle state. `--publish` requires every selected branch to already have an open PR.
+
+`--rerequest-review` runs only for PRs that already existed before submit updated them. Newly created PRs are skipped. Use `--rerequest-review-only <users>` with a comma-separated list to re-request a smaller reviewer set.
 
 **Aliases:** `dub ss`
 

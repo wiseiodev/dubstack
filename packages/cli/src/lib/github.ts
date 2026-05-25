@@ -13,6 +13,15 @@ export interface PrInfo {
   isDraft?: boolean;
 }
 
+export interface PrReviewer {
+  login: string;
+}
+
+export interface PrReviewers {
+  requested: PrReviewer[];
+  reviewed: PrReviewer[];
+}
+
 export type BranchPrLifecycleState = 'OPEN' | 'CLOSED' | 'MERGED' | 'NONE';
 
 export interface BranchPrSyncInfo {
@@ -261,6 +270,188 @@ export async function getPrByNumber(
       `Run 'gh pr view ${prNumber} --json number,url,title,body' to inspect the response.`,
       'Retry once GitHub is healthy.',
     ]);
+  }
+}
+
+/**
+ * Fetches pending review requests plus users who have already submitted a
+ * review. Team review requests use `org/team-slug` so they can be passed back
+ * to `gh pr edit --add-reviewer`.
+ */
+export async function getPrReviewers(
+  prNumber: number,
+  cwd: string,
+): Promise<PrReviewers> {
+  let stdout: string;
+  try {
+    const result = await runGh(
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'reviewRequests,reviews',
+        '--jq',
+        '.',
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
+    throw new DubError(
+      `Failed to fetch reviewers for PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr view ${prNumber} --json reviewRequests,reviews' to inspect the response.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') {
+    return { requested: [], reviewed: [] };
+  }
+
+  try {
+    return parsePrReviewers(JSON.parse(trimmed));
+  } catch {
+    throw new DubError(`Failed to parse reviewers for PR #${prNumber}.`, [
+      `Run 'gh pr view ${prNumber} --json reviewRequests,reviews' to inspect the response.`,
+      'Retry once GitHub is healthy.',
+    ]);
+  }
+}
+
+function parsePrReviewers(value: unknown): PrReviewers {
+  if (!value || typeof value !== 'object') {
+    return { requested: [], reviewed: [] };
+  }
+
+  const record = value as {
+    reviewRequests?: unknown;
+    reviews?: unknown;
+  };
+  return {
+    requested: extractReviewRequestLogins(record.reviewRequests).map(
+      loginToReviewer,
+    ),
+    reviewed: extractReviewLogins(record.reviews).map(loginToReviewer),
+  };
+}
+
+function extractReviewRequestLogins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const request = entry as {
+      login?: unknown;
+      slug?: unknown;
+      name?: unknown;
+      organization?: { login?: unknown };
+    };
+    if (typeof request.login === 'string' && request.login.length > 0) {
+      logins.push(request.login);
+      continue;
+    }
+    if (typeof request.slug === 'string' && request.slug.length > 0) {
+      const org =
+        request.organization &&
+        typeof request.organization.login === 'string' &&
+        request.organization.login.length > 0
+          ? request.organization.login
+          : null;
+      logins.push(org ? `${org}/${request.slug}` : request.slug);
+      continue;
+    }
+    if (typeof request.name === 'string' && request.name.length > 0) {
+      logins.push(request.name);
+    }
+  }
+  return uniqueLogins(logins);
+}
+
+function extractReviewLogins(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const logins: string[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const review = entry as {
+      author?: { login?: unknown };
+    };
+    const login = review.author?.login;
+    if (typeof login === 'string' && login.length > 0) {
+      logins.push(login);
+    }
+  }
+  return uniqueLogins(logins);
+}
+
+function uniqueLogins(logins: string[]): string[] {
+  return [...new Set(logins.map((login) => login.trim()).filter(Boolean))];
+}
+
+function loginToReviewer(login: string): PrReviewer {
+  return { login };
+}
+
+export async function rerequestPrReviewers(
+  prNumber: number,
+  reviewers: PrReviewers,
+  cwd: string,
+): Promise<string[]> {
+  const requested = new Set(
+    reviewers.requested.map((reviewer) => reviewer.login),
+  );
+  const targets = uniqueLogins([
+    ...reviewers.requested.map((reviewer) => reviewer.login),
+    ...reviewers.reviewed.map((reviewer) => reviewer.login),
+  ]);
+
+  for (const login of targets) {
+    if (requested.has(login)) {
+      await editPrReviewer(prNumber, '--remove-reviewer', login, cwd);
+    }
+    await editPrReviewer(prNumber, '--add-reviewer', login, cwd);
+  }
+
+  return targets;
+}
+
+async function editPrReviewer(
+  prNumber: number,
+  flag: '--add-reviewer' | '--remove-reviewer',
+  login: string,
+  cwd: string,
+): Promise<void> {
+  try {
+    await runGh(['pr', 'edit', String(prNumber), flag, login], { cwd });
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    const action =
+      flag === '--add-reviewer' ? 'add reviewer' : 'remove reviewer';
+    if (message.includes('403') || message.includes('insufficient')) {
+      throw new DubError('GitHub token lacks required permissions.', [
+        "Run 'gh auth login' and re-select the 'repo' scope.",
+        "Run 'gh auth status' to confirm the active scopes after re-login.",
+      ]);
+    }
+    throw new DubError(
+      `Failed to ${action} '${login}' on PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr edit ${prNumber} ${flag} ${login}' manually to inspect the failure.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
   }
 }
 
