@@ -50,6 +50,12 @@ export async function acquireStateLock(
     localLock.count += 1;
     return makeStateLockHandle(localLock.path, localLock.info);
   }
+  if (localLock) {
+    throw new DubError('DubStack state lock is already held by this process.', [
+      'This usually means a command tried to acquire a non-reentrant state lock while already mutating state.',
+      'Please report this at https://github.com/dubstack/dubstack/issues with the command you were running.',
+    ]);
+  }
 
   while (true) {
     const acquired = tryCreateLock(lockPath, options);
@@ -116,14 +122,25 @@ function tryCreateLock(
   const payload = `${JSON.stringify(info, null, 2)}\n`;
 
   let fd: number | null = null;
+  let created = false;
+  let completed = false;
   try {
     fd = fs.openSync(lockPath, 'wx');
+    created = true;
     fs.writeFileSync(fd, payload, 'utf8');
+    completed = true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null;
     throw error;
   } finally {
     if (fd != null) fs.closeSync(fd);
+    if (created && !completed) {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch {
+        // Preserve the original create/write failure; cleanup is best effort.
+      }
+    }
   }
 
   return info;

@@ -3429,6 +3429,8 @@ function shouldAcquireInvocationStateLock(): boolean {
   const args = historyArgsForCapture ?? process.argv.slice(2);
   const command = firstCommandArg(args);
   if (!command) return false;
+  // Keep the documented read-only/MCP bypasses explicit so future alias changes
+  // do not accidentally start locking commands that must remain non-blocking.
   if (command === 'log') return false;
   if (command === 'status' && args.includes('--json')) return false;
   if (command === 'doctor' && args.includes('--no-fetch')) return false;

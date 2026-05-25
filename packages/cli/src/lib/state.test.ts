@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
 import { DubError } from './errors';
 import {
@@ -84,6 +84,19 @@ describe('readState', () => {
     expect(state.stacks[0].branches[0].sync_source).toBeNull();
   });
 });
+
+async function waitUntil(
+  predicate: () => boolean,
+  timeoutMs = 1_000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error('Timed out waiting for condition');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
 
 describe('writeState and readState roundtrip', () => {
   it('roundtrips correctly', async () => {
@@ -263,13 +276,20 @@ describe('state lock', () => {
 
   it('waits with feedback while another live process owns the lock', async () => {
     const messages: string[] = [];
-    const first = await acquireStateLock(dir, {
-      commandName: 'dub sync',
-      retryMs: 10,
-      timeoutMs: 1_000,
-      onWait: (message) => messages.push(message),
-      now: () => new Date('2026-05-23T10:15:00Z'),
-    });
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: process.pid,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'dub sync',
+        },
+        null,
+        2,
+      )}\n`,
+    );
 
     const second = acquireStateLock(dir, {
       commandName: 'dub create feat/a',
@@ -279,15 +299,67 @@ describe('state lock', () => {
       allowReentrant: false,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await waitUntil(() => messages.length > 0);
     expect(messages).toContain(
       'Another dub command (PID ' +
         `${process.pid} running \`dub sync\` since 2026-05-23T10:15:00.000Z) is currently writing state. Waiting...`,
     );
 
-    await first.release();
+    fs.unlinkSync(lockPath);
     const secondLock = await second;
     await secondLock.release();
+  });
+
+  it('fails fast when a non-reentrant lock is requested in the same process', async () => {
+    const first = await acquireStateLock(dir, { commandName: 'dub sync' });
+
+    await expect(
+      acquireStateLock(dir, {
+        commandName: 'dub create feat/a',
+        allowReentrant: false,
+      }),
+    ).rejects.toThrow('already held by this process');
+
+    await first.release();
+  });
+
+  it('removes a newly created lockfile when writing lock metadata fails', async () => {
+    const lockPath = await getStateLockPath(dir);
+    const writeError = new Error('metadata write failed');
+    vi.resetModules();
+    vi.doMock('node:fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('node:fs')>();
+      const realWriteFileSync = actual.writeFileSync as (
+        file: fs.PathOrFileDescriptor,
+        data: string | NodeJS.ArrayBufferView,
+        options?: fs.WriteFileOptions,
+      ) => void;
+
+      return {
+        ...actual,
+        writeFileSync: (
+          file: fs.PathOrFileDescriptor,
+          data: string | NodeJS.ArrayBufferView,
+          options?: fs.WriteFileOptions,
+        ) => {
+          if (typeof file === 'number') throw writeError;
+          return realWriteFileSync(file, data, options);
+        },
+      };
+    });
+
+    try {
+      const { acquireStateLock: acquireStateLockWithWriteFailure } =
+        await import('./state-lock');
+      await expect(
+        acquireStateLockWithWriteFailure(dir, { commandName: 'dub sync' }),
+      ).rejects.toThrow(writeError);
+    } finally {
+      vi.doUnmock('node:fs');
+      vi.resetModules();
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it('reclaims stale locks whose owner process is gone', async () => {
