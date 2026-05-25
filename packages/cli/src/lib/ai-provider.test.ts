@@ -250,6 +250,48 @@ describe('resolveAiProvider', () => {
     );
   });
 
+  it('checks the Ollama tags endpoint for a root base URL', () => {
+    const execFile = vi.fn();
+
+    checkOllamaEndpoint('http://localhost:11434/', execFile);
+
+    expect(execFile).toHaveBeenCalledWith(
+      'curl',
+      [
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--max-time',
+        '2',
+        'http://localhost:11434/api/tags',
+      ],
+      {
+        stdio: 'pipe',
+      },
+    );
+  });
+
+  it('checks the OpenAI-compatible models endpoint for an LM Studio base URL', () => {
+    const execFile = vi.fn();
+
+    checkOllamaEndpoint('http://localhost:1234/v1', execFile);
+
+    expect(execFile).toHaveBeenCalledWith(
+      'curl',
+      [
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--max-time',
+        '2',
+        'http://localhost:1234/v1/models',
+      ],
+      {
+        stdio: 'pipe',
+      },
+    );
+  });
+
   it('uses the explicitly selected Anthropic provider and repo model override', () => {
     process.env.DUBSTACK_GEMINI_API_KEY = 'gem-key';
     process.env.DUBSTACK_ANTHROPIC_API_KEY = 'anthropic-key';

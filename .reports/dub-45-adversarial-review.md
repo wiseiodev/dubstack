@@ -32,6 +32,17 @@ behavior.
 - Minor: 0
 - Nitpick: 0
 
+## Follow-up review after PR creation
+
+- The external two-reviewer workflow could not run because the local `claude`
+  CLI returned `401 Invalid authentication credentials`.
+- I performed a second local adversarial pass against the PR diff and found a
+  coverage gap: the production `checkOllamaEndpoint` helper had an error-path
+  test but did not directly assert the happy-path curl URL for Ollama
+  `/api/tags` or LM Studio `/v1/models`.
+- Added focused tests for both URL shapes in
+  `packages/cli/src/lib/ai-provider.test.ts`.
+
 ## Notes
 
 - `pnpm evals` was attempted after rebuilding `better-sqlite3`; it remains
