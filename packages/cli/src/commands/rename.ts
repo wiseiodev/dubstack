@@ -5,7 +5,6 @@ import {
   getCurrentBranch,
   isValidBranchName,
   lastPushedRef,
-  listWorktreeCheckouts,
   pushBranch,
   readLastPushedSha,
   renameBranch,
@@ -13,6 +12,7 @@ import {
 } from '../lib/git';
 import { findStackForBranch, readState, writeState } from '../lib/state';
 import { clearUndoEntry, saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 
 interface RenameOptions {
   /**
@@ -119,20 +119,7 @@ export async function rename(
     ]);
   }
 
-  // Refuse to rename a branch that's checked out in another worktree —
-  // `git branch -m` would fail mid-operation, and undo would point to a
-  // rename that never happened.
-  const worktreeCheckouts = await listWorktreeCheckouts(cwd);
-  const otherWorktree = worktreeCheckouts.get(oldName);
-  if (otherWorktree) {
-    throw new DubError(
-      `Branch '${oldName}' is checked out in another worktree (${otherWorktree}).`,
-      [
-        `Run 'git worktree remove ${otherWorktree}' to drop the worktree, then retry.`,
-        `Switch off '${oldName}' in the other worktree, then retry.`,
-      ],
-    );
-  }
+  await assertBranchesNotCheckedOutElsewhere(cwd, [oldName], 'dub rename');
 
   const childBranches = sourceStack.branches.filter(
     (b) => b.parent === oldName,

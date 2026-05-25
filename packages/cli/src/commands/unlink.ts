@@ -21,6 +21,7 @@ import {
   writeState,
 } from '../lib/state';
 import { saveUndoEntry } from '../lib/undo-log';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 
 export interface UnlinkOptions {
   /** Skip PR retargeting; print a warning that the PR base is now out of sync. */
@@ -110,6 +111,7 @@ export async function unlink(
       `Run 'dub untrack ${branch}' to drop the root from tracking entirely.`,
     ]);
   }
+  await assertBranchesNotCheckedOutElsewhere(cwd, [branch], 'dub unlink');
 
   const previousParent = entry.parent;
   if (!previousParent) {
