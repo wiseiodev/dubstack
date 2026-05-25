@@ -58,6 +58,7 @@ import { restack, restackContinue } from './commands/restack';
 import { revert } from './commands/revert';
 import type { SplitMode } from './commands/split';
 import { split } from './commands/split';
+import { squash } from './commands/squash';
 import { stashList, stashPop, stashPush } from './commands/stash';
 import { formatStatus, status } from './commands/status';
 import type { SubmitPathMode, SubmitScope } from './commands/submit';
@@ -1994,6 +1995,57 @@ program
           : options.message,
     };
     await modify(process.cwd(), normalizedOptions);
+  });
+
+program
+  .command('squash')
+  .description(
+    'Collapse every commit on the current branch (since its parent) into one',
+  )
+  .option('-m, --message <message>', 'Use the given message for the new commit')
+  .option(
+    '--ai',
+    'Generate a Conventional Commit summary from the squashed commits',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub squash                          Squash and concatenate original messages
+  $ dub squash -m "feat: rewrite api"   Squash with a custom commit message
+  $ dub squash --ai                     Squash with an AI-generated summary`,
+  )
+  .action(async (options: { message?: string; ai?: boolean }) => {
+    const result = await squash(process.cwd(), {
+      message: options.message,
+      ai: options.ai,
+    });
+
+    if (result.noopReason === 'no-commits') {
+      console.log(
+        chalk.dim(
+          `Nothing to squash — '${result.branch}' has no commits above '${result.parent}'.`,
+        ),
+      );
+      return;
+    }
+    if (result.noopReason === 'single-commit') {
+      console.log(
+        chalk.dim(
+          `Nothing to squash — '${result.branch}' already has a single commit above '${result.parent}'.`,
+        ),
+      );
+      return;
+    }
+
+    console.log(
+      chalk.green(
+        `✔ Squashed ${result.squashedCommits} commit(s) on '${result.branch}' into one.`,
+      ),
+    );
+    if (result.restacked) {
+      console.log(chalk.dim('  ↳ Descendants restacked.'));
+    }
   });
 
 program
