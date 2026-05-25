@@ -8,6 +8,7 @@
     "squash",
     "pop",
     "checkout",
+    "back",
     "log",
     "navigate",
     "submit",

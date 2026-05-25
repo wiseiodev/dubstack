@@ -22,6 +22,7 @@ import type { RebaseTodoEntry } from '../lib/rebase-todo';
 import type { ScopeMode } from '../lib/scope';
 import { getStackOverviewBatch } from '../lib/stack-overview';
 import { absorb } from './absorb';
+import { back } from './back';
 import { branchInfo } from './branch';
 import { checkout } from './checkout';
 import { children } from './children';
@@ -145,6 +146,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   ],
   'dubstack.sync': ['force', 'all'],
   'dubstack.checkout': ['branch'],
+  'dubstack.back': ['steps'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
   'dubstack.reorder': ['entries'],
   'dubstack.revert': ['target', 'branch', 'submit'],
@@ -546,6 +548,22 @@ const TOOLS: ToolDefinition[] = [
         },
       },
       required: ['branch'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.back',
+    description: 'Return to a previously checked-out branch.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Number of available history entries to go back.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -1381,6 +1399,10 @@ async function callTool(
       }
       return mutatingToolResult(() => checkout(branch, cwd));
     }
+    case 'dubstack.back':
+      return mutatingToolResult(() =>
+        back(cwd, optionalPositiveInteger(args.steps) ?? 1),
+      );
     case 'dubstack.reorder': {
       const entries = parseReorderEntries(args.entries);
       return mutatingToolResult(
