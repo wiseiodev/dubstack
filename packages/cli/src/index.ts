@@ -310,7 +310,10 @@ program
 Examples:
   $ dub completion bash >> ~/.bashrc
   $ dub completion zsh > "\${fpath[1]}/_dub"
-  $ dub completion fish > ~/.config/fish/completions/dub.fish`,
+  $ dub completion fish > ~/.config/fish/completions/dub.fish
+
+See also:
+  dub man, dub docs`,
   )
   .action((shell: string) => {
     process.stdout.write(completion(program, shell));
@@ -324,7 +327,10 @@ program
     `
 Examples:
   $ dub man > ~/.local/share/man/man1/dub.1
-  $ mandb --user-db    # then 'man dub' renders the page`,
+  $ mandb --user-db    # then 'man dub' renders the page
+
+See also:
+  dub completion, dub docs, dub help`,
   )
   .action(() => {
     process.stdout.write(man(program, { version }));
