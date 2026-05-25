@@ -1,0 +1,49 @@
+---
+title: dub freeze / dub unfreeze
+description: Freeze tracked branches so restack/sync/post-merge skip them.
+---
+
+## Usage
+
+```bash
+# Freeze the current branch
+dub freeze
+
+# Freeze a specific tracked branch
+dub freeze feat/auth-login
+
+# Freeze a branch and its ancestors toward trunk
+dub freeze feat/auth-login --downstack
+
+# Freeze the current branch and all descendants
+dub freeze --upstack
+
+# Preview the plan without mutating
+dub freeze --dry-run
+
+# Reverse with unfreeze
+dub unfreeze
+dub unfreeze feat/auth-login --upstack
+dub unfreeze --dry-run
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--downstack` | Also freeze (or unfreeze) ancestors toward trunk |
+| `--upstack` | Also freeze (or unfreeze) descendants |
+| `--dry-run` | Print the planned change without mutating state |
+| `--json` | Pair with `--dry-run` to emit the plan as JSON |
+
+## Notes
+
+- Freezing sets the `frozen` flag on the branch's tracked state. While
+  set, `dub restack`, `dub sync`, and `dub post-merge` skip the branch
+  instead of rebasing it.
+- `dub doctor` surfaces frozen branches so they don't silently fall behind
+  the rest of the stack.
+- The change is to state only — no git refs are touched by `freeze` or
+  `unfreeze` themselves.
+
+See also: `dub restack`, `dub sync`, `dub doctor`.

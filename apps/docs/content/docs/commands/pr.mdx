@@ -1,0 +1,22 @@
+---
+title: dub pr
+description: Open a branch PR in your browser.
+---
+
+## Usage
+
+```bash
+# Open the PR for the current branch
+dub pr
+
+# Open the PR for a specific branch
+dub pr feat/auth-login
+
+# Open a PR by number
+dub pr 123
+```
+
+The argument can be either a branch name or a PR number; both are resolved
+through `gh` and opened in your default browser.
+
+See also: `dub submit`, `dub repo`, `dub status`.

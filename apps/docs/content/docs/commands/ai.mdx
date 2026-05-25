@@ -1,0 +1,110 @@
+---
+title: dub ai
+description: AI assistant utilities — provider setup, prompts, env vars, and conflict resolution.
+---
+
+## Usage
+
+```bash
+# Guided provider + model setup (interactive)
+dub ai setup
+
+# Ask the assistant a question
+dub ai ask "what changed in this stack?"
+
+# Or use the implicit shortcut from the root command
+dub "summarize the diff on this branch"
+
+# Write provider settings into your shell profile
+dub ai env --anthropic-key sk-...
+dub ai env --gemini-key ... --gemini-model gemini-2.5-pro
+dub ai env --ollama-base-url http://localhost:11434 --ollama-model qwen2.5-coder
+
+# AI-assisted conflict resolution during a rebase/restack
+dub ai resolve
+dub ai resolve --dry-run
+dub ai resolve --adjudicate
+```
+
+## Subcommands
+
+### `dub ai setup`
+
+Interactive provider + model picker. Prompts for the provider, a model
+(or a custom model ID), and where to store the model (global shell profile
+or repo-local `.git/dubstack/config.json`). Writes the chosen provider env
+vars to your shell profile and updates `ai-provider` (and, for repo scope,
+`ai-model`) in repo-local config.
+
+### `dub ai ask <prompt...>`
+
+Send a prompt to the configured AI provider. Requires the assistant to be
+enabled with `dub config ai-assistant on`. The assistant has read-only bash
+access to the repo for context gathering — destructive commands are
+sandboxed out.
+
+### `dub ai env`
+
+Write provider keys, model overrides, and Bedrock/Ollama settings into your
+shell profile (`.zshrc`, `.bashrc`/`.bash_profile`, or `.profile`).
+
+| Flag | Env var written |
+|---|---|
+| `--gemini-key <key>` | `DUBSTACK_GEMINI_API_KEY` |
+| `--anthropic-key <key>` | `DUBSTACK_ANTHROPIC_API_KEY` |
+| `--gateway-key <key>` | `DUBSTACK_AI_GATEWAY_API_KEY` |
+| `--openai-key <key>` | `DUBSTACK_OPENAI_API_KEY` |
+| `--ollama-base-url <url>` | `DUBSTACK_OLLAMA_BASE_URL` |
+| `--gemini-model <model>` | `DUBSTACK_GEMINI_MODEL` |
+| `--anthropic-model <model>` | `DUBSTACK_ANTHROPIC_MODEL` |
+| `--gateway-model <model>` | `DUBSTACK_AI_GATEWAY_MODEL` |
+| `--openai-model <model>` | `DUBSTACK_OPENAI_MODEL` |
+| `--ollama-model <model>` | `DUBSTACK_OLLAMA_MODEL` |
+| `--bedrock-profile <profile>` | `DUBSTACK_BEDROCK_AWS_PROFILE` |
+| `--bedrock-region <region>` | `DUBSTACK_BEDROCK_AWS_REGION` |
+| `--bedrock-model <model>` | `DUBSTACK_BEDROCK_MODEL` |
+| `--profile <path>` | Override target profile path |
+| `--shell <shell>` | Force shell detection (`zsh` or `bash`) |
+
+At least one key, model, or Bedrock setting must be passed.
+
+### `dub ai resolve`
+
+AI-assisted conflict resolver for in-progress rebase/restack operations.
+Reads the conflict markers, asks the configured provider for resolutions,
+and previews them before applying. After applying, it tries `dub continue`;
+on test failures or new conflicts it retries once with feedback.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Show proposed resolutions without applying |
+| `--abort` | Abort the active rebase/restack operation |
+| `--adjudicate` | Resolve with two configured providers and reconcile disagreements |
+| `--no-adjudicate` | Force single-provider mode |
+
+When two providers are configured, adjudication runs by default. With
+`--adjudicate`, both providers propose resolutions; matching outputs apply
+automatically with `high` confidence, and disagreements prompt for which
+side to take (or `skip`/`abort`). Disagreements are also written to
+`.git/dubstack/ai-eval-bank/*.json` for later evaluation.
+
+`--dry-run` shows both providers' answers for disagreement files and the
+first provider's pick is recorded as the dry-run choice.
+
+## Providers
+
+| Provider | Required env (or other) |
+|---|---|
+| Gemini | `DUBSTACK_GEMINI_API_KEY` |
+| Vercel AI Gateway | `DUBSTACK_AI_GATEWAY_API_KEY` |
+| Amazon Bedrock | `DUBSTACK_BEDROCK_AWS_PROFILE`, `DUBSTACK_BEDROCK_AWS_REGION` |
+| Anthropic | `DUBSTACK_ANTHROPIC_API_KEY` |
+| OpenAI | `DUBSTACK_OPENAI_API_KEY` |
+| Ollama (and LM Studio) | `DUBSTACK_OLLAMA_BASE_URL` (default `http://localhost:11434`) |
+
+Provider selection is repo-local — `dub config ai-provider <name>` (or
+`auto` to pick based on which env vars are set). Per-provider model
+overrides live in repo config (`dub config ai-model --provider <p> <model>`)
+or in `DUBSTACK_<PROVIDER>_MODEL` env vars.
+
+See also: `dub config ai-assistant`, `dub config ai-provider`, `dub config ai-model`, `dub flow`.

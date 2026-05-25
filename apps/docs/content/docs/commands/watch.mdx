@@ -1,0 +1,33 @@
+---
+title: dub watch
+description: Long-lived monitor that polls GitHub and watches .git for stack-state changes.
+---
+
+## Usage
+
+```bash
+# Default 60s poll interval
+dub watch
+
+# Custom interval (e.g. 30s, 2m)
+dub watch --interval 30s
+
+# Render the live TUI status pane
+dub watch --ui
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--interval <duration>` | Poll interval — duration like `30s`, `2m` (default `60s`) |
+| `--ui` | Render the live TUI status pane |
+
+## Notes
+
+- `dub watch` polls GitHub for PR and CI status changes and watches the
+  `.git` directory for stack-state changes (checkouts, restacks, submits).
+- It is intended to run as a long-lived process in a terminal pane or
+  editor sidecar; exit with Ctrl-C.
+
+See also: `dub status`, `dub log`, `dub sync`.

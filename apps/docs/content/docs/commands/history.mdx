@@ -1,0 +1,33 @@
+---
+title: dub history
+description: Show recent DubStack command history.
+---
+
+## Usage
+
+```bash
+# Show the 20 most recent dub commands
+dub history
+
+# Show the last 50 entries
+dub history --limit 50
+
+# Emit JSON for downstream tooling
+dub history --json
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-n, --limit <count>` | Number of history entries to show (default: 20) |
+| `--json` | Output history as JSON |
+
+## Notes
+
+- Each entry records the command, its status (`success` or failure), and
+  the timestamp. Sensitive-looking arguments are redacted.
+- The same history backs the audit log surfaced by MCP tools, giving AI
+  agents read-only visibility into recent operations on the stack.
+
+See also: `dub status`, `dub doctor`.

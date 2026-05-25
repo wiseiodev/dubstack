@@ -1,0 +1,145 @@
+---
+title: dub config
+description: Manage repo-local DubStack configuration (AI, reviewers, storage, theme).
+---
+
+## Usage
+
+```bash
+dub config theme dark
+dub config ai-assistant on
+dub config reviewers alice,bob
+dub config storage-backend sqlite
+dub config submit-default draft
+```
+
+Config lives in `.git/dubstack/config.json` and is repo-local. Most
+subcommands accept no argument to print the current value, or a value to
+set it.
+
+## `ai-assistant`
+
+Enable or disable the repo-local AI assistant.
+
+```bash
+dub config ai-assistant         # show
+dub config ai-assistant on
+dub config ai-assistant off
+```
+
+## `ai-provider`
+
+Pick the active AI provider for this repo.
+
+```bash
+dub config ai-provider           # show
+dub config ai-provider auto      # pick based on configured env keys
+dub config ai-provider anthropic
+dub config ai-provider gemini
+dub config ai-provider gateway
+dub config ai-provider bedrock
+dub config ai-provider openai
+dub config ai-provider ollama
+```
+
+## `ai-model`
+
+Set or clear a repo-local model override per provider.
+
+```bash
+dub config ai-model --provider anthropic claude-sonnet-4-7
+dub config ai-model --provider gemini gemini-2.5-pro
+dub config ai-model --provider openai --clear
+```
+
+| Flag | Description |
+|---|---|
+| `--provider <name>` | Required. One of `gemini`, `anthropic`, `gateway`, `bedrock`, `openai`, `ollama` |
+| `--clear` | Clear the repo-local override (falls back to env var or default) |
+
+## `ai-defaults`
+
+Toggle AI-on-by-default for `create`, `submit`, and `flow`. When enabled,
+running the command without `--ai`/`--no-ai` uses AI; pass `--no-ai` to
+opt out for one invocation.
+
+```bash
+dub config ai-defaults create         # show
+dub config ai-defaults create on
+dub config ai-defaults submit on
+dub config ai-defaults flow on
+```
+
+## `ai-prompts`
+
+Control whether interactive prompts surface AI choices.
+
+```bash
+dub config ai-prompts auto    # show AI choices when the assistant is enabled
+dub config ai-prompts on      # always offer AI choices
+dub config ai-prompts off     # never offer AI choices
+```
+
+## `ai-prompts-auto-accept`
+
+Control how AI recommendations in prompts are accepted.
+
+```bash
+dub config ai-prompts-auto-accept off    # always confirm
+dub config ai-prompts-auto-accept high   # auto-apply high-confidence picks
+```
+
+## `submit-default`
+
+Default PR lifecycle for `dub submit`.
+
+```bash
+dub config submit-default          # show
+dub config submit-default auto     # draft when .github/workflows/ has workflows
+dub config submit-default draft    # open new PRs as drafts
+dub config submit-default publish  # promote existing draft PRs by default
+```
+
+## `reviewers`
+
+Manage repo-default PR reviewers used by `dub submit`.
+
+```bash
+dub config reviewers                     # show
+dub config reviewers alice,@org/backend  # set
+dub config reviewers --clear             # remove
+```
+
+## `mcp-mode`
+
+Security model for mutating MCP tool calls (used by `dub mcp`).
+
+```bash
+dub config mcp-mode read-only    # disable mutating tools entirely
+dub config mcp-mode interactive  # terminal confirmation (default)
+dub config mcp-mode trusted      # allow mutating tools without prompts
+```
+
+## `storage-backend`
+
+State storage backend.
+
+```bash
+dub config storage-backend          # show
+dub config storage-backend json     # JSON state.json (default)
+dub config storage-backend sqlite   # SQLite-backed state
+```
+
+Use `dub migrate storage --to <backend>` to copy state when switching.
+
+## `theme`
+
+Terminal color theme used by `log`, `status`, and `sync` output.
+
+```bash
+dub config theme            # show
+dub config theme auto       # auto-detect light/dark from COLORFGBG (default)
+dub config theme dark
+dub config theme light
+dub config theme none       # equivalent to --no-color globally
+```

@@ -1,0 +1,40 @@
+---
+title: dub install
+description: Install a DubStack recipe (workflow templates, etc.) into the current repo.
+---
+
+## Usage
+
+```bash
+# Install the retarget-action GitHub workflow
+dub install retarget-action
+
+# Preview the planned write without touching disk
+dub install retarget-action --dry-run
+
+# Overwrite an existing file with different content without confirming
+dub install retarget-action --force
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Print the planned write without touching disk |
+| `--force` | Overwrite an existing file with different content without confirming |
+
+## Recipes
+
+| Recipe | Writes |
+|---|---|
+| `retarget-action` | `.github/workflows/dubstack-retarget.yml` — GitHub Action that retargets dependent PRs when a stack PR merges |
+
+## Notes
+
+- If the target file already exists with different content, `dub install` prompts
+  for confirmation in an interactive TTY. In non-interactive shells it refuses to
+  prompt and prints a hint — re-run with `--force` to overwrite or `--dry-run` to preview.
+- If the file already exists with identical content, the command reports
+  `already installed` and makes no changes.
+- After installing `retarget-action`, commit and push the workflow file. The
+  Action runs on the next merge.

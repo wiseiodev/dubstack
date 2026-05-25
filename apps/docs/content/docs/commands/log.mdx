@@ -1,6 +1,6 @@
 ---
 title: dub log
-description: Visualize your stack as an ASCII tree.
+description: Visualize your stack as an ASCII tree, tree-aware with current-path highlighting and PR/CI annotations.
 ---
 
 ## Usage
@@ -34,15 +34,38 @@ dub log --json
 
 **Aliases:** `dub ls`, `dub l`
 
+## Tree-shaped stacks
+
+`dub log` renders the full tracked tree, not just a linear chain. On
+tree-shaped stacks:
+
+- The current branch's ancestor path is shown in **bold**.
+- Sibling sub-trees are dimmed so the focus stays on the current path.
+- The current branch is highlighted in bright cyan.
+- Frozen branches (see `dub freeze`) are marked so it's clear why
+  `restack`/`sync`/`post-merge` skipped them.
+- PR/CI/commit annotations come from a 30-second cached batch `gh pr list`,
+  so re-running `dub log` is cheap.
+
 ## Example Output
 
-A typical stack looks like this:
+A typical linear stack:
 
 ```text
 (main)
   └─ feat/auth-types
        └─ feat/auth-login
             └─ feat/auth-tests   ← you are here
+```
+
+A tree-shaped stack:
+
+```text
+(main)
+  └─ feat/auth-types
+       ├─ feat/auth-login         ← you are here
+       │    └─ feat/auth-tests
+       └─ feat/auth-google
 ```
 
 ## Branch Info

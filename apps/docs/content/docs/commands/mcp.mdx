@@ -1,0 +1,34 @@
+---
+title: dub mcp
+description: Start the DubStack MCP server over stdio for AI agents.
+---
+
+## Usage
+
+```bash
+# Speak Model Context Protocol over stdio (run from an AI agent host)
+dub mcp
+```
+
+`dub mcp` exposes DubStack commands as MCP tools so AI coding agents can
+inspect and operate on the stack. The full tool list, request/response
+shape, and security model are documented in the
+[MCP guide](/docs/guides/mcp).
+
+## Security mode
+
+Mutating MCP tools are gated by `dub config mcp-mode`:
+
+```bash
+# Disable mutating tools entirely (read-only)
+dub config mcp-mode read-only
+
+# Require terminal confirmation for mutating tools (default)
+dub config mcp-mode interactive
+
+# Allow mutating tools to run without prompts
+dub config mcp-mode trusted
+```
+
+See the [MCP guide](/docs/guides/mcp) for the tool inventory and best
+practices for each mode.

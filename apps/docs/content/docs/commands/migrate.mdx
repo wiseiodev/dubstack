@@ -1,0 +1,35 @@
+---
+title: dub migrate
+description: Migrate DubStack repo-local data between storage formats.
+---
+
+## Usage
+
+```bash
+# Move state.json into state.sqlite (and opt the repo into the SQLite backend)
+dub migrate storage --to sqlite
+
+# Move state.sqlite back to state.json
+dub migrate storage --to json
+```
+
+## `dub migrate storage`
+
+Copy DubStack state across storage backends and switch
+`storage-backend` config to the destination.
+
+| Flag | Description |
+|---|---|
+| `--to <backend>` | Required. Destination backend: `json` or `sqlite` |
+
+## Notes
+
+- The copy is performed first; the config flip only happens if the copy
+  succeeds. Running it when the destination already matches the current
+  backend is a no-op (with a warning).
+- The summary line reports how many stacks and branches were migrated.
+- Storage backend can also be toggled directly with
+  `dub config storage-backend <backend>`, but `dub migrate storage` is the
+  safe path because it preserves existing state.
+
+See also: `dub config storage-backend`, `dub init`.

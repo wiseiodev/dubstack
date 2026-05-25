@@ -72,4 +72,4 @@ git config commit.template .gitmessage
 
 - `dub create` auto-initializes DubStack state if needed.
 - The new branch is always stacked on the current branch.
-- Use `dub undo` to revert the last create operation.
+- Use `dub undo` to revert the most recent create (multi-level via the 20-entry ring buffer; `dub redo` replays).

@@ -18,7 +18,7 @@ Common issues and how to resolve them.
 | Need metadata-only removal | Use `dub untrack` (or `--downstack`) |
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
-| Wrong operation during create/restack | Use `dub undo` (single-level) |
+| Wrong operation during create/restack | Use `dub undo` (multi-level; pair with `dub redo` to replay) |
 | PR merge blocked by order | Run `dub merge-check --pr <number>` and merge previous PR first |
 | Manual merge left stack inconsistent | Run `dub post-merge` |
 
@@ -50,6 +50,7 @@ DubStack stores local state in your repo. Nothing is pushed to your remote from 
 ```text
 .git/dubstack/
 ├── state.json
-├── undo.json
+├── undo-log.json
+├── redo-log.json
 └── restack-progress.json
 ```

@@ -76,7 +76,7 @@ If you have `gt` muscle memory, use this as a fast map:
 | `gt parent` | `dub parent` |
 | `gt children` | `dub children` |
 | `gt trunk` | `dub trunk` |
-| `gt undo` | `dub undo` |
+| `gt undo` | `dub undo` (multi-level; pair with `dub redo`) |
 
 ## Quick Start
 
@@ -747,13 +747,35 @@ dub unfreeze feat/auth-login
 
 `dub log` marks frozen branches with 🔒 and `dub doctor` lists them as an informational notice. Freeze wins over destructive maintenance flags: if a branch is frozen, unfreeze it explicitly before using `dub sync --force` or any other branch-mutating maintenance.
 
-### `dub undo`
+### `dub undo` / `dub redo`
 
-Undo the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, `dub freeze`, or `dub unfreeze` operation.
+Multi-level undo and redo backed by a 20-entry ring buffer at
+`.git/dubstack/undo-log.json`. Reversal coverage includes `create`,
+`restack`, `move`, `reorder`, `absorb`, `unlink`, `rename`, `pop`, `modify`,
+`freeze`/`unfreeze`, `track`/`untrack`, `delete`, `sync`, `split`, and
+`submit` (PR body restore only — PR retargets and pushes are not reverted).
 
 ```bash
+# Undo the most recent mutating dub command
 dub undo
+
+# Roll back the last N operations
+dub undo --steps 3
+
+# Show what's on the ring (newest first)
+dub undo --list
+
+# Wipe both undo and redo logs
+dub undo --clear
+
+# Replay the most recently undone operation
+dub redo
 ```
+
+A new mutating command **clears** the redo log; until then `dub undo` ↔
+`dub redo` cycle freely. If part of an undo can't fully succeed (a branch
+was force-pushed, GitHub rejected a PR body update, etc.) DubStack undoes
+what it can and prints `⚠ …` warnings with manual recovery hints.
 
 ### `dub completion <shell>` and `dub man`
 
@@ -1073,6 +1095,69 @@ recovery } }` with a non-zero exit code. Covered commands: `log`, `info`,
 [Programmatic use guide](https://dubstack.dev/docs/guides/json-output) for
 the full schema reference.
 
+### `dub mcp` (Model Context Protocol)
+
+Expose DubStack to MCP-aware agents (Claude Code, Cursor, etc.) so they
+can drive the stack without shelling out to free-form commands.
+
+```bash
+claude mcp add dubstack dub mcp
+```
+
+Mutating tools are gated by repo-local mode:
+
+```bash
+dub config mcp-mode read-only    # disable mutating tools entirely
+dub config mcp-mode interactive  # terminal confirmation (default)
+dub config mcp-mode trusted      # allow mutating tools without prompts
+```
+
+Every MCP tool invocation — success, refusal, or failure — is appended to
+`dub history` with redacted args and a `args_sha256` fingerprint. See the
+[MCP server guide](https://dubstack.dev/docs/guides/mcp) for the tool list
+and security model.
+
+### Multi-trunk repositories
+
+Repositories with multiple long-lived trunks (e.g. `main` plus a release
+branch) can register additional trunks. DubStack records which trunk each
+stack tracks and the default trunk used by `dub create` at the root.
+
+```bash
+dub trunk list                  # show configured trunks
+dub trunk add release/24.04     # register an additional trunk
+dub trunk set-default release/24.04
+dub trunk remove release/24.04
+```
+
+`dub doctor` surfaces orphaned trunks (branches that lost their tracked
+trunk after a rename or deletion) and walks you through reattachment.
+
+### Storage backend (SQLite)
+
+DubStack state defaults to `.git/dubstack/state.json`. Repositories with
+very large stacks can opt into a SQLite backend for faster reads.
+
+```bash
+dub config storage-backend           # show
+dub config storage-backend sqlite    # switch backend (does not migrate data)
+dub migrate storage --to sqlite      # copy state.json → SQLite
+dub migrate storage --to json        # copy SQLite → state.json
+```
+
+### Terminal theming
+
+```bash
+dub config theme            # show
+dub config theme auto       # auto-detect light/dark from COLORFGBG (default)
+dub config theme dark
+dub config theme light
+dub config theme none       # equivalent to --no-color globally
+```
+
+`--no-color` on any invocation overrides the configured theme for that
+run. Affects `log`, `status`, `sync`, and any other colorized output.
+
 ## Typical Workflows
 
 ### Add review feedback to a middle branch
@@ -1143,7 +1228,7 @@ dub restack --continue
 | Need metadata-only removal | Use `dub untrack` (or `--downstack`) |
 | Need stack-aware branch deletion | Use `dub delete` with `--upstack` / `--downstack` |
 | Sync skipped branch | Re-run with `--interactive` or `--force` as appropriate |
-| Wrong operation during create/restack/move | Use `dub undo` (single-level) |
+| Wrong operation during create/restack/move | Use `dub undo` (multi-level; `dub redo` to replay) |
 | PR merge blocked by order or GitHub conflict | Run `dub merge-check --pr <number>` to verify stack order and remote mergeability |
 | Manual merge left stack inconsistent | Run `dub post-merge` |
 
@@ -1175,7 +1260,8 @@ DubStack stores local state in your repo:
 ```text
 .git/dubstack/
 ├── state.json
-├── undo.json
+├── undo-log.json
+├── redo-log.json
 └── restack-progress.json
 ```
 

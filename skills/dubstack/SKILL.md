@@ -38,7 +38,7 @@ Use this skill whenever the user is working in a repo that uses `dub` for stacke
 | Submit PR stack | `dub submit` / `dub ss` |
 | AI PR description | `dub submit --ai` |
 | Open PR in browser | `dub pr [branch|number]` |
-| Undo last create/restack | `dub undo` |
+| Undo / redo | `dub undo` / `dub redo` (multi-level, 20-entry ring) |
 | Ask AI assistant | `dub ai ask "..."` |
 | AI conflict help | `dub ai resolve` / `dub continue --ai` |
 

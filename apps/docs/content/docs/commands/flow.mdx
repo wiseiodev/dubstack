@@ -1,0 +1,43 @@
+---
+title: dub flow
+description: Stage, preview, create, and submit an AI-assisted DubStack change in one shot.
+---
+
+## Usage
+
+```bash
+# Stage all, preview AI metadata, create branch + commit, submit
+dub flow --ai -a
+
+# Same, but auto-approve generated metadata
+dub flow -y -u
+
+# Preview generated branch, commit, and PR text only
+dub flow --dry-run
+
+# Alias
+dub f --ai
+```
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `-a, --all` | Stage all changes before generating metadata |
+| `-u, --update` | Stage tracked file changes before generating metadata |
+| `-p, --patch` | Pick hunks to stage before generating metadata |
+| `-y, --yes` | Auto-approve generated metadata without prompting |
+| `-i, --ai` | Force AI flow for this invocation |
+| `--no-ai` | Disable AI flow for this invocation |
+| `--dry-run` | Preview generated metadata without creating or submitting |
+
+**Alias:** `dub f`
+
+## Notes
+
+- AI mode requires `dub config ai-assistant on` plus a configured provider
+  (`dub ai setup` or `dub ai env`).
+- The `flow` AI default can be set repo-wide with `dub config ai-defaults flow on`.
+- `--ai` and `--no-ai` are mutually exclusive overrides for a single run.
+
+See also: `dub create`, `dub submit`, `dub ai setup`.

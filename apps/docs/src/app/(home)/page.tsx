@@ -1,7 +1,9 @@
 import {
   ArrowRight,
+  Bot,
   GitBranch,
   Layers,
+  Network,
   RefreshCw,
   Sparkles,
   Terminal,
@@ -11,27 +13,39 @@ import Link from 'next/link';
 const features = [
   {
     icon: Layers,
-    title: 'Stacked Branches',
+    title: 'Tree-Shaped Stacks',
     description:
-      'Split work into focused, dependent layers. Each branch builds on the one below, keeping PRs small and reviewable.',
+      'Split work into focused layers — linear or branching. DubStack tracks the full stack tree and renders the current path in your terminal.',
   },
   {
     icon: RefreshCw,
-    title: 'Auto Restack',
+    title: 'Safe Restack & Merge',
     description:
-      'When a lower branch changes, dub restack propagates it upstack. Conflict recovery is built in with dub continue and dub abort.',
-  },
-  {
-    icon: Terminal,
-    title: 'Graphite Compatible',
-    description:
-      'If you have gt muscle memory, DubStack maps 1:1. Same mental model, same workflow patterns, fully local-first.',
+      'Restack propagates parent changes upstack. merge-next picks the next safe PR, post-merge cleans up retargets, and undo/redo is multi-level.',
   },
   {
     icon: Sparkles,
-    title: 'AI Powered',
+    title: 'AI Across The Flow',
     description:
-      'AI-generate branch names and commit messages from staged changes. Ask the built-in assistant for stack-aware guidance.',
+      'Pluggable providers (Anthropic, Gemini, OpenAI, Bedrock, Ollama, AI Gateway) generate branch names, commit bodies, PR descriptions, and resolve restack conflicts.',
+  },
+  {
+    icon: Bot,
+    title: 'Agents & MCP',
+    description:
+      'Every read command emits JSON with schemaVersion: 1. The built-in MCP server exposes stack tools to Claude Code, Cursor, and any MCP-aware agent with a per-repo security model.',
+  },
+  {
+    icon: Terminal,
+    title: 'Shell & IDE Integration',
+    description:
+      'dub status drives prompts. dub completion + dub man emit shell completions and a man page from live commander metadata. Theming follows your terminal.',
+  },
+  {
+    icon: Network,
+    title: 'Graphite-Compatible',
+    description:
+      'If you have gt muscle memory, DubStack maps 1:1. Local-first state under .git/dubstack, optional SQLite backend for large stacks, and a GitHub Action that retargets stacks after merges.',
   },
 ];
 
@@ -51,9 +65,9 @@ export default function HomePage() {
             <span className='text-primary'>without the friction</span>
           </h1>
           <p className='mx-auto mb-10 max-w-2xl text-lg leading-relaxed text-muted-foreground text-pretty'>
-            DubStack makes stacked branch workflows fast and safe. Create
-            dependent branches, restack automatically, and submit entire PR
-            stacks in one command.
+            A local-first CLI for tree-shaped stacked branches. Create dependent
+            layers, restack safely, submit entire stacks, and drive it all from
+            your shell, IDE, or an MCP-aware agent.
           </p>
           <div className='mb-10 mx-auto max-w-md'>
             <pre className='overflow-x-auto rounded-lg border border-border bg-card p-4 text-left text-sm'>
@@ -92,7 +106,7 @@ export default function HomePage() {
           Everything you need to manage dependent branches, from creation to
           merge.
         </p>
-        <div className='grid gap-6 sm:grid-cols-2'>
+        <div className='grid gap-6 sm:grid-cols-2 lg:grid-cols-3'>
           {features.map((feature) => (
             <div
               key={feature.title}
