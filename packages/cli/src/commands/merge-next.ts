@@ -8,8 +8,10 @@ import {
   type AllPrSyncInfoBatch,
   type BranchPrLifecycleState,
   checkGhAuth,
+  enqueuePrToMergeQueue,
   ensureGhInstalled,
   getAllPrSyncInfoBatch,
+  getBranchMergeQueueStatus,
   getBranchPrSyncInfo,
   getPr,
   getPrMergeStatusByNumber,
@@ -31,6 +33,7 @@ export interface MergeNextResult {
   siblingCandidates: string[];
   /** Open siblings at the chosen depth whose PR is not MERGEABLE. */
   blockedSiblings: BlockedSibling[];
+  mode: 'direct' | 'queue';
   postMerge?: PostMergeResult;
 }
 
@@ -62,6 +65,7 @@ export async function mergeNext(
   options: {
     dryRun?: boolean;
     method?: 'merge' | 'squash' | 'rebase';
+    queue?: boolean;
     restack?: boolean;
     submit?: boolean;
   } = {},
@@ -70,6 +74,7 @@ export async function mergeNext(
   await checkGhAuth();
 
   const plan = await getSubmitPlan(cwd, { stack: true });
+  const queueMode = await resolveQueueMode(cwd, plan.rootBranch, options.queue);
   const batch = await getAllPrSyncInfoBatch(cwd);
   const depthByName = computeDepths(plan.stack);
   const currentPathSet = currentPathBranchNames(plan.stack, plan.currentBranch);
@@ -108,9 +113,11 @@ export async function mergeNext(
     .map((branch) => branch.name)
     .sort();
   const childBranchesWithOpenPr: string[] = [];
-  for (const childBranch of directChildren) {
-    const childPr = await getPr(childBranch, cwd);
-    if (childPr) childBranchesWithOpenPr.push(childBranch);
+  if (!queueMode) {
+    for (const childBranch of directChildren) {
+      const childPr = await getPr(childBranch, cwd);
+      if (childPr) childBranchesWithOpenPr.push(childBranch);
+    }
   }
 
   const dryRun = options.dryRun ?? false;
@@ -122,6 +129,22 @@ export async function mergeNext(
       preMergeRetargeted: childBranchesWithOpenPr,
       siblingCandidates: selection.siblings,
       blockedSiblings: selection.blockedSiblings,
+      mode: queueMode ? 'queue' : 'direct',
+    };
+  }
+
+  if (queueMode) {
+    await enqueuePrToMergeQueue(chosenPr.number, cwd, {
+      method: options.method ?? 'squash',
+    });
+    return {
+      dryRun: false,
+      mergedBranch: chosenBranch.name,
+      prNumber: chosenPr.number,
+      preMergeRetargeted: [],
+      siblingCandidates: selection.siblings,
+      blockedSiblings: selection.blockedSiblings,
+      mode: 'queue',
     };
   }
 
@@ -156,8 +179,29 @@ export async function mergeNext(
     preMergeRetargeted: childBranchesWithOpenPr,
     siblingCandidates: selection.siblings,
     blockedSiblings: selection.blockedSiblings,
+    mode: 'direct',
     postMerge: maintenance,
   };
+}
+
+async function resolveQueueMode(
+  cwd: string,
+  trunk: string,
+  requested: boolean | undefined,
+): Promise<boolean> {
+  if (requested === false) return false;
+  const status = await getBranchMergeQueueStatus(trunk, cwd);
+  if (status.mergeQueueEnabled) return true;
+  if (requested === true) {
+    throw new DubError(
+      `GitHub merge queue is not enabled for trunk branch '${trunk}'.`,
+      [
+        `Enable a merge queue in GitHub branch protection or rulesets for '${trunk}', then retry.`,
+        "Run 'dub merge-next --no-queue' to force the direct merge path.",
+      ],
+    );
+  }
+  return false;
 }
 
 function computeDepths(stack: Stack): Map<string, number> {

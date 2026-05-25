@@ -17,8 +17,10 @@ import {
   checkGhAuth,
   createPr,
   enablePrAutoMerge,
+  enqueuePrToMergeQueue,
   ensureGhInstalled,
   getAllPrSyncInfoBatch,
+  getBranchMergeQueueStatus,
   getBranchPrLifecycleState,
   getBranchPrSyncInfo,
   getPr,
@@ -817,6 +819,104 @@ describe('enablePrAutoMerge', () => {
       ),
     });
     expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getBranchMergeQueueStatus', () => {
+  it('returns true when branch protection includes required_merge_queue', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        required_status_checks: { strict: true },
+        required_merge_queue: { merge_method: 'SQUASH' },
+      }),
+    });
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: true,
+    });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['api', 'repos/{owner}/{repo}/branches/main/protection'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('returns false when branch protection has no merge queue', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({
+        required_status_checks: { strict: true },
+        enforce_admins: { enabled: true },
+      }),
+    });
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: false,
+    });
+  });
+
+  it('returns false when branch protection is not enabled', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(getBranchMergeQueueStatus('main', '/repo')).resolves.toEqual({
+      mergeQueueEnabled: false,
+    });
+  });
+
+  it('encodes branch names for the branch protection endpoint', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({ required_merge_queue: {} }),
+    });
+
+    await getBranchMergeQueueStatus('release/next', '/repo');
+
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['api', 'repos/{owner}/{repo}/branches/release%2Fnext/protection'],
+      { cwd: '/repo' },
+    );
+  });
+
+  it('uses the encoded branch endpoint in branch-protection recovery hints', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: '{invalid-json',
+    });
+
+    await expect(
+      getBranchMergeQueueStatus('release/next', '/repo'),
+    ).rejects.toMatchObject({
+      message: "Failed to parse branch protection for 'release/next'.",
+      recovery: expect.arrayContaining([
+        expect.stringContaining(
+          'repos/{owner}/{repo}/branches/release%2Fnext/protection',
+        ),
+      ]),
+    });
+  });
+});
+
+describe('enqueuePrToMergeQueue', () => {
+  it('enables auto-merge with squash strategy for merge queue enrollment', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(enqueuePrToMergeQueue(44, '/repo')).resolves.toBeUndefined();
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--squash'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+
+  it('surfaces enqueue failures with queue-specific recovery', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('merge queue disabled'));
+
+    await expect(enqueuePrToMergeQueue(44, '/repo')).rejects.toMatchObject({
+      message: expect.stringContaining(
+        'Failed to enqueue PR #44 to the merge queue',
+      ),
+      recovery: expect.arrayContaining([
+        expect.stringContaining('merge queue'),
+      ]),
+    });
   });
 });
 

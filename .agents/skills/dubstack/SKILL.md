@@ -123,6 +123,8 @@ dub submit --merge-when-ready
 dub submit --merge-when-ready --method squash
 dub merge-check --pr 123
 dub merge-next
+dub merge-next --queue
+dub merge-next --no-queue
 dub post-merge
 ```
 

@@ -98,6 +98,8 @@ This is a concise command reference for agents using `dub`.
 | `dub merge-check --pr <number>` | Validate DubStack merge-order dependencies |
 | `dub merge-next` / `dub land` | Merge next safe PR in current path |
 | `dub merge-next --dry-run` | Preview merge-next actions |
+| `dub merge-next --queue` | Require GitHub native merge queue mode |
+| `dub merge-next --no-queue` | Force direct merge even when queue is detected |
 | `dub post-merge` | Repair/retarget stack after merge |
 | `dub post-merge --dry-run` | Preview post-merge repair actions |
 | `dub pr` | Open current branch PR in browser |

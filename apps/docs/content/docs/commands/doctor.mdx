@@ -96,7 +96,7 @@ dub merge-check --pr 123
 
 ## dub merge-next / dub land
 
-Merge the next safe PR in your current stack path, pre-retarget direct child PRs, then run post-merge maintenance:
+Merge the next safe PR in your current stack path. Direct merges pre-retarget direct child PRs and run post-merge maintenance; GitHub merge-queue branches enqueue the PR and wait for a later `dub sync`:
 
 ```bash
 dub merge-next
@@ -105,6 +105,9 @@ dub land
 
 # Preview only
 dub merge-next --dry-run
+
+# Require queue mode
+dub merge-next --queue
 ```
 
 ## dub post-merge
