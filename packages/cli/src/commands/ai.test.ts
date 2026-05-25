@@ -258,6 +258,7 @@ describe('askAi', () => {
             selected: 'bedrock',
             models: {
               bedrock: 'repo-bedrock-model',
+              openai: null,
             },
           },
         },

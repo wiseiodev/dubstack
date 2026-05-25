@@ -19,11 +19,12 @@ export interface DubConfig {
       autoAccept: 'off' | 'high';
     };
     provider: {
-      selected: 'auto' | 'gemini' | 'gateway' | 'bedrock';
+      selected: 'auto' | 'gemini' | 'gateway' | 'bedrock' | 'openai';
       models: {
         gemini: string | null;
         gateway: string | null;
         bedrock: string | null;
+        openai: string | null;
       };
     };
     shortcutFallback: {
@@ -70,6 +71,7 @@ const DEFAULT_CONFIG: DubConfig = {
         gemini: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     },
     shortcutFallback: {
@@ -165,6 +167,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           gemini: normalizeAiProviderModel(provider?.models?.gemini),
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
+          openai: normalizeAiProviderModel(provider?.models?.openai),
         },
       },
       shortcutFallback: {
@@ -233,7 +236,8 @@ function normalizeAiProviderSelection(
     value === 'auto' ||
     value === 'gemini' ||
     value === 'gateway' ||
-    value === 'bedrock'
+    value === 'bedrock' ||
+    value === 'openai'
   ) {
     return value;
   }

@@ -1,5 +1,6 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import {
@@ -89,6 +90,7 @@ const DEFAULT_DEPS: SubmitDependencies = {
   createGoogleGenerativeAI,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
   fromIni,
   fromNodeProviderChain,
 };

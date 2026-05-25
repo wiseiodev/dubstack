@@ -42,6 +42,7 @@ describe('configureAiEnv', () => {
       [
         "export DUBSTACK_GEMINI_API_KEY='old'",
         "export DUBSTACK_AI_GATEWAY_API_KEY='old'",
+        "export DUBSTACK_OPENAI_API_KEY='old'",
         '',
       ].join('\n'),
     );
@@ -49,16 +50,19 @@ describe('configureAiEnv', () => {
     await configureAiEnv({
       geminiKey: 'new-gemini',
       gatewayKey: 'new-gateway',
+      openaiKey: 'new-openai',
       profile,
     });
     const updated = await fs.promises.readFile(profile, 'utf8');
 
     expect(updated.match(/DUBSTACK_GEMINI_API_KEY/g)?.length).toBe(1);
     expect(updated.match(/DUBSTACK_AI_GATEWAY_API_KEY/g)?.length).toBe(1);
+    expect(updated.match(/DUBSTACK_OPENAI_API_KEY/g)?.length).toBe(1);
     expect(updated).toContain("export DUBSTACK_GEMINI_API_KEY='new-gemini'");
     expect(updated).toContain(
       "export DUBSTACK_AI_GATEWAY_API_KEY='new-gateway'",
     );
+    expect(updated).toContain("export DUBSTACK_OPENAI_API_KEY='new-openai'");
   });
 
   it('writes model exports without keys', async () => {
@@ -68,6 +72,7 @@ describe('configureAiEnv', () => {
     const result = await configureAiEnv({
       geminiModel: 'gemini-2.5-flash',
       gatewayModel: 'google/gemini-3-flash',
+      openaiModel: 'gpt-5.5',
       profile,
     });
     const updated = await fs.promises.readFile(profile, 'utf8');
@@ -75,6 +80,7 @@ describe('configureAiEnv', () => {
     expect(result.updated).toEqual([
       'DUBSTACK_GEMINI_MODEL',
       'DUBSTACK_AI_GATEWAY_MODEL',
+      'DUBSTACK_OPENAI_MODEL',
     ]);
     expect(updated).toContain(
       "export DUBSTACK_GEMINI_MODEL='gemini-2.5-flash'",
@@ -82,6 +88,28 @@ describe('configureAiEnv', () => {
     expect(updated).toContain(
       "export DUBSTACK_AI_GATEWAY_MODEL='google/gemini-3-flash'",
     );
+    expect(updated).toContain("export DUBSTACK_OPENAI_MODEL='gpt-5.5'");
+  });
+
+  it('writes OpenAI key and model exports', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await fs.promises.writeFile(profile, '# existing\n');
+
+    const result = await configureAiEnv({
+      openaiKey: 'openai-secret',
+      openaiModel: 'gpt-5.5',
+      profile,
+    });
+    const updated = await fs.promises.readFile(profile, 'utf8');
+
+    expect(result.updated).toEqual([
+      'DUBSTACK_OPENAI_API_KEY',
+      'DUBSTACK_OPENAI_MODEL',
+    ]);
+    expect(updated).toContain("export DUBSTACK_OPENAI_API_KEY='openai-secret'");
+    expect(updated).toContain("export DUBSTACK_OPENAI_MODEL='gpt-5.5'");
+    expect(process.env.DUBSTACK_OPENAI_API_KEY).toBe('openai-secret');
+    expect(process.env.DUBSTACK_OPENAI_MODEL).toBe('gpt-5.5');
   });
 
   it('updates key and model exports together', async () => {
@@ -162,6 +190,16 @@ describe('configureAiEnv', () => {
         geminiModel: 'google/gemini-2.5-pro',
       }),
     ).rejects.toThrow("Gemini model should not include '/'");
+  });
+
+  it('rejects gateway-style OpenAI model names', async () => {
+    const profile = path.join(tempDir, '.zshrc');
+    await expect(
+      configureAiEnv({
+        profile,
+        openaiModel: 'openai/gpt-5.5',
+      }),
+    ).rejects.toThrow("OpenAI model should not include '/'");
   });
 
   it('throws when no key or model is provided', async () => {

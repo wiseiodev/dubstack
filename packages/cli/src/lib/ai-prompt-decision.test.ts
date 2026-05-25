@@ -26,6 +26,7 @@ const baseConfig: DubConfig = {
         gemini: 'gemini-test',
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     },
     shortcutFallback: {

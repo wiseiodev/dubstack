@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import { execa } from 'execa';
@@ -90,6 +91,7 @@ const DEFAULT_DEPS: FlowDependencies = {
   createGoogleGenerativeAI,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
   fromIni,
   fromNodeProviderChain,
   generateFlowMetadata,

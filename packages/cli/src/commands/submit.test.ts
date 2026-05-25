@@ -94,6 +94,7 @@ function makeConfig(overrides?: {
           gemini: null,
           gateway: null,
           bedrock: null,
+          openai: null,
         },
       },
       shortcutFallback: {

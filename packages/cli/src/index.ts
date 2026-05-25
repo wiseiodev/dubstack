@@ -1834,7 +1834,7 @@ program
     new Command('ai-provider')
       .argument(
         '[provider]',
-        'Set to auto/gemini/gateway/bedrock (omit to inspect current value)',
+        'Set to auto/gemini/gateway/bedrock/openai (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
       .action(async (provider?: string) => {
@@ -1891,7 +1891,7 @@ program
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
         '--provider <provider>',
-        'Provider name: gemini, gateway, or bedrock',
+        'Provider name: gemini, gateway, bedrock, or openai',
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
@@ -1999,8 +1999,10 @@ program
       )
       .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
       .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
+      .option('--openai-key <key>', 'Set DUBSTACK_OPENAI_API_KEY')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
       .option('--gateway-model <model>', 'Set DUBSTACK_AI_GATEWAY_MODEL')
+      .option('--openai-model <model>', 'Set DUBSTACK_OPENAI_MODEL')
       .option('--bedrock-profile <profile>', 'Set DUBSTACK_BEDROCK_AWS_PROFILE')
       .option('--bedrock-region <region>', 'Set DUBSTACK_BEDROCK_AWS_REGION')
       .option('--bedrock-model <model>', 'Set DUBSTACK_BEDROCK_MODEL')
@@ -2016,8 +2018,10 @@ program
         async (options: {
           geminiKey?: string;
           gatewayKey?: string;
+          openaiKey?: string;
           geminiModel?: string;
           gatewayModel?: string;
+          openaiModel?: string;
           bedrockProfile?: string;
           bedrockRegion?: string;
           bedrockModel?: string;
@@ -2028,8 +2032,10 @@ program
           const result = await configureAiEnv({
             geminiKey: options.geminiKey,
             gatewayKey: options.gatewayKey,
+            openaiKey: options.openaiKey,
             geminiModel: options.geminiModel,
             gatewayModel: options.gatewayModel,
+            openaiModel: options.openaiModel,
             bedrockProfile: options.bedrockProfile,
             bedrockRegion: options.bedrockRegion,
             bedrockModel: options.bedrockModel,

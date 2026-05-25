@@ -180,6 +180,8 @@ dub trunk
 dub ai env --gemini-key "<your-key>"
 # or
 dub ai env --gateway-key "<your-key>"
+# or
+dub ai env --openai-key "<your-key>"
 
 dub config ai-assistant on
 dub config ai-defaults create on

@@ -426,7 +426,12 @@ function makeFakeAiDeps(input: {
         },
         provider: {
           selected: 'gemini' as const,
-          models: { gemini: 'gemini-test', gateway: null, bedrock: null },
+          models: {
+            gemini: 'gemini-test',
+            gateway: null,
+            bedrock: null,
+            openai: null,
+          },
         },
         shortcutFallback: {
           enabled: false,

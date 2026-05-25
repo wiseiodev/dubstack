@@ -31,6 +31,17 @@ jobs:
       - name: Test affected
         run: pnpm turbo run test:coverage --affected
 
+      - name: AI evals
+        env:
+          DUBSTACK_OPENAI_API_KEY: ${{ secrets.DUBSTACK_OPENAI_API_KEY }}
+          DUBSTACK_OPENAI_MODEL: ${{ vars.DUBSTACK_OPENAI_MODEL || 'gpt-5.5' }}
+        run: |
+          if [ -z "$DUBSTACK_OPENAI_API_KEY" ]; then
+            echo "::notice::Skipping AI evals because DUBSTACK_OPENAI_API_KEY is not configured."
+            exit 0
+          fi
+          pnpm evals
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

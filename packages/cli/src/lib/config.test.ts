@@ -40,6 +40,7 @@ describe('readConfig', () => {
             gemini: null,
             gateway: null,
             bedrock: null,
+            openai: null,
           },
         },
         shortcutFallback: {
@@ -91,6 +92,7 @@ describe('writeConfig', () => {
         gemini: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });
@@ -126,6 +128,7 @@ describe('writeConfig', () => {
         gemini: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });
@@ -153,6 +156,7 @@ describe('writeConfig', () => {
         gemini: null,
         gateway: null,
         bedrock: 'us.anthropic.claude-sonnet-4-6',
+        openai: null,
       },
     });
   });
@@ -195,6 +199,7 @@ describe('writeConfig', () => {
               gemini: 123,
               gateway: '',
               bedrock: '   ',
+              openai: '   ',
             },
           },
         },
@@ -213,6 +218,7 @@ describe('writeConfig', () => {
         gemini: null,
         gateway: null,
         bedrock: null,
+        openai: null,
       },
     });
   });

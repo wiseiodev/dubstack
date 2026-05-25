@@ -1,5 +1,6 @@
 import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
 import type {
   fromIni,
   fromNodeProviderChain,
@@ -19,6 +20,7 @@ export interface AiMetadataDependencies {
   createGoogleGenerativeAI: typeof createGoogleGenerativeAI;
   createGateway: typeof createGateway;
   createAmazonBedrock?: typeof createAmazonBedrock;
+  createOpenAI?: typeof createOpenAI;
   fromIni?: typeof fromIni;
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }

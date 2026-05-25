@@ -34,7 +34,7 @@ describe('aiReviewBranch', () => {
       },
       {
         selected: 'gemini',
-        models: { gemini: null, gateway: null, bedrock: null },
+        models: { gemini: null, gateway: null, bedrock: null, openai: null },
       },
     );
 
@@ -71,7 +71,7 @@ describe('aiReviewBranch', () => {
         },
         {
           selected: 'gemini',
-          models: { gemini: null, gateway: null, bedrock: null },
+          models: { gemini: null, gateway: null, bedrock: null, openai: null },
         },
       ),
     ).rejects.toThrow(DubError);
@@ -96,7 +96,7 @@ describe('aiReviewBranch', () => {
       },
       {
         selected: 'gemini',
-        models: { gemini: null, gateway: null, bedrock: null },
+        models: { gemini: null, gateway: null, bedrock: null, openai: null },
       },
     );
 

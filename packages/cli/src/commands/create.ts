@@ -1,5 +1,6 @@
 import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
 import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { createGateway, generateText } from 'ai';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
@@ -53,6 +54,7 @@ const DEFAULT_DEPS: CreateDependencies = {
   createGoogleGenerativeAI,
   createGateway,
   createAmazonBedrock,
+  createOpenAI,
   fromIni,
   fromNodeProviderChain,
 };

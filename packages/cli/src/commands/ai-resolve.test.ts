@@ -75,6 +75,7 @@ function createMockDeps(overrides?: Partial<AiResolveDeps>): AiResolveDeps {
             gemini: null,
             gateway: null,
             bedrock: null,
+            openai: null,
           },
         },
         shortcutFallback: {
