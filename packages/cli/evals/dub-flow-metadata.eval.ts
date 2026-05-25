@@ -42,6 +42,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
       gemini: null,
       gateway: null,
       bedrock: null,
+      openai: null,
     },
   };
 }
