@@ -87,6 +87,7 @@ function isPermanentGhError(err: unknown): boolean {
   if (normalized.includes('no pull requests found')) return true;
   if (normalized.includes('enoent')) return true;
   if (isMergeMethodUnavailable(message)) return true;
+  if (isAutoMergeSetupUnavailable(message)) return true;
   return false;
 }
 
@@ -888,14 +889,28 @@ function mergeMethodFlag(method: MergeMethod): string {
 
 function isMergeMethodUnavailable(message: string): boolean {
   const normalized = message.toLowerCase();
-  return (
-    normalized.includes('merge method') ||
+  const unavailable =
     normalized.includes('not allowed') ||
     normalized.includes('not enabled') ||
     normalized.includes('disabled') ||
-    normalized.includes('squash merge') ||
-    normalized.includes('rebase merge') ||
-    normalized.includes('merge commits')
+    normalized.includes('unavailable');
+  return Boolean(
+    unavailable &&
+      (normalized.includes('merge method') ||
+        normalized.includes('squash merge') ||
+        normalized.includes('rebase merge') ||
+        normalized.includes('merge commit')),
+  );
+}
+
+function isAutoMergeSetupUnavailable(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (!normalized.includes('auto-merge')) return false;
+  return (
+    normalized.includes('not allowed') ||
+    normalized.includes('not available') ||
+    normalized.includes('not enabled') ||
+    normalized.includes('disabled')
   );
 }
 

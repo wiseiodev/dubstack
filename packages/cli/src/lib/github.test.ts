@@ -770,6 +770,19 @@ describe('enablePrAutoMerge', () => {
       ]),
     });
   });
+
+  it('does not treat repository-level auto-merge setup failures as method fallback', async () => {
+    mockExeca.mockRejectedValueOnce(
+      new Error('Auto-merge is disabled for this repository'),
+    );
+
+    await expect(enablePrAutoMerge(44, '/repo')).rejects.toMatchObject({
+      message: expect.stringContaining(
+        'Auto-merge is disabled for this repository',
+      ),
+    });
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('openPrInBrowser', () => {
