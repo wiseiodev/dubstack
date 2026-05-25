@@ -90,29 +90,35 @@ jobs:
             ].join('\n');
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
-            const comments = await github.rest.issues.listComments({
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const previous = comments.data.find((comment) =>
-              comment.body?.includes(marker),
-            );
-            if (previous) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: previous.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
+            try {
+              const comments = await github.rest.issues.listComments({
                 owner,
                 repo,
                 issue_number,
-                body,
+                per_page: 100,
               });
+              const previous = comments.data.find((comment) =>
+                comment.body?.includes(marker),
+              );
+              if (previous) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: previous.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body,
+                });
+              }
+            } catch (error) {
+              core.warning(
+                `Could not write AI eval PR comment: ${error.message}`,
+              );
             }
 
   nightly-quality:
