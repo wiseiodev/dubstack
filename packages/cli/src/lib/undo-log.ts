@@ -16,6 +16,7 @@ export interface UndoEntry {
     | 'rename'
     | 'move'
     | 'pop'
+    | 'reorder'
     | 'freeze'
     | 'unfreeze'
     | 'absorb'
@@ -66,7 +67,7 @@ export async function readUndoEntry(cwd: string): Promise<UndoEntry> {
   const undoPath = await getUndoPath(cwd);
   if (!fs.existsSync(undoPath)) {
     throw new DubError('Nothing to undo.', [
-      "DubStack tracks only the last 'create', 'restack', 'rename', 'move', 'pop', 'freeze', 'unfreeze', 'absorb', or 'unlink'; perform one to enable undo.",
+      "DubStack tracks only the last 'create', 'restack', 'rename', 'move', 'pop', 'reorder', 'freeze', 'unfreeze', 'absorb', or 'unlink'; perform one to enable undo.",
     ]);
   }
   const raw = fs.readFileSync(undoPath, 'utf-8');

@@ -20,6 +20,7 @@
     "fold",
     "move",
     "absorb",
+    "reorder",
     "unlink",
     "undo",
     "doctor",

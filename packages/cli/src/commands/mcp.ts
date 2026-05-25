@@ -1,25 +1,49 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as readline from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { createGateway, generateText } from 'ai';
+import { buildAiDiffContext } from '../lib/ai-diff-context';
+import {
+  type AiMetadataDependencies,
+  generateCreateMetadata,
+  generatePrDescriptionSummary,
+} from '../lib/ai-metadata';
 import { type McpMode, readConfig } from '../lib/config';
 import { DubError, formatDubError } from '../lib/errors';
-import { getCurrentBranch } from '../lib/git';
+import { getCurrentBranch, getDiffBetween } from '../lib/git';
 import { appendHistoryEntry, redactSensitiveText } from '../lib/history';
+import { readMetadataTemplates } from '../lib/metadata-templates';
 import { detectActiveOperation } from '../lib/operation-state';
+import type { RebaseTodoEntry } from '../lib/rebase-todo';
+import type { ScopeMode } from '../lib/scope';
 import { getStackOverviewBatch } from '../lib/stack-overview';
 import { absorb } from './absorb';
 import { back } from './back';
+import { branchInfo } from './branch';
 import { checkout } from './checkout';
 import { children } from './children';
 import { create } from './create';
 import { deleteCommand } from './delete';
 import { doctor } from './doctor';
+import { fold } from './fold';
 import { freeze } from './freeze';
 import { history } from './history';
 import { logJson } from './log';
+import { mergeCheck } from './merge-check';
 import { modify } from './modify';
+import { move } from './move';
 import { parent } from './parent';
+import { pop } from './pop';
+import { ready } from './ready';
+import { rename } from './rename';
+import { reorder } from './reorder';
 import { revert } from './revert';
+import { type SplitMode, split } from './split';
+import { squash } from './squash';
 import { stashList, stashPop, stashPush } from './stash';
 import { status } from './status';
 import { submit } from './submit';
@@ -60,6 +84,7 @@ interface McpServerOptions {
   output?: Writable;
   version?: string;
   confirmMutating?: ConfirmMutatingFn;
+  aiMetadataDeps?: AiMetadataDependencies;
 }
 
 interface ToolDefinition {
@@ -79,6 +104,15 @@ const PROTOCOL_VERSION = '2025-11-25';
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-11-25', '2025-06-18']);
 const MAX_HISTORY_ARGS_LENGTH = 500;
 
+const DEFAULT_AI_METADATA_DEPS: AiMetadataDependencies = {
+  generateText,
+  createGoogleGenerativeAI,
+  createGateway,
+  createAmazonBedrock,
+  fromIni,
+  fromNodeProviderChain,
+};
+
 const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.log': ['stack', 'all', 'reverse', 'prs', 'ci', 'refresh'],
   'dubstack.doctor': ['all', 'fetch'],
@@ -87,6 +121,18 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.children': ['branch'],
   'dubstack.trunk': ['branch'],
   'dubstack.history': ['limit'],
+  'dubstack.branch': ['branch'],
+  'dubstack.diff': ['branch', 'base'],
+  'dubstack.ready': ['scope'],
+  'dubstack.merge_check': ['pr', 'branch', 'scope'],
+  'dubstack.propose_branch_name': ['diff'],
+  'dubstack.propose_commit_message': ['diff'],
+  'dubstack.propose_pr_description': [
+    'branch',
+    'baseBranch',
+    'commitMessage',
+    'diff',
+  ],
   'dubstack.create': ['name', 'message', 'ai'],
   'dubstack.modify': ['message', 'commit', 'all'],
   'dubstack.submit': [
@@ -102,6 +148,7 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.checkout': ['branch'],
   'dubstack.back': ['steps'],
   'dubstack.delete': ['branch', 'upstack', 'downstack', 'force'],
+  'dubstack.reorder': ['entries'],
   'dubstack.revert': ['target', 'branch', 'submit'],
   'dubstack.unlink': ['branch', 'noRetarget', 'orphanChildren'],
   'dubstack.stash': ['message'],
@@ -110,6 +157,22 @@ const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.freeze': ['branch', 'upstack', 'downstack'],
   'dubstack.unfreeze': ['branch', 'upstack', 'downstack'],
   'dubstack.absorb': ['ai', 'stack', 'dryRun'],
+  'dubstack.split': [
+    'mode',
+    'files',
+    'name',
+    'commitPicks',
+    'commitPicksRaw',
+    'closeOldPr',
+    'noRestack',
+    'dryRun',
+    'yes',
+  ],
+  'dubstack.squash': ['message', 'ai'],
+  'dubstack.fold': ['squash', 'force'],
+  'dubstack.pop': ['steps'],
+  'dubstack.rename': ['oldName', 'newName', 'noPush'],
+  'dubstack.move': ['branch', 'before', 'after'],
 };
 
 const BRANCH_SCHEMA = {
@@ -227,6 +290,133 @@ const TOOLS: ToolDefinition[] = [
           description: 'Maximum number of history entries to return.',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.branch',
+    description:
+      'Return tracked stack metadata for one branch, including parent, children, root, and tree position.',
+    inputSchema: BRANCH_SCHEMA,
+  },
+  {
+    name: 'dubstack.diff',
+    description:
+      'Return a git diff for a branch against its tracked parent, or against an explicit base ref.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to diff. Defaults to the current branch.',
+        },
+        base: {
+          type: 'string',
+          description:
+            'Base ref to diff against. Defaults to the branch tracked parent.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.ready',
+    description:
+      'Return a pre-submit readiness checklist for the current branch and chosen submit scope.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['current', 'downstack', 'stack'],
+          description: 'Submit scope to check. Defaults to downstack.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.merge_check',
+    description:
+      'Return a mergeability snapshot for one PR, branch, or stack scope.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pr: {
+          type: 'integer',
+          minimum: 1,
+          description: 'PR number to check.',
+        },
+        branch: {
+          type: 'string',
+          description: 'Branch whose PR should be checked.',
+        },
+        scope: {
+          type: 'string',
+          enum: ['current', 'downstack', 'stack'],
+          description: 'Stack scope to check. Defaults to current.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.propose_branch_name',
+    description:
+      'Use the configured AI provider to suggest a branch name from a diff. Does not mutate git or DubStack state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        diff: {
+          type: 'string',
+          description: 'Unified diff or concise change description.',
+        },
+      },
+      required: ['diff'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.propose_commit_message',
+    description:
+      'Use the configured AI provider to suggest a Conventional Commit message from a diff. Does not mutate git or DubStack state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        diff: {
+          type: 'string',
+          description: 'Unified diff or concise change description.',
+        },
+      },
+      required: ['diff'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.propose_pr_description',
+    description:
+      'Use the configured AI provider to suggest a PR description from branch metadata and a diff. Does not mutate git or DubStack state.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch name for the proposed PR.',
+        },
+        baseBranch: {
+          type: 'string',
+          description: 'Base branch for the proposed PR.',
+        },
+        commitMessage: {
+          type: 'string',
+          description: 'Commit message or PR title context.',
+        },
+        diff: {
+          type: 'string',
+          description: 'Unified diff or concise change description.',
+        },
+      },
+      required: ['branch', 'baseBranch', 'commitMessage', 'diff'],
       additionalProperties: false,
     },
   },
@@ -378,6 +568,42 @@ const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: 'dubstack.reorder',
+    description:
+      "Reorder or drop commits on the current tracked branch. AI clients must supply the full reordered todo (oldest-first) via `entries`; the TUI picker is bypassed. The cascading restack still runs and an undo entry is saved. Returns the resulting status ('success' | 'conflict' | 'exit' | 'cancelled' | 'no-op').",
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entries: {
+          type: 'array',
+          description:
+            'Ordered rebase todo, oldest commit first. Every commit currently between the parent and HEAD must appear exactly once; mark omissions as `action: "drop"` rather than leaving them out.',
+          items: {
+            type: 'object',
+            properties: {
+              sha: {
+                type: 'string',
+                description:
+                  'Full commit SHA (short SHA also accepted but discouraged for AI use).',
+              },
+              action: {
+                type: 'string',
+                enum: ['pick', 'drop'],
+                description:
+                  "'pick' keeps the commit; 'drop' removes it from the branch. No other rebase verbs are supported — use 'dub modify --pop' / 'dub squash' for edit/squash/reword.",
+              },
+            },
+            required: ['sha', 'action'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['entries'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'dubstack.freeze',
     description:
       'Set the `frozen` flag on a tracked branch (stack-aware). Note: this is a passive marker only — `dub restack` and `dub sync` do NOT yet honor the flag. The enforcement wiring is tracked as DUB-82.',
@@ -475,6 +701,170 @@ const TOOLS: ToolDefinition[] = [
           description: 'Preview the plan without mutating.',
         },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.split',
+    description:
+      'Split the current branch into smaller sibling branches by commit, file, or AI proposal.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['by-commit', 'by-file', 'ai'],
+          description: 'Split mode to run.',
+        },
+        files: {
+          type: 'array',
+          items: { type: 'string' },
+          description: "Files to extract when mode is 'by-file'.",
+        },
+        name: {
+          type: 'string',
+          description: 'New branch name for by-file, by-commit, or by-hunk.',
+        },
+        commitPicks: {
+          type: 'array',
+          items: { type: 'integer', minimum: 1 },
+          description:
+            "1-indexed commit positions to extract when mode is 'by-commit'.",
+        },
+        commitPicksRaw: {
+          type: 'string',
+          description:
+            "Raw commit selection such as '1,3-4' when mode is 'by-commit'.",
+        },
+        closeOldPr: {
+          type: 'boolean',
+          description: "Close the source branch's existing PR.",
+        },
+        noRestack: {
+          type: 'boolean',
+          description: 'Skip automatic descendant restack after split.',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'AI mode only: return the proposal without applying it.',
+        },
+        yes: {
+          type: 'boolean',
+          description: 'AI mode only: approve the generated split proposal.',
+        },
+      },
+      required: ['mode'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.squash',
+    description:
+      'Collapse every commit on the current branch since its parent into one commit.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Commit message for the squashed commit.',
+        },
+        ai: {
+          type: 'boolean',
+          description:
+            'Generate a Conventional Commit message from the squashed commits.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.fold',
+    description:
+      'Combine the current branch into its parent and delete the folded branch.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        squash: {
+          type: 'boolean',
+          description: 'Collapse the folded branch into one parent commit.',
+        },
+        force: {
+          type: 'boolean',
+          description:
+            'Skip the command confirmation prompt. Defaults to true for MCP because MCP mode already gates mutation.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.pop',
+    description:
+      'Pop the last commit(s) off the current branch into the staging area.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Number of commits to pop. Defaults to 1.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.rename',
+    description:
+      'Rename a tracked branch and propagate the change through state, children, and remote branch pushes.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        oldName: {
+          type: 'string',
+          description:
+            'Branch to rename. Defaults to the current branch when omitted.',
+        },
+        newName: {
+          type: 'string',
+          description: 'New branch name.',
+        },
+        noPush: {
+          type: 'boolean',
+          description: 'Skip pushing the renamed branch even if a PR exists.',
+        },
+      },
+      required: ['newName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'dubstack.move',
+    description:
+      'Move a tracked branch before or after another branch in the same stack.',
+    mutating: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        branch: {
+          type: 'string',
+          description: 'Branch to move.',
+        },
+        before: {
+          type: 'string',
+          description: 'Insert branch as the new parent of this target.',
+        },
+        after: {
+          type: 'string',
+          description: 'Insert branch as the new child of this target.',
+        },
+      },
+      required: ['branch'],
       additionalProperties: false,
     },
   },
@@ -591,6 +981,7 @@ export async function mcp(
   const output = options.output ?? process.stdout;
   const serverVersion = options.version ?? '0.0.0';
   const confirmMutating = options.confirmMutating ?? confirmMutatingTool;
+  const aiMetadataDeps = options.aiMetadataDeps ?? DEFAULT_AI_METADATA_DEPS;
   let buffer = '';
   let queue: Promise<void> = Promise.resolve();
 
@@ -601,7 +992,14 @@ export async function mcp(
       queue = queue
         .catch(() => undefined)
         .then(() =>
-          handleLineSafely(line, cwd, output, serverVersion, confirmMutating),
+          handleLineSafely(
+            line,
+            cwd,
+            output,
+            serverVersion,
+            confirmMutating,
+            aiMetadataDeps,
+          ),
         );
     };
 
@@ -630,9 +1028,17 @@ async function handleLineSafely(
   output: Writable,
   serverVersion: string,
   confirmMutating: ConfirmMutatingFn,
+  aiMetadataDeps: AiMetadataDependencies,
 ): Promise<void> {
   try {
-    await handleLine(line, cwd, output, serverVersion, confirmMutating);
+    await handleLine(
+      line,
+      cwd,
+      output,
+      serverVersion,
+      confirmMutating,
+      aiMetadataDeps,
+    );
   } catch (error) {
     const requestId = parseRequestId(line);
     const message = error instanceof Error ? error.message : String(error);
@@ -649,6 +1055,7 @@ async function handleLine(
   output: Writable,
   serverVersion: string,
   confirmMutating: ConfirmMutatingFn,
+  aiMetadataDeps: AiMetadataDependencies,
 ): Promise<void> {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -676,6 +1083,7 @@ async function handleLine(
     cwd,
     serverVersion,
     confirmMutating,
+    aiMetadataDeps,
   );
   writeMessage(output, response);
 }
@@ -691,6 +1099,7 @@ async function handleRequest(
   cwd: string,
   serverVersion: string,
   confirmMutating: ConfirmMutatingFn,
+  aiMetadataDeps: AiMetadataDependencies,
 ): Promise<JsonValue> {
   switch (request.method) {
     case 'initialize':
@@ -703,7 +1112,12 @@ async function handleRequest(
     case 'tools/list':
       return jsonRpcResult(request.id ?? null, { tools: TOOLS });
     case 'tools/call':
-      return handleToolCallRequest(request, cwd, confirmMutating);
+      return handleToolCallRequest(
+        request,
+        cwd,
+        confirmMutating,
+        aiMetadataDeps,
+      );
     default:
       return jsonRpcError(
         request.id ?? null,
@@ -717,6 +1131,7 @@ async function handleToolCallRequest(
   request: JsonRpcRequest,
   cwd: string,
   confirmMutating: ConfirmMutatingFn,
+  aiMetadataDeps: AiMetadataDependencies,
 ): Promise<JsonValue> {
   const params = asRecord(request.params);
   const name = typeof params?.name === 'string' ? params.name : null;
@@ -741,7 +1156,7 @@ async function handleToolCallRequest(
 
     if (mode === 'read-only') {
       const text = `${name} refused: repo is in read-only MCP mode. Run \`dub config mcp-mode interactive\` to enable mutating tools.`;
-      await appendMcpHistory(cwd, name, args, startedAt, 'error', [text]);
+      await appendMcpHistory(cwd, name, args, startedAt, 'error', [text], true);
       return jsonRpcResult(request.id ?? null, {
         content: [{ type: 'text', text }],
         isError: true,
@@ -751,9 +1166,15 @@ async function handleToolCallRequest(
     if (mode === 'interactive') {
       const confirmation = await confirmMutating(name, args);
       if (!confirmation.confirmed) {
-        await appendMcpHistory(cwd, name, args, startedAt, 'error', [
-          confirmation.reason,
-        ]);
+        await appendMcpHistory(
+          cwd,
+          name,
+          args,
+          startedAt,
+          'error',
+          [confirmation.reason],
+          true,
+        );
         return jsonRpcResult(request.id ?? null, {
           content: [{ type: 'text', text: confirmation.reason }],
           isError: true,
@@ -763,10 +1184,16 @@ async function handleToolCallRequest(
   }
 
   try {
-    const result = await callTool(cwd, name, args);
-    await appendMcpHistory(cwd, name, args, startedAt, 'success', [
-      `MCP tool '${name}' returned structured JSON.`,
-    ]);
+    const result = await callTool(cwd, name, args, aiMetadataDeps);
+    await appendMcpHistory(
+      cwd,
+      name,
+      args,
+      startedAt,
+      'success',
+      [`MCP tool '${name}' returned structured JSON.`],
+      tool.mutating === true,
+    );
     return jsonRpcResult(request.id ?? null, result);
   } catch (error) {
     const message =
@@ -775,7 +1202,15 @@ async function handleToolCallRequest(
         : error instanceof Error
           ? error.message
           : String(error);
-    await appendMcpHistory(cwd, name, args, startedAt, 'error', [message]);
+    await appendMcpHistory(
+      cwd,
+      name,
+      args,
+      startedAt,
+      'error',
+      [message],
+      tool.mutating === true,
+    );
     return jsonRpcResult(request.id ?? null, {
       content: [{ type: 'text', text: message }],
       isError: true,
@@ -850,6 +1285,7 @@ async function callTool(
   cwd: string,
   name: string,
   args: Record<string, unknown>,
+  aiMetadataDeps: AiMetadataDependencies,
 ): Promise<ToolCallResult> {
   switch (name) {
     case 'dubstack.log': {
@@ -898,6 +1334,25 @@ async function callTool(
         await history(cwd, {
           limit: optionalPositiveInteger(args.limit) ?? 20,
         }),
+      );
+    case 'dubstack.branch':
+      return jsonToolResult(await branchInfo(cwd, optionalString(args.branch)));
+    case 'dubstack.diff':
+      return jsonToolResult(await diffTool(cwd, args));
+    case 'dubstack.ready':
+      return jsonToolResult(
+        await ready(cwd, { scope: optionalScopeMode(args.scope) }),
+      );
+    case 'dubstack.merge_check':
+      return jsonToolResult(await mergeCheckTool(cwd, args));
+    case 'dubstack.propose_branch_name':
+    case 'dubstack.propose_commit_message':
+      return jsonToolResult(
+        await proposeCreateMetadataTool(cwd, name, args, aiMetadataDeps),
+      );
+    case 'dubstack.propose_pr_description':
+      return jsonToolResult(
+        await proposePrDescriptionTool(cwd, args, aiMetadataDeps),
       );
     case 'dubstack.create':
       return mutatingToolResult(() =>
@@ -948,6 +1403,27 @@ async function callTool(
       return mutatingToolResult(() =>
         back(cwd, optionalPositiveInteger(args.steps) ?? 1),
       );
+    case 'dubstack.reorder': {
+      const entries = parseReorderEntries(args.entries);
+      return mutatingToolResult(
+        async () =>
+          reorder(cwd, {
+            entries,
+            // Non-TTY contexts can't surface the three-option conflict
+            // prompt; resolve to "continue" so the rebase pauses for
+            // manual resolution. We flag the response as an error below
+            // so the AI client knows the repo is mid-rebase.
+            promptConflict: async () => 'continue',
+          }),
+        {
+          // Conflict/exit leaves an interactive rebase mid-flight; surface
+          // that as a tool error so AI clients see the repo state isn't
+          // clean and can prompt the human for manual recovery.
+          isError: (result) =>
+            result.status === 'conflict' || result.status === 'exit',
+        },
+      );
+    }
     case 'dubstack.revert': {
       const target = optionalString(args.target);
       if (!target) {
@@ -1035,6 +1511,95 @@ async function callTool(
           quiet: true,
         }),
       );
+    case 'dubstack.split': {
+      const mode = optionalSplitMode(args.mode);
+      if (!mode) {
+        throw new DubError("'mode' is required for dubstack.split.", [
+          "Pass {'mode': 'by-file' | 'by-commit' | 'by-hunk' | 'ai'}.",
+        ]);
+      }
+      if (mode === 'by-hunk') {
+        throw new DubError(
+          "'by-hunk' split is not supported via MCP because it requires an interactive patch TTY.",
+          [
+            "Run 'dub split --by-hunk' from a terminal instead.",
+            "Use mode 'by-file' or 'by-commit' for non-interactive MCP splits.",
+          ],
+        );
+      }
+      const dryRun = optionalBoolean(args.dryRun);
+      const yes = optionalBoolean(args.yes);
+      if (mode === 'ai' && !dryRun && !yes) {
+        throw new DubError(
+          "'ai' split requires explicit approval via {'yes': true} when called through MCP.",
+          [
+            "Call dubstack.split with {'mode': 'ai', 'dryRun': true} first to inspect the proposal.",
+            "Call dubstack.split with {'mode': 'ai', 'yes': true} to apply the generated proposal.",
+          ],
+        );
+      }
+      return mutatingToolResult(() =>
+        split(cwd, {
+          mode,
+          files: optionalStringArray(args.files),
+          name: optionalString(args.name),
+          commitPicks: optionalPositiveIntegerArray(args.commitPicks),
+          commitPicksRaw: optionalString(args.commitPicksRaw),
+          closeOldPr: optionalBoolean(args.closeOldPr),
+          noRestack: optionalBoolean(args.noRestack),
+          dryRun,
+          yes,
+          interactive: false,
+        }),
+      );
+    }
+    case 'dubstack.squash':
+      return mutatingToolResult(() =>
+        squash(cwd, {
+          message: optionalString(args.message),
+          ai: optionalBoolean(args.ai),
+        }),
+      );
+    case 'dubstack.fold':
+      return mutatingToolResult(() =>
+        fold(cwd, {
+          squash: optionalBoolean(args.squash),
+          force: optionalBoolean(args.force) ?? true,
+          interactive: false,
+        }),
+      );
+    case 'dubstack.pop':
+      return mutatingToolResult(() =>
+        pop(cwd, { steps: optionalPositiveInteger(args.steps) }),
+      );
+    case 'dubstack.rename': {
+      const newName = optionalString(args.newName);
+      if (!newName) {
+        throw new DubError("'newName' is required for dubstack.rename.", [
+          "Pass {'newName': '<new-branch-name>'} in the tool arguments.",
+        ]);
+      }
+      const oldName = optionalString(args.oldName);
+      return mutatingToolResult(() =>
+        rename(cwd, oldName ?? newName, oldName ? newName : undefined, {
+          noPush: optionalBoolean(args.noPush),
+        }),
+      );
+    }
+    case 'dubstack.move': {
+      const branch = optionalString(args.branch);
+      if (!branch) {
+        throw new DubError("'branch' is required for dubstack.move.", [
+          "Pass {'branch': '<name>', 'before': '<target>'} or {'branch': '<name>', 'after': '<target>'}.",
+        ]);
+      }
+      return mutatingToolResult(() =>
+        move(cwd, branch, {
+          before: optionalString(args.before),
+          after: optionalString(args.after),
+        }),
+      );
+    }
     default:
       throw new DubError(`Unknown MCP tool '${name}'.`, [
         'Call tools/list to discover the available dubstack.* tool names.',
@@ -1043,10 +1608,147 @@ async function callTool(
   }
 }
 
+async function diffTool(
+  cwd: string,
+  args: Record<string, unknown>,
+): Promise<{ branch: string; base: string; diff: string }> {
+  const branch = optionalString(args.branch) ?? (await getCurrentBranch(cwd));
+  const explicitBase = optionalString(args.base);
+  let base = explicitBase;
+
+  if (!base) {
+    const info = await branchInfo(cwd, branch);
+    if (!info.parent) {
+      throw new DubError(`Could not determine a diff base for '${branch}'.`, [
+        "Pass {'base': '<ref>'} to diff against an explicit git ref.",
+        "Run 'dub branch info <branch>' to confirm the branch is tracked and has a parent.",
+      ]);
+    }
+    base = info.parent;
+  }
+
+  return {
+    branch,
+    base,
+    diff: await getDiffBetween(base, branch, cwd),
+  };
+}
+
+async function mergeCheckTool(
+  cwd: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  try {
+    return await mergeCheck(cwd, {
+      pr: optionalPositiveInteger(args.pr),
+      branch: optionalString(args.branch),
+      scope: optionalScopeMode(args.scope),
+    });
+  } catch (error) {
+    if (error instanceof DubError) {
+      return {
+        ok: false,
+        reason: error.message,
+        fixes: error.recovery,
+      };
+    }
+    throw error;
+  }
+}
+
+async function proposeCreateMetadataTool(
+  cwd: string,
+  name: string,
+  args: Record<string, unknown>,
+  aiMetadataDeps: AiMetadataDependencies,
+): Promise<{ branchName: string } | { commitMessage: string }> {
+  const diff = optionalString(args.diff);
+  if (!diff) {
+    throw new DubError("'diff' is required for AI proposal tools.", [
+      "Pass {'diff': '<unified diff or concise change description>'}.",
+    ]);
+  }
+
+  const config = await readConfig(cwd);
+  if (!config.aiAssistantEnabled) {
+    throw new DubError('AI assistant is disabled for this repo.', [
+      "Run 'dub config ai-assistant on' to enable AI proposal tools.",
+      "Use 'dubstack.diff' first if you only need a deterministic read-only inspection.",
+    ]);
+  }
+
+  const templates = await readMetadataTemplates(cwd);
+  const generated = await generateCreateMetadata(
+    buildAiDiffContext({ rawDiff: diff }),
+    aiMetadataDeps,
+    { commitTemplate: templates.commitTemplate },
+    config.ai.provider,
+  );
+
+  if (name === 'dubstack.propose_branch_name') {
+    return { branchName: generated.branch };
+  }
+  return { commitMessage: generated.message };
+}
+
+async function proposePrDescriptionTool(
+  cwd: string,
+  args: Record<string, unknown>,
+  aiMetadataDeps: AiMetadataDependencies,
+): Promise<{ prDescription: string }> {
+  const branch = optionalString(args.branch);
+  const baseBranch = optionalString(args.baseBranch);
+  const commitMessage = optionalString(args.commitMessage);
+  const diff = optionalString(args.diff);
+  if (!branch || !baseBranch || !commitMessage || !diff) {
+    throw new DubError(
+      "'branch', 'baseBranch', 'commitMessage', and 'diff' are required for dubstack.propose_pr_description.",
+      [
+        "Pass {'branch': '<branch>', 'baseBranch': '<base>', 'commitMessage': '<message>', 'diff': '<diff>'}.",
+      ],
+    );
+  }
+
+  const config = await readConfig(cwd);
+  if (!config.aiAssistantEnabled) {
+    throw new DubError('AI assistant is disabled for this repo.', [
+      "Run 'dub config ai-assistant on' to enable AI proposal tools.",
+      "Use 'dubstack.diff' first if you only need a deterministic read-only inspection.",
+    ]);
+  }
+
+  const templates = await readMetadataTemplates(cwd);
+  const prDescription = await generatePrDescriptionSummary(
+    {
+      branch,
+      baseBranch,
+      commitMessage,
+      diff: buildAiDiffContext({ rawDiff: diff }),
+    },
+    aiMetadataDeps,
+    { prTemplate: templates.prTemplate },
+    config.ai.provider,
+  );
+
+  return { prDescription };
+}
+
 let stdioCaptureActive = false;
+
+interface MutatingToolResultOptions<T> {
+  /**
+   * Optional callback to decide whether the tool result represents a
+   * recoverable error condition (e.g. a mid-rebase conflict) that the AI
+   * client should treat as a failure rather than a success. When it returns
+   * `true`, `isError: true` is set on the JSON-RPC response so the client
+   * knows to surface the structured result for human intervention.
+   */
+  isError?: (result: T) => boolean;
+}
 
 async function mutatingToolResult<T>(
   fn: () => Promise<T>,
+  options: MutatingToolResultOptions<T> = {},
 ): Promise<ToolCallResult> {
   if (stdioCaptureActive) {
     // The server's per-line queue should already serialize tool calls; this
@@ -1092,6 +1794,7 @@ async function mutatingToolResult<T>(
       result: value,
       output: captured.join(''),
     });
+    const isError = options.isError?.(value) === true;
     return {
       content: [
         {
@@ -1100,6 +1803,7 @@ async function mutatingToolResult<T>(
         },
       ],
       structuredContent,
+      ...(isError ? { isError: true } : {}),
     };
   } finally {
     process.stdout.write = originalStdoutWrite;
@@ -1151,10 +1855,11 @@ async function appendMcpHistory(
   startedAt: number,
   status: 'success' | 'error',
   output: string[],
+  includeArgHash = false,
 ): Promise<void> {
   const currentBranch = await getCurrentBranch(cwd).catch(() => undefined);
   const operation = await detectActiveOperation(cwd).catch(() => undefined);
-  const argsText = formatHistoryArgs(name, args);
+  const argsText = formatHistoryArgs(name, args, includeArgHash);
   const command =
     argsText === null
       ? `dub mcp tools/call ${name}`
@@ -1179,8 +1884,11 @@ async function appendMcpHistory(
 function formatHistoryArgs(
   name: string,
   args: Record<string, unknown>,
+  includeHash: boolean,
 ): string | null {
-  const keys = HISTORY_ARG_KEYS[name] ?? [];
+  const keys = includeHash
+    ? Object.keys(args).sort()
+    : (HISTORY_ARG_KEYS[name] ?? []);
   const filteredArgs: Record<string, unknown> = {};
 
   for (const key of keys) {
@@ -1190,14 +1898,19 @@ function formatHistoryArgs(
   }
 
   const argsText = JSON.stringify(filteredArgs);
-  if (!argsText || argsText === '{}') return null;
+  if (!argsText) return null;
+  if (!includeHash && argsText === '{}') return null;
 
   const redactedArgs = redactSensitiveText(argsText);
-  if (redactedArgs.length <= MAX_HISTORY_ARGS_LENGTH) {
-    return redactedArgs;
-  }
+  const suffix = includeHash ? ` args_sha256=${hashArgs(redactedArgs)}` : '';
+  if (redactedArgs.length <= MAX_HISTORY_ARGS_LENGTH)
+    return `${redactedArgs}${suffix}`;
 
-  return `${redactedArgs.slice(0, MAX_HISTORY_ARGS_LENGTH)}...`;
+  return `${redactedArgs.slice(0, MAX_HISTORY_ARGS_LENGTH)}...${suffix}`;
+}
+
+function hashArgs(redactedArgs: string): string {
+  return createHash('sha256').update(redactedArgs).digest('hex').slice(0, 16);
 }
 
 function jsonToolResult(value: unknown): ToolCallResult {
@@ -1279,6 +1992,110 @@ function optionalPositiveInteger(value: unknown): number | undefined {
   if (typeof value !== 'number') return undefined;
   if (!Number.isInteger(value) || value < 1) return undefined;
   return value;
+}
+
+function optionalPositiveIntegerArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.filter(
+    (entry): entry is number =>
+      typeof entry === 'number' && Number.isInteger(entry) && entry >= 1,
+  );
+  return entries.length === value.length ? entries : undefined;
+}
+
+function optionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.filter(
+    (entry): entry is string => typeof entry === 'string' && entry.length > 0,
+  );
+  return entries.length === value.length ? entries : undefined;
+}
+
+function optionalScopeMode(value: unknown): ScopeMode | undefined {
+  if (value === 'current' || value === 'downstack' || value === 'stack') {
+    return value;
+  }
+  return undefined;
+}
+
+function optionalSplitMode(value: unknown): SplitMode | undefined {
+  if (
+    value === 'by-commit' ||
+    value === 'by-file' ||
+    value === 'by-hunk' ||
+    value === 'ai'
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+/**
+ * Validates the `entries` argument of the `dubstack.reorder` tool call and
+ * normalises it to a `RebaseTodoEntry[]`. Surfaces a `DubError` with
+ * recovery hints when the shape is wrong so AI clients can self-correct.
+ *
+ * Enforces non-emptiness, >=2 entries (matches `reorder()` which rejects
+ * single-commit branches), well-formed shape, no duplicate SHAs, and at
+ * least one `pick`. The "every commit between parent and HEAD must appear"
+ * invariant is enforced downstream by `reorder()` itself once it can read
+ * the actual git state.
+ */
+function parseReorderEntries(value: unknown): RebaseTodoEntry[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new DubError(
+      "'entries' must be a non-empty array of {sha, action} objects.",
+      [
+        "Pass the full rebase todo, oldest commit first, e.g. [{'sha': '<sha>', 'action': 'pick'}, ...].",
+        'Call dubstack.log or git log to discover the commits to reorder.',
+      ],
+    );
+  }
+  if (value.length < 2) {
+    throw new DubError(
+      "'entries' must contain at least 2 commits; dub reorder cannot rewrite a single-commit branch.",
+      [
+        "Use 'dub modify --pop' to edit a single-commit branch.",
+        'Add more commits before invoking dubstack.reorder.',
+      ],
+    );
+  }
+  const normalized = value.map((raw, idx) => {
+    const entry = asRecord(raw);
+    const sha = typeof entry?.sha === 'string' ? entry.sha.trim() : '';
+    const action = entry?.action;
+    if (sha.length === 0 || (action !== 'pick' && action !== 'drop')) {
+      throw new DubError(
+        `'entries[${idx}]' is invalid: expected {sha: string, action: 'pick' | 'drop'}.`,
+        [
+          "Set 'action' to 'pick' (keep) or 'drop' (remove).",
+          "Pass the full commit SHA in 'sha'.",
+        ],
+      );
+    }
+    return { sha, action } satisfies RebaseTodoEntry;
+  });
+  const seen = new Set<string>();
+  for (const entry of normalized) {
+    if (seen.has(entry.sha)) {
+      throw new DubError(
+        `'entries' contains a duplicate SHA '${entry.sha}'. Each commit may appear only once.`,
+        [
+          'Remove the duplicate; mark commits to skip with `action: "drop"` instead of repeating them.',
+        ],
+      );
+    }
+    seen.add(entry.sha);
+  }
+  if (normalized.every((e) => e.action === 'drop')) {
+    throw new DubError(
+      "'entries' marks every commit as 'drop'; the rebase would leave the branch empty.",
+      [
+        "Keep at least one commit as 'pick' (use 'dub delete' if you really want to remove the branch).",
+      ],
+    );
+  }
+  return normalized;
 }
 
 function toJsonValue(value: unknown): JsonValue {
