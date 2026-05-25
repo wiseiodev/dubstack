@@ -1,7 +1,15 @@
-import type { DubConfig, McpMode, SubmitDefault } from '../lib/config';
+import * as fs from 'node:fs';
+import type {
+  DubConfig,
+  McpMode,
+  StorageBackend,
+  SubmitDefault,
+} from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import { parseReviewerList } from '../lib/reviewers';
+import { getStatePath } from '../lib/state';
+import { getSQLiteStatePath } from '../lib/state-sqlite';
 
 export interface ConfigBooleanResult {
   enabled: boolean;
@@ -25,6 +33,11 @@ export interface ConfigMcpModeResult {
 
 export interface ConfigReviewersResult {
   reviewers: string[];
+  changed: boolean;
+}
+
+export interface ConfigStorageBackendResult {
+  backend: StorageBackend;
   changed: boolean;
 }
 
@@ -343,6 +356,39 @@ export async function configReviewers(
   };
 }
 
+export async function configStorageBackend(
+  cwd: string,
+  backend?: string,
+): Promise<ConfigStorageBackendResult> {
+  const config = await readConfig(cwd);
+  if (backend == null) {
+    return {
+      backend: config.storageBackend,
+      changed: false,
+    };
+  }
+
+  const parsed = parseStorageBackend(backend);
+  const changed = config.storageBackend !== parsed;
+  if (changed) {
+    await assertStorageBackendReady(cwd, parsed);
+  }
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        storageBackend: parsed,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    backend: parsed,
+    changed,
+  };
+}
+
 export async function configSubmitDefault(
   cwd: string,
   mode?: string,
@@ -379,6 +425,26 @@ function sameReviewers(left: string[], right: string[]): boolean {
   );
 }
 
+async function assertStorageBackendReady(
+  cwd: string,
+  backend: StorageBackend,
+): Promise<void> {
+  const targetPath =
+    backend === 'sqlite'
+      ? await getSQLiteStatePath(cwd)
+      : await getStatePath(cwd);
+  const otherPath =
+    backend === 'sqlite'
+      ? await getStatePath(cwd)
+      : await getSQLiteStatePath(cwd);
+  if (fs.existsSync(targetPath) || !fs.existsSync(otherPath)) return;
+
+  throw new DubError(`Cannot switch to '${backend}' storage yet.`, [
+    `Run 'dub migrate storage --to ${backend}' to copy the existing state before switching.`,
+    `Run 'dub init' first if this repository should start fresh with '${backend}' storage.`,
+  ]);
+}
+
 function parseMcpMode(value: string): McpMode {
   if (value === 'read-only' || value === 'interactive' || value === 'trusted') {
     return value;
@@ -405,6 +471,14 @@ function parseSubmitDefault(value: string): SubmitDefault {
       "Pass 'publish' to promote existing draft PRs by default.",
     ],
   );
+}
+
+function parseStorageBackend(value: string): StorageBackend {
+  if (value === 'json' || value === 'sqlite') return value;
+  throw new DubError("Storage backend must be one of 'json' or 'sqlite'.", [
+    "Pass 'json' to use the default state.json backend.",
+    "Pass 'sqlite' after running 'dub migrate storage --to sqlite'.",
+  ]);
 }
 
 function parseAiAssistantState(value: string): boolean {

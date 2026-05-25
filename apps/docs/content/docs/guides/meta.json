@@ -5,6 +5,7 @@
     "conflict-resolution",
     "ai-assistant",
     "mcp",
+    "sqlite-backend",
     "shell-integration",
     "multi-trunk",
     "github-action-retarget",

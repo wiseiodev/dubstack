@@ -45,6 +45,7 @@ import { log, logJson, styleLogOutput } from './commands/log';
 import { mcp } from './commands/mcp';
 import { mergeCheck } from './commands/merge-check';
 import { mergeNext } from './commands/merge-next';
+import { migrateStorage } from './commands/migrate';
 import { move } from './commands/move';
 import { bottom, downBySteps, top, upBySteps } from './commands/navigate';
 import { parent } from './commands/parent';
@@ -2099,6 +2100,37 @@ program
       ),
   )
   .addCommand(
+    new Command('storage-backend')
+      .argument(
+        '[backend]',
+        'Set to json/sqlite (omit to inspect current value)',
+      )
+      .description('Manage the repo-local state storage backend')
+      .action(async (backend?: string) => {
+        const { configStorageBackend } = await import('./commands/config');
+        const result = await configStorageBackend(process.cwd(), backend);
+
+        if (!backend) {
+          console.log(
+            chalk.blue(
+              `Storage backend is '${result.backend}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(`✔ Storage backend set to '${result.backend}'`),
+          );
+        } else {
+          console.log(
+            chalk.yellow(`⚠ Storage backend is already '${result.backend}'`),
+          );
+        }
+      }),
+  )
+  .addCommand(
     new Command('submit-default')
       .argument(
         '[mode]',
@@ -2184,6 +2216,40 @@ program
           }
         },
       ),
+  );
+
+program
+  .command('migrate')
+  .description('Migrate DubStack repo-local data between storage formats')
+  .addCommand(
+    new Command('storage')
+      .requiredOption('--to <backend>', 'Storage backend: json or sqlite')
+      .description('Copy DubStack state and switch the configured backend')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub migrate storage --to sqlite    Copy state.json into state.sqlite and opt in
+  $ dub migrate storage --to json      Copy state.sqlite back to state.json`,
+      )
+      .action(async (options: { to: string }) => {
+        const result = await migrateStorage(process.cwd(), options.to);
+        const summary = `${result.stackCount} stack${result.stackCount === 1 ? '' : 's'}, ${result.branchCount} branch${result.branchCount === 1 ? '' : 'es'}`;
+
+        if (result.changed) {
+          console.log(
+            chalk.green(
+              `✔ Migrated storage from '${result.from}' to '${result.to}' (${summary})`,
+            ),
+          );
+        } else {
+          console.log(
+            chalk.yellow(
+              `⚠ Storage backend is already '${result.to}' (${summary})`,
+            ),
+          );
+        }
+      }),
   );
 
 program

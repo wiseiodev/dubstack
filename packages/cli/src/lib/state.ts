@@ -6,12 +6,19 @@ import { execa } from './exec';
 import { getCurrentBranch, getRepoRoot, isGitRepo } from './git';
 import { withStateLock } from './state-lock';
 import {
+  initSQLiteState,
+  readSQLiteState,
+  sqliteStateExists,
+  writeSQLiteState,
+} from './state-sqlite';
+import {
   RECONCILE_SOURCES,
   type ReconcileSource,
   type ReconcileSourceHistogram,
 } from './sync/types';
 
 const VALID_RECONCILE_SOURCES = new Set<string>(RECONCILE_SOURCES);
+type StorageBackend = 'json' | 'sqlite';
 const STATE_REF = 'refs/dubstack/state';
 const BRANCH_REF_PREFIX = 'refs/dubstack/branches/';
 const REFS_MIRROR_VERSION = '1';
@@ -119,6 +126,14 @@ export async function getDubDir(cwd: string): Promise<string> {
  * @throws {DubError} If the state file is missing or contains invalid JSON.
  */
 export async function readState(cwd: string): Promise<DubState> {
+  const backend = await readConfiguredStorageBackend(cwd);
+  if (backend === 'sqlite') {
+    return normalizeState(await readSQLiteState(cwd));
+  }
+  return readJsonState(cwd);
+}
+
+export async function readJsonState(cwd: string): Promise<DubState> {
   const statePath = await getStatePath(cwd);
   if (!fs.existsSync(statePath)) {
     const restored = await readStateFromRefs(cwd);
@@ -147,36 +162,54 @@ export async function readState(cwd: string): Promise<DubState> {
  */
 export async function writeState(state: DubState, cwd: string): Promise<void> {
   await withStateLock(cwd, async () => {
-    const statePath = await getStatePath(cwd);
-    const dir = path.dirname(statePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
     const normalized = normalizeState(state);
-    // Write-temp-then-rename so a process kill mid-write can never leave a
-    // partially-truncated state.json. fs.renameSync is atomic on the same
-    // filesystem (.git/dubstack lives next to the temp file).
-    const payload = `${JSON.stringify(normalized, null, 2)}\n`;
-    const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, payload);
-    try {
-      fs.renameSync(tmpPath, statePath);
-    } catch (error) {
-      try {
-        fs.unlinkSync(tmpPath);
-      } catch {
-        // best-effort cleanup; surface the original rename error
-      }
-      throw error;
+    const backend = await readConfiguredStorageBackend(cwd);
+    if (backend === 'sqlite') {
+      await writeSQLiteState(normalized, cwd);
+      await mirrorStateRefs(normalized, cwd);
+      return;
     }
-
-    try {
-      await mirrorStateToRefs(normalized, cwd);
-      writeRefsMirrorVersionMarker(dir);
-    } catch (error) {
-      warnRefsMirrorFailure(error);
-    }
+    await writeJsonStateUnlocked(normalized, cwd);
+    await mirrorStateRefs(normalized, cwd);
   });
+}
+
+export async function writeJsonState(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  await withStateLock(cwd, async () => {
+    const normalized = normalizeState(state);
+    await writeJsonStateUnlocked(normalized, cwd);
+    await mirrorStateRefs(normalized, cwd);
+  });
+}
+
+async function writeJsonStateUnlocked(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  const statePath = await getStatePath(cwd);
+  const dir = path.dirname(statePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  // Write-temp-then-rename so a process kill mid-write can never leave a
+  // partially-truncated state.json. fs.renameSync is atomic on the same
+  // filesystem (.git/dubstack lives next to the temp file).
+  const payload = `${JSON.stringify(normalizeState(state), null, 2)}\n`;
+  const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tmpPath, payload);
+  try {
+    fs.renameSync(tmpPath, statePath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      // best-effort cleanup; surface the original rename error
+    }
+    throw error;
+  }
 }
 
 /**
@@ -189,6 +222,22 @@ export async function initState(
   cwd: string,
 ): Promise<'created' | 'already_exists'> {
   return withStateLock(cwd, async () => {
+    const backend = await readConfiguredStorageBackend(cwd);
+    if (backend === 'sqlite') {
+      if (await sqliteStateExists(cwd)) {
+        return 'already_exists';
+      }
+      const defaultTrunk = await detectDefaultTrunk(cwd);
+      const emptyState: DubState = {
+        trunks: [defaultTrunk],
+        defaultTrunk,
+        stacks: [],
+      };
+      await initSQLiteState(cwd, emptyState);
+      await mirrorStateRefs(emptyState, cwd);
+      return 'created';
+    }
+
     const statePath = await getStatePath(cwd);
     const dir = path.dirname(statePath);
 
@@ -204,8 +253,40 @@ export async function initState(
       stacks: [],
     };
     fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
+    await mirrorStateRefs(emptyState, cwd);
     return 'created';
   });
+}
+
+export async function readConfiguredStorageBackend(
+  cwd: string,
+): Promise<StorageBackend> {
+  const configPath = path.join(await getDubDir(cwd), 'config.json');
+  if (!fs.existsSync(configPath)) return 'json';
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+      storageBackend?: unknown;
+    };
+    return parsed.storageBackend === 'sqlite' ? 'sqlite' : 'json';
+  } catch {
+    throw new DubError('Config file is corrupted.', [
+      "Run 'rm .git/dubstack/config.json' to delete the corrupted file.",
+      "Run 'dub config storage-backend json' to reset the storage backend after deleting it.",
+    ]);
+  }
+}
+
+export async function mirrorStateRefs(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  try {
+    const normalized = normalizeState(state);
+    await mirrorStateToRefs(normalized, cwd);
+    writeRefsMirrorVersionMarker(await getDubDir(cwd));
+  } catch (error) {
+    warnRefsMirrorFailure(error);
+  }
 }
 
 /**
@@ -410,10 +491,13 @@ function normalizeStack(stack: Stack): Stack {
   };
 }
 
-function uniqueNonEmpty(values: string[]): string[] {
+function uniqueNonEmpty(values: unknown[]): string[] {
   return Array.from(
     new Set(
-      values.map((value) => value.trim()).filter((value) => value.length > 0),
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
     ),
   );
 }

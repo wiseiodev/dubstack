@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestRepo } from '../../test/helpers';
 import { readConfig } from '../lib/config';
+import { writeJsonState } from '../lib/state';
 import {
   configAiAssistant,
   configAiDefaults,
@@ -10,6 +11,7 @@ import {
   configAiProvider,
   configMcpMode,
   configReviewers,
+  configStorageBackend,
   configSubmitDefault,
 } from './config';
 
@@ -313,6 +315,35 @@ describe('config reviewers', () => {
     await expect(
       configReviewers(dir, 'alice', { clear: true }),
     ).rejects.toThrow("'--clear' cannot be combined with a reviewer list.");
+  });
+});
+
+describe('config storage-backend', () => {
+  it('returns the default JSON backend when no backend is set', async () => {
+    const result = await configStorageBackend(dir);
+    expect(result).toEqual({ backend: 'json', changed: false });
+  });
+
+  it('writes SQLite backend when set', async () => {
+    const result = await configStorageBackend(dir, 'sqlite');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ backend: 'sqlite', changed: true });
+    expect(config.storageBackend).toBe('sqlite');
+  });
+
+  it('throws for invalid backends', async () => {
+    await expect(configStorageBackend(dir, 'redis')).rejects.toThrow(
+      "Storage backend must be one of 'json' or 'sqlite'.",
+    );
+  });
+
+  it('refuses to switch an existing JSON repo to SQLite without migration', async () => {
+    await writeJsonState({ stacks: [] }, dir);
+
+    await expect(configStorageBackend(dir, 'sqlite')).rejects.toThrow(
+      "Cannot switch to 'sqlite' storage yet.",
+    );
   });
 });
 

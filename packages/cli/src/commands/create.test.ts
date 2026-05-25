@@ -87,6 +87,24 @@ describe('create', () => {
     }
   });
 
+  it('auto-initializes and updates SQLite state when configured', async () => {
+    const repo2 = await createTestRepo();
+    try {
+      await writeConfig({ storageBackend: 'sqlite' }, repo2.dir);
+
+      const result = await create('feat/sqlite', repo2.dir);
+
+      expect(result.branch).toBe('feat/sqlite');
+      const state = await readState(repo2.dir);
+      expect(state.stacks[0].branches.map((branch) => branch.name)).toEqual([
+        'main',
+        'feat/sqlite',
+      ]);
+    } finally {
+      await repo2.cleanup();
+    }
+  });
+
   it('saves an undo entry', async () => {
     await create('feat/first', dir);
 
