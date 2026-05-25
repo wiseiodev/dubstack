@@ -18,7 +18,9 @@
  * @packageDocumentation
  */
 
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
@@ -111,6 +113,7 @@ import { parseScope, type ScopeMode } from './lib/scope';
 import { getStackOverviewBatch } from './lib/stack-overview';
 import { migrateStateRefsIfNeeded } from './lib/state';
 import { acquireStateLock, type StateLockHandle } from './lib/state-lock';
+import { applyTheme, resolveTheme } from './lib/theme';
 
 const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
@@ -166,6 +169,10 @@ program
     '--verbose',
     'Print each git/gh subprocess before running (sanitized of secrets)',
   )
+  .option(
+    '--no-color',
+    'Disable ANSI colors globally (overrides the configured theme)',
+  )
   .addHelpText(
     'after',
     `
@@ -186,7 +193,10 @@ program
     `
 Examples:
   $ dub init                       Initialize DubStack, creating .git/dubstack/ and updating .gitignore
-  $ dub init --restore-from-refs   Restore state.json from refs/dubstack/*`,
+  $ dub init --restore-from-refs   Restore state.json from refs/dubstack/*
+
+See also:
+  dub install, dub config, dub doctor`,
   )
   .action(async (options: { restoreFromRefs?: boolean }) => {
     const result = await init(process.cwd(), {
@@ -221,7 +231,10 @@ Recipes:
 Examples:
   $ dub install retarget-action             Write .github/workflows/dubstack-retarget.yml
   $ dub install retarget-action --dry-run   Preview the planned write
-  $ dub install retarget-action --force     Overwrite an existing file without confirming`,
+  $ dub install retarget-action --force     Overwrite an existing file without confirming
+
+See also:
+  dub docs, dub init`,
   )
   .action(
     async (recipe: string, options: { dryRun?: boolean; force?: boolean }) => {
@@ -297,7 +310,10 @@ program
 Examples:
   $ dub completion bash >> ~/.bashrc
   $ dub completion zsh > "\${fpath[1]}/_dub"
-  $ dub completion fish > ~/.config/fish/completions/dub.fish`,
+  $ dub completion fish > ~/.config/fish/completions/dub.fish
+
+See also:
+  dub man, dub docs`,
   )
   .action((shell: string) => {
     process.stdout.write(completion(program, shell));
@@ -311,7 +327,10 @@ program
     `
 Examples:
   $ dub man > ~/.local/share/man/man1/dub.1
-  $ mandb --user-db    # then 'man dub' renders the page`,
+  $ mandb --user-db    # then 'man dub' renders the page
+
+See also:
+  dub completion, dub docs, dub help`,
   )
   .action(() => {
     process.stdout.write(man(program, { version }));
@@ -324,7 +343,10 @@ program
     'after',
     `
 Examples:
-  $ dub docs    Open the DubStack docs website`,
+  $ dub docs    Open the DubStack docs website
+
+See also:
+  dub repo, dub help`,
   )
   .action(async () => {
     await docs();
@@ -337,7 +359,10 @@ program
     'after',
     `
 Examples:
-  $ dub repo    Open the current repository GitHub page`,
+  $ dub repo    Open the current repository GitHub page
+
+See also:
+  dub pr, dub docs`,
   )
   .action(async () => {
     await repo(process.cwd());
@@ -373,7 +398,10 @@ Examples:
   $ dub create feat/api -m "feat: add API"    Create branch + commit staged
   $ dub create feat/api -am "feat: add API"   Stage all + create + commit
   $ dub create --ai                            AI-generate branch + commit from staged
-  $ dub create --no-ai feat/api                Override repo AI defaults for one create`,
+  $ dub create --no-ai feat/api                Override repo AI defaults for one create
+
+See also:
+  dub modify, dub flow, dub track, dub log`,
   )
   .action(
     async (
@@ -436,7 +464,10 @@ program
 Examples:
   $ dub flow --ai -a      Stage all, preview AI metadata, create, and submit
   $ dub flow -y -u        Auto-approve after staging tracked changes
-  $ dub flow --dry-run    Preview generated branch, commit, and PR text only`,
+  $ dub flow --dry-run    Preview generated branch, commit, and PR text only
+
+See also:
+  dub create, dub submit, dub ai setup`,
   )
   .action(runFlow);
 
@@ -459,7 +490,13 @@ program
     'after',
     `
 Examples:
-  $ dub log    Show the branch tree with current branch highlighted`,
+  $ dub log                   Show the branch tree with current branch highlighted
+  $ dub log --stack           Only show the current stack
+  $ dub log --json            Emit machine-readable JSON
+  $ dub log --refresh         Bust the 30-second PR/CI overview cache
+
+See also:
+  dub ls, dub status, dub info, dub watch`,
   )
   .action(
     async (options: {
@@ -478,7 +515,7 @@ Examples:
 
 program
   .command('ls')
-  .description('Display an ASCII tree of the current stack')
+  .description('Display an ASCII tree of the current stack (alias of log)')
   .option('-s, --stack', 'Only show the current stack')
   .option('-a, --all', 'Show all stacks (default)')
   .option('-r, --reverse', 'Reverse stack/child ordering')
@@ -489,6 +526,17 @@ program
   .option(
     '--no-color',
     'Disable ANSI colors; keep `*` (current) and `>` (ancestor) text markers, strip `~` sibling markers',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub ls                      Show every tracked stack
+  $ dub ls --stack              Show only the current stack
+  $ dub ls --json               Emit machine-readable JSON
+
+See also:
+  dub log, dub status, dub info`,
   )
   .action(
     async (options: {
@@ -510,6 +558,17 @@ program
   .argument('[steps]', 'Number of checkout-history entries to go back')
   .option('-l, --list', 'List recent checkout history without switching')
   .description('Return to a previously checked-out branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub back              Switch back to the previous branch
+  $ dub back 3            Jump 3 entries back in the checkout history
+  $ dub back --list       Show recent checkout history without switching
+
+See also:
+  dub checkout, dub co, dub up, dub down`,
+  )
   .action(async (stepsArg: string | undefined, options: { list?: boolean }) => {
     if (options.list) {
       const entries = await listBackHistory(process.cwd());
@@ -541,6 +600,17 @@ program
   .argument('[steps]', 'Number of levels to traverse upstack')
   .option('-n, --steps <count>', 'Number of levels to traverse upstack')
   .description('Checkout the child branch directly above the current branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub up           Step one branch upstack (toward descendants)
+  $ dub up 2         Step two branches upstack
+  $ dub up --steps 3 Step three branches upstack
+
+See also:
+  dub down, dub top, dub bottom, dub co`,
+  )
   .action(async (stepsArg: string | undefined, options: { steps?: string }) => {
     const steps = parseSteps(stepsArg, options.steps);
     const result = await upBySteps(process.cwd(), steps);
@@ -556,6 +626,17 @@ program
   .argument('[steps]', 'Number of levels to traverse downstack')
   .option('-n, --steps <count>', 'Number of levels to traverse downstack')
   .description('Checkout the parent branch directly below the current branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub down            Step one branch downstack (toward trunk)
+  $ dub down 2          Step two branches downstack
+  $ dub down --steps 3  Step three branches downstack
+
+See also:
+  dub up, dub top, dub bottom, dub co`,
+  )
   .action(async (stepsArg: string | undefined, options: { steps?: string }) => {
     const steps = parseSteps(stepsArg, options.steps);
     const result = await downBySteps(process.cwd(), steps);
@@ -571,6 +652,15 @@ program
 program
   .command('top')
   .description('Checkout the topmost branch in the current stack path')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub top    Jump to the highest tip in the current stack path
+
+See also:
+  dub bottom, dub up, dub down`,
+  )
   .action(async () => {
     const result = await top(process.cwd());
     if (result.changed) {
@@ -584,6 +674,15 @@ program
   .command('bottom')
   .description(
     'Checkout the first branch above the root in the current stack path',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub bottom    Jump to the branch sitting directly on trunk
+
+See also:
+  dub top, dub up, dub down`,
   )
   .action(async () => {
     const result = await bottom(process.cwd());
@@ -601,12 +700,34 @@ program
 program
   .command('branch')
   .description('Show DubStack branch metadata')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub branch info                  Show stack info for the current branch
+  $ dub branch info feat/auth-login  Show stack info for a specific branch
+
+See also:
+  dub info, dub log, dub parent, dub children`,
+  )
   .addCommand(
     new Command('info')
       .description('Show tracked stack info for the current branch')
       .argument('[branch]', 'Branch to inspect (defaults to current branch)')
       .option('-d, --diff', 'Show the parent-relative git diff for the branch')
       .option('--json', 'Output branch info as JSON')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub branch info                  Show stack info for the current branch
+  $ dub branch info feat/auth-login  Show stack info for a specific branch
+  $ dub branch info --diff           Include parent-relative diff inline
+  $ dub branch info --json           Emit machine-readable JSON
+
+See also:
+  dub info, dub log, dub parent, dub children`,
+      )
       .action(showInfo),
   );
 
@@ -616,6 +737,18 @@ program
   .option('-d, --diff', 'Show the parent-relative git diff for the branch')
   .option('--json', 'Output branch info as JSON')
   .description('Show tracked stack info for a branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub info                       Inspect the current branch
+  $ dub info feat/auth-login       Inspect a specific tracked branch
+  $ dub info --diff                Show parent-relative diff inline
+  $ dub info --json                Emit machine-readable JSON
+
+See also:
+  dub status, dub log, dub parent, dub children`,
+  )
   .action(showInfo);
 
 program
@@ -631,8 +764,11 @@ program
     'after',
     `
 Examples:
-  $ dub track
-  $ dub track feat/a --parent main`,
+  $ dub track                       Adopt the current branch (DubStack picks the parent)
+  $ dub track feat/a --parent main  Adopt feat/a with main as the explicit parent
+
+See also:
+  dub untrack, dub create, dub log, dub doctor`,
   )
   .action(
     async (
@@ -682,8 +818,11 @@ program
     'after',
     `
 Examples:
-  $ dub untrack
-  $ dub untrack feat/a --downstack`,
+  $ dub untrack                       Drop tracking metadata for the current branch
+  $ dub untrack feat/a --downstack    Untrack feat/a and its ancestors toward trunk
+
+See also:
+  dub track, dub delete, dub prune`,
   )
   .action(
     async (
@@ -722,8 +861,11 @@ program
     'after',
     `
 Examples:
-  $ dub delete feat/a
-  $ dub delete feat/a --upstack -f -q`,
+  $ dub delete feat/a                       Delete feat/a (with confirmation)
+  $ dub delete feat/a --upstack -f -q       Delete feat/a + descendants, force, quiet
+
+See also:
+  dub untrack, dub prune, dub fold`,
   )
   .action(
     async (
@@ -783,7 +925,10 @@ program
 Examples:
   $ dub fold                Fold current branch into parent (keeps commits)
   $ dub fold --squash       Collapse current branch into a single commit on parent
-  $ dub fold --force        Skip the confirmation prompt`,
+  $ dub fold --force        Skip the confirmation prompt
+
+See also:
+  dub squash, dub delete, dub move`,
   )
   .action(
     async (options: {
@@ -857,7 +1002,10 @@ program
     `
 Examples:
   $ dub move feat/inserted --before feat/auth-login    Insert before <target>
-  $ dub move feat/inserted --after feat/auth-base      Insert after <target>`,
+  $ dub move feat/inserted --after feat/auth-base      Insert after <target>
+
+See also:
+  dub reorder, dub unlink, dub restack`,
   )
   .action(
     async (branch: string, options: { before?: string; after?: string }) => {
@@ -925,7 +1073,10 @@ Examples:
   $ dub absorb                Autosquash literal 'fixup!' / 'squash!' commits on the current branch
   $ dub absorb --ai           Use the configured AI provider to pick targets for ambiguous WIP commits
   $ dub absorb --stack        Move fixup commits across branches in the stack, then restack
-  $ dub absorb --dry-run      Print the plan without mutating`,
+  $ dub absorb --dry-run      Print the plan without mutating
+
+See also:
+  dub modify, dub squash, dub restack`,
   )
   .action(
     async (options: { ai?: boolean; stack?: boolean; dryRun?: boolean }) => {
@@ -990,7 +1141,10 @@ program
 Examples:
   $ dub unlink feat/auth-login                Promote feat/auth-login to a new stack root
   $ dub unlink feat/auth-login --orphan-children  Leave descendants on the original parent
-  $ dub unlink feat/auth-login --no-retarget  Skip PR retarget (warns about drift)`,
+  $ dub unlink feat/auth-login --no-retarget  Skip PR retarget (warns about drift)
+
+See also:
+  dub move, dub track, dub untrack`,
   )
   .action(
     async (
@@ -1059,6 +1213,17 @@ program
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .option('--json', 'Output parent info as JSON')
   .description('Show the direct parent branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub parent                   Print the parent of the current branch
+  $ dub parent feat/auth-login   Print the parent of a specific branch
+  $ dub parent --json            Emit JSON for shell scripts
+
+See also:
+  dub children, dub info, dub log`,
+  )
   .action(async (branch: string | undefined, options: { json?: boolean }) => {
     if (options.json) activateJsonMode();
     const result = await parent(process.cwd(), branch);
@@ -1074,6 +1239,17 @@ program
   .argument('[branch]', 'Branch to inspect (defaults to current branch)')
   .option('--json', 'Output children info as JSON')
   .description('Show direct child branches')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub children                   Print children of the current branch
+  $ dub children feat/auth-base    Print children of a specific branch
+  $ dub children --json            Emit JSON for shell scripts
+
+See also:
+  dub parent, dub info, dub log`,
+  )
   .action(async (branch: string | undefined, options: { json?: boolean }) => {
     if (options.json) activateJsonMode();
     const result = await children(process.cwd(), branch);
@@ -1117,6 +1293,15 @@ Examples:
 trunkCommand
   .command('list')
   .description('List configured trunk branches')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk list    Print every configured trunk with the default marked
+
+See also:
+  dub trunk add, dub trunk set-default`,
+  )
   .action(async () => {
     const result = await listTrunks(process.cwd());
     for (const entry of result.trunks) {
@@ -1128,6 +1313,16 @@ trunkCommand
   .command('add')
   .argument('<name>', 'Trunk branch name to register')
   .description('Register a trunk branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk add main          Register 'main' as a trunk
+  $ dub trunk add release/24.x  Register a release-line trunk
+
+See also:
+  dub trunk list, dub trunk set-default, dub trunk remove`,
+  )
   .action(async (name: string) => {
     const result = await addTrunk(process.cwd(), name);
     if (result.status === 'already-exists') {
@@ -1143,6 +1338,15 @@ trunkCommand
   .command('remove')
   .argument('<name>', 'Trunk branch name to remove')
   .description('Remove a configured trunk branch')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk remove release/24.x   Unregister a configured trunk
+
+See also:
+  dub trunk add, dub trunk list`,
+  )
   .action(async (name: string) => {
     const result = await removeTrunk(process.cwd(), name);
     console.log(chalk.green(`✔ Removed trunk '${result.trunk}'`));
@@ -1152,6 +1356,16 @@ trunkCommand
   .command('set-default')
   .argument('<name>', 'Configured trunk to use by default')
   .description('Set the default trunk for new stacks')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub trunk set-default main           Use 'main' for new untracked stacks
+  $ dub trunk set-default release/24.x   Switch the default to a release line
+
+See also:
+  dub trunk list, dub trunk add`,
+  )
   .action(async (name: string) => {
     const result = await setDefaultTrunk(process.cwd(), name);
     console.log(chalk.green(`✔ Default trunk is now '${result.trunk}'`));
@@ -1173,7 +1387,10 @@ program
 Examples:
   $ dub watch                     Start watcher with default 60s interval
   $ dub watch --interval 30s      Poll GitHub every 30 seconds
-  $ dub watch --ui                Render live status pane`,
+  $ dub watch --ui                Render live status pane
+
+See also:
+  dub status, dub log, dub sync`,
   )
   .action(async (options: { interval?: string; ui?: boolean }) => {
     await watch(process.cwd(), options);
@@ -1197,6 +1414,19 @@ program
     '--fresh',
     'Force a full fetch of every tracked branch (skip 5-minute freshness cache)',
   )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub sync                Sync the current stack with origin and restack
+  $ dub sync --all          Sync every tracked stack across trunks
+  $ dub sync --no-restack   Sync without restacking (manual fix-up later)
+  $ dub sync --fresh        Force-fetch each branch even if cached
+  $ dub sync -f             Skip prompts on reset/reconcile decisions
+
+See also:
+  dub restack, dub post-merge, dub merge-next`,
+  )
   .action(
     async (options: {
       restack?: boolean;
@@ -1217,8 +1447,11 @@ program
     'after',
     `
 Examples:
-  $ dub restack              Rebase the current stack
-  $ dub restack --continue   Continue after resolving conflicts`,
+  $ dub restack              Rebase the current stack onto its updated parents
+  $ dub restack --continue   Continue after resolving conflicts
+
+See also:
+  dub continue, dub abort, dub sync, dub post-merge`,
   )
   .action(async (options: { continue?: boolean }) => {
     const result = options.continue
@@ -1293,6 +1526,17 @@ program
     '--no-adjudicate',
     'Use one configured AI provider for conflict resolution',
   )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub continue                Resume restack/rebase after manual conflict resolution
+  $ dub continue --ai           Ask the AI to propose resolutions, then continue
+  $ dub continue --adjudicate   Use two AI providers and pick the better fix
+
+See also:
+  dub restack, dub abort, dub ai resolve`,
+  )
   .action(async (options: { ai?: boolean; adjudicate?: boolean }) => {
     const result = await continueCommand(process.cwd(), {
       ai: options.ai,
@@ -1339,6 +1583,15 @@ program
 program
   .command('abort')
   .description('Abort the active restack or git rebase operation')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub abort    Roll back the in-progress restack/rebase and restore branches
+
+See also:
+  dub continue, dub restack, dub undo`,
+  )
   .action(async () => {
     const result = await abortCommand(process.cwd());
     if (result.aborted === 'restack') {
@@ -1371,7 +1624,10 @@ Examples:
   $ dub undo                  Roll back the last dub operation
   $ dub undo --steps 3        Roll back the last three operations
   $ dub undo --list           Show recent undoable operations with timestamps
-  $ dub undo --clear          Wipe both the undo and redo logs`,
+  $ dub undo --clear          Wipe both the undo and redo logs
+
+See also:
+  dub redo, dub abort, dub history`,
   )
   .action(
     async (options: { steps?: number; list?: boolean; clear?: boolean }) => {
@@ -1419,7 +1675,10 @@ program
     'after',
     `
 Examples:
-  $ dub redo    Re-apply the most recently undone operation`,
+  $ dub redo    Re-apply the most recently undone operation
+
+See also:
+  dub undo, dub history`,
   )
   .action(async () => {
     const result = await redo(process.cwd());
@@ -1497,13 +1756,27 @@ Examples:
   $ dub submit --merge-when-ready --method squash
                             Queue GitHub auto-merge for submitted PRs
   $ dub submit --rerequest-review
-                            Re-request review on updated PRs`,
+                            Re-request review on updated PRs
+
+See also:
+  dub ss, dub ready, dub merge-next, dub merge-check, dub pr`,
   )
   .action(runSubmit);
 
 program
   .command('ss')
   .description('Submit the current stack (alias for submit)')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub ss               Submit downstack (current branch + ancestors)
+  $ dub ss --stack       Submit the full stack tree
+  $ dub ss --dry-run     Preview the push/PR plan without executing
+
+See also:
+  dub submit, dub ready, dub merge-next`,
+  )
   .option('--dry-run', 'Print what would happen without executing')
   .option('-i, --ai', 'AI-generate a PR description for this invocation')
   .option('--no-ai', 'Disable AI PR description generation for this invocation')
@@ -1571,7 +1844,10 @@ Examples:
   $ dub merge-check --scope downstack     Check current branch + ancestors
   $ dub merge-check --scope stack         Check every branch in the stack
   $ dub merge-check --pr 123              Check a specific PR (scope ignored)
-  $ dub merge-check --json                Emit structured JSON (exits 1 on failure)`,
+  $ dub merge-check --json                Emit structured JSON (exits 1 on failure)
+
+See also:
+  dub merge-next, dub ready, dub submit`,
   )
   .action(
     async (options: {
@@ -1631,6 +1907,18 @@ program
     'Submit refreshed stack updates (disable with --no-submit)',
     true,
   )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub post-merge                Repair the current stack after a merge
+  $ dub post-merge --all          Process every tracked stack
+  $ dub post-merge --dry-run      Preview cleanup + retarget without mutating
+  $ dub post-merge --no-restack   Skip restacking remaining branches
+
+See also:
+  dub merge-next, dub sync, dub restack`,
+  )
   .action(
     async (options: {
       all?: boolean;
@@ -1667,6 +1955,19 @@ program
   .command('merge-next')
   .alias('land')
   .description('Merge the next safe PR in your current stack path')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub merge-next                       Merge the next eligible PR + run post-merge
+  $ dub land                             Alias for 'dub merge-next'
+  $ dub merge-next --method squash       Squash-merge (default)
+  $ dub merge-next --queue               Enqueue in the GitHub merge queue
+  $ dub merge-next --dry-run             Preview the merge + retarget plan
+
+See also:
+  dub submit, dub merge-check, dub post-merge, dub ready`,
+  )
   .option('--dry-run', 'Preview merge + post-merge actions')
   .option('--queue', 'Use GitHub native merge queue when merging')
   .option('--no-queue', 'Force direct merge even when merge queue is enabled')
@@ -1779,6 +2080,18 @@ program
   .option('-a, --all', 'Check all stacks instead of only the current stack')
   .option('--no-fetch', 'Skip remote fetch before remote drift checks')
   .option('--json', 'Output doctor results as JSON')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub doctor              Health-check the current stack
+  $ dub doctor --all        Health-check every tracked stack
+  $ dub doctor --no-fetch   Skip the remote fetch (offline / fast path)
+  $ dub doctor --json       Emit machine-readable results
+
+See also:
+  dub status, dub prune, dub sync`,
+  )
   .action(
     async (options: { all?: boolean; fetch?: boolean; json?: boolean }) => {
       if (options.json) activateJsonMode();
@@ -1830,7 +2143,10 @@ Examples:
   $ dub status                Print a one-line status (cache-only, fast)
   $ dub status --json         Emit structured JSON
   $ dub status --live         Refresh PR/CI data via gh
-  $ dub status --no-pr        Skip the PR fetch (shell prompts without gh)`,
+  $ dub status --no-pr        Skip the PR fetch (shell prompts without gh)
+
+See also:
+  dub log, dub info, dub doctor, dub watch`,
   )
   .action(async (options: { json?: boolean; live?: boolean; pr?: boolean }) => {
     if (options.json) activateJsonMode();
@@ -1871,7 +2187,10 @@ Examples:
   $ dub ready --scope current    Check just the current branch
   $ dub ready --scope stack      Check every branch in the stack
   $ dub ready --ai               Run AI review-readiness checks
-  $ dub ready --ai --scope stack Run AI checks for every branch in the stack`,
+  $ dub ready --ai --scope stack Run AI checks for every branch in the stack
+
+See also:
+  dub doctor, dub submit, dub merge-check`,
   )
   .action(
     async (options: {
@@ -1928,6 +2247,18 @@ program
   .option('--apply', 'Apply pruning changes (default is preview only)')
   .option('-a, --all', 'Prune stale tracked branches across all stacks')
   .option('--no-fetch', 'Skip remote fetch before pruning checks')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub prune              Preview stale tracked branches
+  $ dub prune --apply      Apply the prune and remove stale metadata
+  $ dub prune --all        Scan every tracked stack
+  $ dub prune --no-fetch   Skip the remote fetch (offline / fast path)
+
+See also:
+  dub doctor, dub untrack, dub delete`,
+  )
   .action(
     async (options: { apply?: boolean; all?: boolean; fetch?: boolean }) => {
       const result = await prune(process.cwd(), options);
@@ -1985,6 +2316,20 @@ program
   )
   .option('--no-color', 'Disable ANSI colors in the picker')
   .description('Checkout a branch (interactive picker if no name given)')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub co                       Open the interactive branch picker
+  $ dub co feat/auth-login       Checkout a specific branch by name
+  $ dub co --trunk               Jump back to the current trunk
+  $ dub co --stack               Picker scoped to ancestors + descendants
+  $ dub co --all                 Picker showing every tracked stack
+  $ dub co --show-untracked      Include untracked git branches in the picker
+
+See also:
+  dub back, dub up, dub down, dub top, dub bottom`,
+  )
   .action(
     async (
       branch: string | undefined,
@@ -2022,12 +2367,35 @@ program
 program
   .command('skills')
   .description('Manage DubStack agent skills')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub skills add              Install every agent skill into this repo
+  $ dub skills add dubstack     Install just the dubstack skill
+  $ dub skills remove           Remove every installed skill
+
+See also:
+  dub config ai-assistant, dub ai setup`,
+  )
   .addCommand(
     new Command('add')
       .description('Install agent skills (e.g. dubstack, dub-flow)')
       .argument('[skills...]', 'Names of skills to install (default: all)')
       .option('-g, --global', 'Install skills globally')
       .option('--dry-run', 'Preview actions without installing')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub skills add                  Install every available skill into this repo
+  $ dub skills add dubstack         Install just the dubstack skill
+  $ dub skills add --global         Install skills to your user-level Claude dir
+  $ dub skills add --dry-run        Preview which files would be written
+
+See also:
+  dub skills remove`,
+      )
       .action(async (skills, options) => {
         const { addSkills } = await import('./commands/skills');
         await addSkills(skills, options);
@@ -2039,6 +2407,17 @@ program
       .argument('[skills...]', 'Names of skills to remove (default: all)')
       .option('-g, --global', 'Remove skills globally')
       .option('--dry-run', 'Preview actions without removing')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub skills remove                Remove every installed skill from this repo
+  $ dub skills remove dub-flow       Remove a specific skill
+  $ dub skills remove --global       Remove user-level installed skills
+
+See also:
+  dub skills add`,
+      )
       .action(async (skills, options) => {
         const { removeSkills } = await import('./commands/skills');
         await removeSkills(skills, options);
@@ -2048,10 +2427,34 @@ program
 program
   .command('config')
   .description('Manage DubStack configuration')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub config theme dark              Pin to a dark-background palette
+  $ dub config ai-assistant on         Enable AI features for this repo
+  $ dub config reviewers alice,bob     Set repo-default PR reviewers
+  $ dub config storage-backend sqlite  Switch to the SQLite backend
+  $ dub config submit-default draft    Open new submit PRs as drafts
+
+See also:
+  dub ai setup, dub migrate storage, dub init`,
+  )
   .addCommand(
     new Command('ai-assistant')
       .argument('[state]', 'Set to on/off (omit to inspect current value)')
       .description('Enable or disable the repo-local AI assistant')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-assistant        Show the current setting
+  $ dub config ai-assistant on     Enable AI features for this repo
+  $ dub config ai-assistant off    Disable AI features for this repo
+
+See also:
+  dub config ai-provider, dub config ai-defaults`,
+      )
       .action(async (state?: string) => {
         const { configAiAssistant } = await import('./commands/config');
         const result = await configAiAssistant(process.cwd(), state);
@@ -2085,6 +2488,17 @@ program
       .description('Manage repo-local AI defaults for DubStack commands')
       .argument('<target>', 'One of: create, submit, flow')
       .argument('[state]', 'Set to on/off (omit to inspect current value)')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-defaults create on     AI-generate branch + commit by default
+  $ dub config ai-defaults submit on     AI-generate PR descriptions by default
+  $ dub config ai-defaults flow on       Default \`dub flow\` to AI mode
+
+See also:
+  dub config ai-assistant, dub config ai-prompts`,
+      )
       .action(async (target: 'create' | 'submit' | 'flow', state?: string) => {
         const { configAiDefaults } = await import('./commands/config');
         const result = await configAiDefaults(process.cwd(), target, state);
@@ -2117,6 +2531,17 @@ program
     new Command('ai-prompts')
       .argument('[mode]', 'Set to auto/on/off (omit to inspect current value)')
       .description('Manage AI choices in interactive prompts')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-prompts auto    Show AI choices when the assistant is enabled
+  $ dub config ai-prompts on      Always offer AI choices in prompts
+  $ dub config ai-prompts off     Never offer AI choices in prompts
+
+See also:
+  dub config ai-prompts-auto-accept, dub config ai-assistant`,
+      )
       .action(async (mode?: string) => {
         const { configAiPrompts } = await import('./commands/config');
         const result = await configAiPrompts(process.cwd(), mode);
@@ -2145,6 +2570,16 @@ program
     new Command('ai-prompts-auto-accept')
       .argument('[level]', 'Set to off/high (omit to inspect current value)')
       .description('Manage AI prompt recommendation auto-accept behavior')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-prompts-auto-accept off    Always confirm AI recommendations
+  $ dub config ai-prompts-auto-accept high   Auto-apply high-confidence picks
+
+See also:
+  dub config ai-prompts`,
+      )
       .action(async (level?: string) => {
         const { configAiPromptsAutoAccept } = await import('./commands/config');
         const result = await configAiPromptsAutoAccept(process.cwd(), level);
@@ -2180,6 +2615,18 @@ program
         'Set to auto/gemini/anthropic/gateway/bedrock/openai/ollama (omit to inspect current value)',
       )
       .description('Manage the repo-local AI provider selection')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-provider auto         Pick a provider from configured env keys
+  $ dub config ai-provider anthropic    Force the Anthropic provider
+  $ dub config ai-provider gemini       Force Google's Gemini provider
+  $ dub config ai-provider ollama       Use a local Ollama server
+
+See also:
+  dub config ai-model, dub ai setup, dub ai env`,
+      )
       .action(async (provider?: string) => {
         const { configAiProvider } = await import('./commands/config');
         const result = await configAiProvider(process.cwd(), provider);
@@ -2211,6 +2658,17 @@ program
       .description(
         'Manage the security model for mutating MCP tool calls (default: interactive)',
       )
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config mcp-mode read-only      Disable mutating MCP tools entirely
+  $ dub config mcp-mode interactive    Require terminal confirmation (default)
+  $ dub config mcp-mode trusted        Let mutating MCP tools run without prompts
+
+See also:
+  dub mcp`,
+      )
       .action(async (mode?: string) => {
         const { configMcpMode } = await import('./commands/config');
         const result = await configMcpMode(process.cwd(), mode);
@@ -2234,6 +2692,17 @@ program
       .argument('[list]', 'Comma-separated GitHub users or teams')
       .option('--clear', 'Remove repo-default reviewers')
       .description('Manage repo-default PR reviewers')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config reviewers                       Show repo-default reviewers
+  $ dub config reviewers alice,@org/backend    Set default reviewers
+  $ dub config reviewers --clear               Remove all repo-default reviewers
+
+See also:
+  dub submit --reviewers, dub submit --no-reviewers`,
+      )
       .action(
         async (list: string | undefined, options: { clear?: boolean }) => {
           const { configReviewers } = await import('./commands/config');
@@ -2280,6 +2749,17 @@ program
         'Set to json/sqlite (omit to inspect current value)',
       )
       .description('Manage the repo-local state storage backend')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config storage-backend         Show the current backend
+  $ dub config storage-backend json    Switch to the JSON backend (default)
+  $ dub config storage-backend sqlite  Switch to the SQLite backend
+
+See also:
+  dub migrate storage`,
+      )
       .action(async (backend?: string) => {
         const { configStorageBackend } = await import('./commands/config');
         const result = await configStorageBackend(process.cwd(), backend);
@@ -2311,6 +2791,17 @@ program
         'Set to auto/draft/publish (omit to inspect current value)',
       )
       .description('Manage the repo-local submit PR lifecycle default')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config submit-default auto      Auto-pick draft when CI workflows exist
+  $ dub config submit-default draft     Open new PRs as drafts by default
+  $ dub config submit-default publish   Promote existing draft PRs by default
+
+See also:
+  dub submit --draft, dub submit --publish`,
+      )
       .action(async (mode?: string) => {
         const { configSubmitDefault } = await import('./commands/config');
         const result = await configSubmitDefault(process.cwd(), mode);
@@ -2334,6 +2825,46 @@ program
       }),
   )
   .addCommand(
+    new Command('theme')
+      .argument(
+        '[mode]',
+        'Set to auto/dark/light/none (omit to inspect current value)',
+      )
+      .description(
+        'Manage the terminal color theme used in log, status, and sync output',
+      )
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config theme              Show the configured theme
+  $ dub config theme auto         Auto-detect light/dark from COLORFGBG (default)
+  $ dub config theme dark         Pin to a dark-background palette
+  $ dub config theme light        Pin to a light-background palette
+  $ dub config theme none         Disable colors (equivalent to --no-color)
+
+See also:
+  dub log, dub status, dub sync`,
+      )
+      .action(async (mode?: string) => {
+        const { configTheme } = await import('./commands/config');
+        const result = await configTheme(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(`Theme is '${result.theme}' for this repository.`),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(chalk.green(`✔ Theme set to '${result.theme}'`));
+        } else {
+          console.log(chalk.yellow(`⚠ Theme is already '${result.theme}'`));
+        }
+      }),
+  )
+  .addCommand(
     new Command('ai-model')
       .argument('[model]', 'Set repo-local model override (omit to inspect)')
       .requiredOption(
@@ -2342,6 +2873,17 @@ program
       )
       .option('--clear', 'Clear the repo-local model override')
       .description('Manage repo-local AI model overrides by provider')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub config ai-model --provider anthropic claude-sonnet-4-7
+  $ dub config ai-model --provider gemini gemini-2.5-pro
+  $ dub config ai-model --provider openai --clear
+
+See also:
+  dub config ai-provider, dub ai env, dub ai setup`,
+      )
       .action(
         async (
           model: string | undefined,
@@ -2395,6 +2937,16 @@ program
 program
   .command('migrate')
   .description('Migrate DubStack repo-local data between storage formats')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub migrate storage --to sqlite    Move state.json into state.sqlite
+  $ dub migrate storage --to json      Move state.sqlite back to state.json
+
+See also:
+  dub config storage-backend`,
+  )
   .addCommand(
     new Command('storage')
       .requiredOption('--to <backend>', 'Storage backend: json or sqlite')
@@ -2404,7 +2956,10 @@ program
         `
 Examples:
   $ dub migrate storage --to sqlite    Copy state.json into state.sqlite and opt in
-  $ dub migrate storage --to json      Copy state.sqlite back to state.json`,
+  $ dub migrate storage --to json      Copy state.sqlite back to state.json
+
+See also:
+  dub config storage-backend, dub init`,
       )
       .action(async (options: { to: string }) => {
         const result = await migrateStorage(process.cwd(), options.to);
@@ -2431,9 +2986,30 @@ program
   .description(
     'Use DubStack AI assistant utilities (or shortcut with: dub PROMPT)',
   )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub ai setup                       Interactive provider + model setup
+  $ dub ai ask "summarize this stack"  Ask the assistant a question
+  $ dub ai env --anthropic-key sk-...  Write Anthropic env exports
+  $ dub ai resolve                     Resolve in-progress conflicts via AI
+
+See also:
+  dub config ai-assistant, dub flow`,
+  )
   .addCommand(
     new Command('setup')
       .description('Guided setup for DubStack AI providers and model defaults')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub ai setup    Interactively pick a provider and write env exports
+
+See also:
+  dub ai env, dub config ai-provider, dub config ai-model`,
+      )
       .action(async () => {
         const { aiSetup } = await import('./commands/ai-setup');
         const result = await aiSetup(process.cwd());
@@ -2463,6 +3039,17 @@ program
     new Command('ask')
       .argument('<prompt...>', 'Prompt text to send to the AI assistant')
       .description('Ask DubStack AI assistant a question (explicit mode)')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub ai ask "what changed in this stack?"
+  $ dub ai ask "draft a PR description for this branch"
+  $ dub ai ask "is this stack ready to land?"
+
+See also:
+  dub ai resolve, dub ai setup, dub flow`,
+      )
       .action(async (promptParts: string[]) => {
         const { askAi } = await import('./commands/ai');
         if (!invocationMetadata.invocationMode) {
@@ -2498,6 +3085,17 @@ program
       .option(
         '--shell <shell>',
         'Shell name used for profile detection (zsh or bash)',
+      )
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub ai env --anthropic-key sk-...
+  $ dub ai env --gemini-key ... --gemini-model gemini-2.5-pro
+  $ dub ai env --ollama-base-url http://localhost:11434 --ollama-model qwen2.5-coder
+
+See also:
+  dub ai setup, dub config ai-provider`,
       )
       .action(
         async (options: {
@@ -2560,6 +3158,17 @@ program
         'Resolve conflicts with two configured AI providers',
       )
       .option('--no-adjudicate', 'Use one configured AI provider')
+      .addHelpText(
+        'after',
+        `
+Examples:
+  $ dub ai resolve              Resolve in-progress rebase/restack conflicts
+  $ dub ai resolve --dry-run    Show proposed resolutions without applying
+  $ dub ai resolve --adjudicate Pit two providers against each other
+
+See also:
+  dub continue --ai, dub abort, dub restack`,
+      )
       .action(
         async (options: {
           dryRun?: boolean;
@@ -2585,6 +3194,17 @@ program
     parsePositiveInt,
   )
   .option('--json', 'Output history as JSON')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub history             Show the 20 most recent dub commands
+  $ dub history -n 50       Show the last 50 entries
+  $ dub history --json      Emit JSON (for downstream tooling)
+
+See also:
+  dub status, dub doctor`,
+  )
   .action(async (options: { limit?: number; json?: boolean }) => {
     if (options.json) activateJsonMode();
     const { formatHistory, history } = await import('./commands/history');
@@ -2604,6 +3224,15 @@ program
   .command('mcp')
   .description(
     'Start the DubStack MCP server over stdio (mutating tools gated by `dub config mcp-mode`)',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub mcp    Speak Model Context Protocol over stdio (used by AI agents)
+
+See also:
+  dub config mcp-mode`,
   )
   .action(async () => {
     await mcp(process.cwd(), { version });
@@ -2639,6 +3268,18 @@ program
   // .option("--into <branch>", "Amend staged changes to the specified branch") // TODO: Implement --into
   // .option("--reset-author", "Set the author to the current user") // TODO: Implement --reset-author
   // .option("-v, --verbose", "Show unified diff") // TODO: Implement verbose
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub modify -a                       Amend HEAD with all working-tree changes
+  $ dub modify -c -a -m "feat: foo"     Add a new commit (stage all) on this branch
+  $ dub modify -p                       Pick hunks to amend with
+  $ dub modify --interactive-rebase     Interactively rebase the branch commits
+
+See also:
+  dub create, dub squash, dub split, dub absorb`,
+  )
   .action(async (options) => {
     const { modify } = await import('./commands/modify');
     const normalizedOptions = {
@@ -2667,7 +3308,10 @@ program
 Examples:
   $ dub squash                          Squash and concatenate original messages
   $ dub squash -m "feat: rewrite api"   Squash with a custom commit message
-  $ dub squash --ai                     Squash with an AI-generated summary`,
+  $ dub squash --ai                     Squash with an AI-generated summary
+
+See also:
+  dub fold, dub modify, dub absorb`,
   )
   .action(async (options: { message?: string; ai?: boolean }) => {
     const result = await squash(process.cwd(), {
@@ -2757,7 +3401,10 @@ PR handling:
     linking to the new branches.
 
 After the split, 'dub restack' runs automatically so any descendants follow
-the source branch's new tip. Pass '--no-restack' to skip that step.`,
+the source branch's new tip. Pass '--no-restack' to skip that step.
+
+See also:
+  dub reorder, dub modify, dub absorb, dub move`,
   )
   .action(runSplit);
 
@@ -2777,7 +3424,10 @@ program
 Examples:
   $ dub pop                Pop last commit into staged changes
   $ dub pop --steps 3      Squash last 3 commits into staged changes
-  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)`,
+  $ dub pop && dub m -a -m "..."   Pop, edit, re-commit (descendants restack lazily)
+
+See also:
+  dub modify, dub split, dub undo`,
   )
   .action(async (options: { steps?: number }) => {
     const result = await pop(process.cwd(), { steps: options.steps });
@@ -2803,7 +3453,10 @@ program
     'after',
     `
 Examples:
-  $ dub reorder    Open the picker for the current branch's commits`,
+  $ dub reorder    Open the picker for the current branch's commits
+
+See also:
+  dub modify, dub split, dub move`,
   )
   .action(async () => {
     const result = await reorder(process.cwd());
@@ -2873,6 +3526,17 @@ program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub pr                       Open the PR for the current branch
+  $ dub pr feat/auth-login       Open the PR for a specific branch
+  $ dub pr 123                   Open PR #123 in the GitHub UI
+
+See also:
+  dub submit, dub repo, dub status`,
+  )
   .action(async (branch?: string) => {
     await pr(process.cwd(), branch);
   });
@@ -2892,7 +3556,10 @@ Examples:
   $ dub freeze                       Freeze the current branch
   $ dub freeze feat/auth-login       Freeze a specific tracked branch
   $ dub freeze feat/auth-login --downstack   Freeze the branch and its ancestors
-  $ dub freeze --upstack             Freeze the current branch and its descendants`,
+  $ dub freeze --upstack             Freeze the current branch and its descendants
+
+See also:
+  dub unfreeze, dub restack`,
   )
   .action(
     async (
@@ -2917,7 +3584,10 @@ program
     `
 Examples:
   $ dub unfreeze                     Unfreeze the current branch
-  $ dub unfreeze feat/auth-login --upstack    Unfreeze a branch and its descendants`,
+  $ dub unfreeze feat/auth-login --upstack    Unfreeze a branch and its descendants
+
+See also:
+  dub freeze, dub restack`,
   )
   .action(
     async (
@@ -2943,7 +3613,10 @@ program
 Examples:
   $ dub rename feat/new-name              Rename the current tracked branch
   $ dub rename feat/old feat/new          Rename a specific tracked branch
-  $ dub rename --no-push feat/new-name    Rename without pushing the renamed branch`,
+  $ dub rename --no-push feat/new-name    Rename without pushing the renamed branch
+
+See also:
+  dub track, dub submit, dub pr`,
   )
   .action(
     async (
@@ -3000,7 +3673,10 @@ Examples:
   $ dub revert 123                       Revert merged PR #123 onto trunk
   $ dub revert abc1234                   Revert commit abc1234 onto trunk
   $ dub revert 123 --submit              Revert + push + open a PR
-  $ dub revert 123 -b revert/api-rollback  Use a custom branch name`,
+  $ dub revert 123 -b revert/api-rollback  Use a custom branch name
+
+See also:
+  dub submit, dub merge-next, dub log`,
   )
   .action(
     async (
@@ -3056,7 +3732,10 @@ Examples:
   $ dub stash pop                            Pop most recent (same branch only)
   $ dub stash pop --on feat/other            Checkout feat/other, then pop
   $ dub stash pop --force                    Pop onto current branch regardless
-  $ dub stash list                           Show recorded stashes with branch context`,
+  $ dub stash list                           Show recorded stashes with branch context
+
+See also:
+  dub stash pop, dub stash list, git stash`,
   )
   .action(async (options: { message?: string; list?: boolean }) => {
     if (options.list) {
@@ -3091,7 +3770,10 @@ stashCommand.addCommand(
 Examples:
   $ dub stash pop                            Pop most recent (same branch only)
   $ dub stash pop --on feat/other            Checkout feat/other, then pop
-  $ dub stash pop --force                    Pop onto current branch regardless`,
+  $ dub stash pop --force                    Pop onto current branch regardless
+
+See also:
+  dub stash, dub stash list`,
     )
     .action(async (options: { on?: string; force?: boolean }) => {
       const result = await stashPop(process.cwd(), {
@@ -3113,6 +3795,15 @@ Examples:
 stashCommand.addCommand(
   new Command('list')
     .description('Show recorded dub stashes with branch context')
+    .addHelpText(
+      'after',
+      `
+Examples:
+  $ dub stash list    Show recorded dub stashes with branch context
+
+See also:
+  dub stash, dub stash pop`,
+    )
     .action(runStashList),
 );
 
@@ -3671,6 +4362,10 @@ async function main() {
     historyArgsForCapture = rawArgs;
     const knownCommands = collectKnownTopLevelCommands(program.commands);
     const config = await readConfig(process.cwd()).catch(() => null);
+    const noColor =
+      rawArgs.includes('--no-color') || process.env.NO_COLOR != null;
+    const resolvedTheme = resolveTheme(config?.theme ?? 'auto', { noColor });
+    applyTheme(resolvedTheme);
     const shortcutEnabled = config?.ai.shortcutFallback.enabled ?? true;
     const preprocessed =
       shortcutEnabled || rawArgs[0] === '--ai'
@@ -3923,4 +4618,23 @@ function _normalizeHistoryLine(line: string): string {
   return visible.trim().length === 0 ? '' : visible;
 }
 
-main();
+export { program };
+
+// Only auto-run when this file is the entrypoint — when vitest (or any other
+// harness) imports it for introspection we leave the program constructed but
+// dormant. Compare via `realpathSync` so the published bin works: pnpm/npm
+// installs `node_modules/.bin/dub` as a symlink to `dubstack/dist/index.js`,
+// and `import.meta.url` always resolves through the symlink.
+function isCliEntrypoint(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntrypoint()) {
+  main();
+}

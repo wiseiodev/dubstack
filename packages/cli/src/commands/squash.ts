@@ -1,10 +1,14 @@
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
+import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
+import type { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type {
+  fromIni,
+  fromNodeProviderChain,
+} from '@aws-sdk/credential-providers';
+import type { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import { resolveAiProvider } from '../lib/ai-provider';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
@@ -55,18 +59,6 @@ interface SquashDependencies {
   fromNodeProviderChain?: typeof fromNodeProviderChain;
 }
 
-const DEFAULT_DEPS: SquashDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
-
 /**
  * Collapses every commit on the current branch (since its tracked parent) into
  * a single commit.
@@ -86,7 +78,7 @@ const DEFAULT_DEPS: SquashDependencies = {
 export async function squash(
   cwd: string,
   options: SquashOptions = {},
-  deps: SquashDependencies = DEFAULT_DEPS,
+  depsArg?: SquashDependencies,
 ): Promise<SquashResult> {
   if (options.ai && options.message) {
     throw new DubError("'--ai' cannot be combined with '-m'.", [
@@ -141,6 +133,7 @@ export async function squash(
         `Rerun 'dub squash -m "<message>"' without '--ai'.`,
       ]);
     }
+    const deps = depsArg ?? (await loadAiDeps());
     message = await generateAiSquashMessage(
       { branch, originalMessages },
       deps,

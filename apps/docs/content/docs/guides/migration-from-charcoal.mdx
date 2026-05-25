@@ -1,0 +1,101 @@
+---
+title: Migrating from Charcoal
+description: Map Charcoal (`gt`) commands to DubStack equivalents and migrate an active stack in under 30 minutes.
+---
+
+[Charcoal](https://github.com/danerwilliams/charcoal) is the community-maintained fork of Graphite's CLI that ships under the same `gt` binary. If you have `gt` muscle memory, this guide is the fast path to DubStack — the mental model is identical, and most command names map one-to-one.
+
+If you are migrating from Graphite proper (the SaaS-backed `gt`), the [Graphite migration guide](/docs/guides/migration-from-graphite) covers the same surface plus the cloud-features wind-down.
+
+## Command Mapping
+
+| Charcoal | DubStack | Notes |
+|---|---|---|
+| `gt create` / `gt c` | `dub create` | Same flags: `-a`, `-m`, `--ai` |
+| `gt modify` / `gt m` | `dub modify` / `dub m` | Amend HEAD and restack descendants |
+| `gt submit` / `gt s` | `dub submit` / `dub ss` | Defaults to downstack; pass `--stack` for the full tree |
+| `gt sync` | `dub sync` | `--all` covers every tracked stack |
+| `gt checkout` / `gt co` | `dub checkout` / `dub co` | Interactive picker with no argument |
+| `gt log` / `gt ls` | `dub log` / `dub ls` | `--stack`, `--all`, `--json` |
+| `gt up` / `gt down` | `dub up` / `dub down` | Identical |
+| `gt top` / `gt bottom` | `dub top` / `dub bottom` | Identical |
+| `gt info` | `dub info` | `--json` available |
+| `gt pr` | `dub pr` | Opens GitHub PR for the current branch |
+| `gt restack` | `dub restack` | Run after `git rebase` to fix up children |
+| `gt continue` | `dub continue` | `--ai` to resolve conflicts via LLM |
+| `gt abort` | `dub abort` | Restack/rebase rollback |
+| `gt track` / `gt trunk` | `dub track` / `dub trunk` | Multi-trunk supported |
+| `gt untrack` | `dub untrack` | Keep the branch, drop metadata |
+| `gt delete` | `dub delete` | `--upstack`/`--downstack`/`--force` |
+| `gt absorb` | `dub absorb` | `--ai` for ambiguous fixups |
+| `gt fold` | `dub fold` | `--squash` for single-commit collapse |
+| `gt undo` | `dub undo` | 20-entry ring buffer + `dub redo` |
+
+Charcoal inherits Graphite's CLI surface, so anything in the [Graphite mapping](/docs/guides/migration-from-graphite#command-mapping) that is not listed above maps the same way to DubStack.
+
+## Conceptual Differences
+
+- **Local-first by design.** DubStack stores everything in `.git/dubstack/`. No external service, no telemetry, no shared cache file.
+- **State mirrored into git refs.** `refs/dubstack/*` lets you rebuild state on a fresh clone with `dub init --restore-from-refs`. Charcoal relies on its own cache files and is sensitive to manual file deletion.
+- **Optional AI throughout.** `dub create --ai`, `dub submit --ai`, `dub flow`, `dub absorb --ai`. Configured per-repo with `dub config ai-provider` and friends; none of it is required to use the stacked-diff workflow.
+- **Safe merge order.** `dub merge-next` (alias `dub land`) refuses to merge a PR whose ancestors are open and retargets every child PR atomically.
+- **Multi-trunk support.** Register additional trunks with `dub trunk add` and `dub trunk set-default`.
+- **GitHub Action for retargeting.** `dub install retarget-action` drops a workflow that retargets dependents when a stack PR merges through the GitHub UI.
+
+## Common Pitfalls
+
+- **`gt submit` defaulted to the full stack; `dub submit` defaults to downstack.** Pass `--stack` explicitly in CI scripts.
+- **Charcoal's local config is not migrated.** Re-run `dub config ai-provider`, `dub config reviewers`, and `dub config submit-default`.
+- **`gt downstack edit` has no direct equivalent.** Use `dub reorder` for interactive reordering or `dub move --before/--after` for one-shot moves.
+- **`gt sync --pull` is implicit.** `dub sync` fetches the trunk by default; pass `--fresh` to force a full refetch.
+
+## 30-Minute Migration Script
+
+```bash
+# 1. Install DubStack
+npm install -g dubstack
+
+# 2. Initialize alongside Charcoal — non-destructive
+cd path/to/repo
+dub init
+
+# 3. Adopt every Charcoal branch. DubStack walks ancestry to infer parents.
+for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
+  if [ "$branch" != "main" ]; then
+    git switch "$branch"
+    dub track --no-interactive || true
+  fi
+done
+
+# 4. Verify the tree matches what Charcoal showed
+dub log --all
+
+# 5. (Optional) restore AI configuration
+dub config ai-assistant on
+dub config ai-provider anthropic
+dub config ai-model --provider anthropic claude-sonnet-4-7
+
+# 6. (Optional) reviewers
+dub config reviewers alice,@org/backend
+
+# 7. Restack to confirm the chain is intact
+dub restack
+
+# 8. Refresh PR descriptions with DubStack metadata
+dub submit --downstack --no-ai
+
+# 9. Once stable, remove Charcoal. (The exact uninstall depends on how you
+#    installed it — Homebrew tap, source build, or volta-managed npm bin.)
+#    Then remove the per-repo cache. Charcoal inherits Graphite's file names:
+rm -rf .graphite_cache_persist .graphite_repo_config 2>/dev/null || true
+# (If your Charcoal fork renamed these, check the fork's docs for its actual
+#  cache path before deleting.)
+```
+
+If `dub log --all` differs from `gt log`, run `dub doctor` to diagnose. State is recoverable via `dub init --restore-from-refs`.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [GitHub Action: retarget](/docs/guides/github-action-retarget)
