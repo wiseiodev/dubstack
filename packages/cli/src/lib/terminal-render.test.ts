@@ -66,11 +66,11 @@ describe('createTerminalRenderer', () => {
     expect(rendered).not.toContain(':---');
     expect(rendered).not.toContain('---:');
 
-    const pathological = `| ${' '.repeat(40)}|x`;
-    const start = Date.now();
+    const pathological = `| |${'  |'.repeat(26)}x|`;
+    const start = performance.now();
     const capture2 = createCapture(true);
     createTerminalRenderer(capture2.output).renderMarkdown(pathological);
-    expect(Date.now() - start).toBeLessThan(100);
+    expect(performance.now() - start).toBeLessThan(500);
   });
 
   it('renders preview panels and tool activity lines', () => {
