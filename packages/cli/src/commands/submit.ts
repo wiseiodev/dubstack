@@ -57,6 +57,7 @@ import {
   writeState,
 } from '../lib/state';
 import { withTempMarkdownFile } from '../lib/temp-text-file';
+import { saveUndoEntry } from '../lib/undo-log';
 import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 
 /** @deprecated Use SubmitScope. Retained for the v1 `--path` deprecation window. */
@@ -180,6 +181,7 @@ export async function submit(
   }
 
   const plan = await getSubmitPlan(cwd, options);
+  const undoStateSnapshot = structuredClone(plan.state);
   if (!dryRun) {
     await assertBranchesNotCheckedOutElsewhere(
       cwd,
@@ -383,6 +385,31 @@ export async function submit(
     }
 
     if (!dryRun) {
+      // Snapshot existing PR bodies BEFORE updating so `dub undo` can replay
+      // each one. Bodies for newly-created PRs (no prior body) are skipped.
+      // Save the undo entry BEFORE updateAllPrBodies runs so a partial
+      // failure mid-update still leaves a recoverable entry on the ring.
+      const undoPrBodies: Record<string, string> = {};
+      for (const branch of plan.branches) {
+        const pr = prMap.get(branch.name);
+        if (pr && typeof pr.body === 'string' && pr.body.length > 0) {
+          undoPrBodies[String(pr.number)] = pr.body;
+        }
+      }
+      await saveUndoEntry(
+        {
+          operation: 'submit',
+          timestamp: new Date().toISOString(),
+          previousBranch: plan.currentBranch,
+          previousState: undoStateSnapshot,
+          branchTips: {},
+          createdBranches: [],
+          prBodies: undoPrBodies,
+          summary: `submit ${plan.branches.length} branch(es)`,
+        },
+        cwd,
+      );
+
       await updateAllPrBodies(
         plan.branches,
         plan.stack.branches,

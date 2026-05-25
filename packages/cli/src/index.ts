@@ -54,6 +54,7 @@ import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
 import { type ReadyAiReviewResult, ready } from './commands/ready';
+import { redo } from './commands/redo';
 import { rename } from './commands/rename';
 import { reorder } from './commands/reorder';
 import { repo } from './commands/repo';
@@ -75,7 +76,7 @@ import {
   setDefaultTrunk,
   trunk,
 } from './commands/trunk';
-import { undo } from './commands/undo';
+import { clearUndo, listUndo, undo } from './commands/undo';
 import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
@@ -1322,17 +1323,78 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, restack, rename, move, pop, reorder, freeze, unfreeze, absorb, or unlink operation',
+    'Undo recent dub operations from the 20-entry ring buffer (create, restack, rename, move, pop, reorder, freeze, unfreeze, absorb, unlink, track, untrack, delete, modify, sync, split, submit)',
+  )
+  .option(
+    '-n, --steps <count>',
+    'Number of recent operations to undo in sequence (default 1)',
+    parsePositiveInt,
+  )
+  .option('--list', 'List the undo ring buffer (newest last) without undoing')
+  .option('--clear', 'Wipe both the undo and redo ring buffers')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub undo                  Roll back the last dub operation
+  $ dub undo --steps 3        Roll back the last three operations
+  $ dub undo --list           Show recent undoable operations with timestamps
+  $ dub undo --clear          Wipe both the undo and redo logs`,
+  )
+  .action(
+    async (options: { steps?: number; list?: boolean; clear?: boolean }) => {
+      if (options.list) {
+        const entries = await listUndo(process.cwd());
+        if (entries.length === 0) {
+          console.log(chalk.dim('(undo log is empty)'));
+          return;
+        }
+        // Newest first for human consumption.
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i];
+          const index = entries.length - i;
+          const stamp = entry.timestamp;
+          const branchInfo = entry.previousBranch
+            ? ` on '${entry.previousBranch}'`
+            : '';
+          const summary = entry.summary ?? '';
+          const tail = summary ? ` — ${summary}` : '';
+          console.log(
+            `${index}. ${chalk.bold(entry.operation)}${branchInfo} ${chalk.dim(`(${stamp})`)}${tail}`,
+          );
+        }
+        return;
+      }
+      if (options.clear) {
+        await clearUndo(process.cwd());
+        console.log(chalk.green('✔ Cleared undo and redo logs.'));
+        return;
+      }
+      const result = await undo(process.cwd(), { steps: options.steps });
+      console.log(chalk.green(`✔ Undid '${result.undone}': ${result.details}`));
+      for (const warning of result.warnings ?? []) {
+        console.log(chalk.yellow(`⚠ ${warning}`));
+      }
+    },
+  );
+
+program
+  .command('redo')
+  .description(
+    'Redo the most recently undone operation by replaying its captured post-state',
   )
   .addHelpText(
     'after',
     `
 Examples:
-  $ dub undo    Roll back the last dub operation`,
+  $ dub redo    Re-apply the most recently undone operation`,
   )
   .action(async () => {
-    const result = await undo(process.cwd());
-    console.log(chalk.green(`✔ Undid '${result.undone}': ${result.details}`));
+    const result = await redo(process.cwd());
+    console.log(chalk.green(`✔ Redid '${result.redone}': ${result.details}`));
+    for (const warning of result.warnings ?? []) {
+      console.log(chalk.yellow(`⚠ ${warning}`));
+    }
   });
 
 program

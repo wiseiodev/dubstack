@@ -2,6 +2,8 @@ import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
 import { DubError } from '../lib/errors';
 import { getCurrentBranch } from '../lib/git';
+import { readState } from '../lib/state';
+import { saveUndoEntry } from '../lib/undo-log';
 import {
   getUntrackContext,
   type UntrackResult,
@@ -53,5 +55,22 @@ export async function untrack(
     downstack = await confirmDownstack(branch, context.descendants);
   }
 
-  return untrackBranch(cwd, { branch, downstack });
+  const previousState = await readState(cwd).catch(() => null);
+  const currentBranch = await getCurrentBranch(cwd).catch(() => branch);
+  const result = await untrackBranch(cwd, { branch, downstack });
+  if (previousState && result.removed.length > 0) {
+    await saveUndoEntry(
+      {
+        operation: 'untrack',
+        timestamp: new Date().toISOString(),
+        previousBranch: currentBranch,
+        previousState: structuredClone(previousState),
+        branchTips: {},
+        createdBranches: [],
+        summary: `untrack ${result.removed.join(', ')}`,
+      },
+      cwd,
+    );
+  }
+  return result;
 }
