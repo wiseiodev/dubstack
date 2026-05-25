@@ -11,7 +11,9 @@ DUB-82 changes TypeScript CLI behavior for `dub restack`, `dub sync`, and `dub p
 
 - Restack skips frozen branches and cascades frozen ancestry to descendants.
 - Sync returns a `frozen-skipped` branch outcome and does not let `--force` mutate a frozen branch.
+- Sync short-circuits frozen branches before remote/local SHA lookups, ancestry checks, and PR sync lookups.
 - Post-merge surfaces frozen merged branches as skipped and leaves state/children intact.
+- Numeric-hex `dub revert` targets keep commit-not-found guidance when the fallback PR lookup is also missing.
 - Existing formatting, typecheck, and full unit/integration test gates pass.
 
 ## Evidence
@@ -19,10 +21,10 @@ DUB-82 changes TypeScript CLI behavior for `dub restack`, `dub sync`, and `dub p
 - `pnpm --filter dubstack exec vitest run src/commands/restack.test.ts` passed: 20 tests.
 - `pnpm --filter dubstack exec vitest run src/commands/sync.test.ts` passed: 56 tests.
 - `pnpm --filter dubstack exec vitest run src/commands/post-merge.test.ts` passed: 14 tests.
-- `pnpm --filter dubstack exec vitest run src/commands/revert.test.ts` passed: 22 tests.
+- `pnpm --filter dubstack exec vitest run src/commands/revert.test.ts` passed: 23 tests.
 - `pnpm checks` passed.
 - `pnpm typecheck` passed.
-- `pnpm test` passed: 121 files / 1231 tests.
+- `pnpm test` passed: 121 files / 1232 tests.
 
 ## Follow-up flag
 

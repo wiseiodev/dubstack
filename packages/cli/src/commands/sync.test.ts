@@ -540,11 +540,6 @@ describe('sync', () => {
         { name: 'feat/a', parent: 'main', frozen: true },
       ]),
     );
-    mockGetRefSha
-      .mockResolvedValueOnce('local-a')
-      .mockResolvedValueOnce('remote-a');
-    mockIsAncestor.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
-
     const result = await sync('/repo', {
       interactive: false,
       force: true,
@@ -563,9 +558,11 @@ describe('sync', () => {
       'origin/feat/a',
       '/repo',
     );
+    expect(mockRemoteBranchExists).not.toHaveBeenCalledWith('feat/a', '/repo');
+    expect(mockGetRefSha).not.toHaveBeenCalledWith('feat/a', '/repo');
   });
 
-  it('refetches recently-synced frozen branches instead of treating them as fresh cache hits', async () => {
+  it('short-circuits recently-synced frozen branches instead of treating them as fresh cache hits', async () => {
     const state = makeState([
       { name: 'main', parent: null, type: 'root' },
       { name: 'feat/a', parent: 'main', frozen: true },
@@ -578,7 +575,7 @@ describe('sync', () => {
     const result = await sync('/repo', { interactive: false, restack: false });
 
     expect(mockFetchBranches).toHaveBeenCalledWith(
-      ['main', 'feat/a'],
+      ['main'],
       '/repo',
       'origin',
       expect.objectContaining({ onBranchStart: expect.any(Function) }),

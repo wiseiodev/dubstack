@@ -531,16 +531,16 @@ export async function sync(
       fresh: options.fresh,
       now: Date.now(),
     });
-    const frozenFreshBranches = partition.canSkip.filter((branch) =>
-      frozenBranches.has(branch),
-    );
     const freshSkipped = new Set(
       partition.canSkip.filter((branch) => !frozenBranches.has(branch)),
     );
 
     console.log('🌲 Fetching branches from remote...');
     const toFetch = [
-      ...new Set([...roots, ...partition.mustFetch, ...frozenFreshBranches]),
+      ...new Set([
+        ...roots,
+        ...partition.mustFetch.filter((branch) => !frozenBranches.has(branch)),
+      ]),
     ];
     if (toFetch.length > 0) {
       progress.start('🌲 Fetching branches', toFetch.length);
@@ -777,6 +777,20 @@ export async function sync(
         continue;
       if (recordWorktreeSkip(branch)) continue;
 
+      if (frozenBranches.has(branch)) {
+        const outcome: BranchSyncOutcome = {
+          branch,
+          status: 'frozen-skipped',
+          action: 'skipped',
+          message: `🔒 Skipped '${branch}' (frozen). Run \`dub unfreeze ${branch}\` to allow sync reconciliation.`,
+          reconcileSource: 'sync-skip',
+        };
+        result.branches.push(outcome);
+        printBranchOutcome(outcome);
+        recordSource(result.reconcileSources, 'sync-skip');
+        continue;
+      }
+
       if (freshSkipped.has(branch)) {
         // `pruneRemote` ran just above, so a branch deleted upstream since
         // the last sync may have lost its `origin/<branch>` ref. Fall through
@@ -872,20 +886,6 @@ export async function sync(
           remoteParentDiffers
         ) {
           status = 'needs-remote-sync';
-        }
-
-        if (frozenBranches.has(branch)) {
-          outcome = {
-            branch,
-            status: 'frozen-skipped',
-            action: 'skipped',
-            message: `🔒 Skipped '${branch}' (frozen). Run \`dub unfreeze ${branch}\` to allow sync reconciliation.`,
-            reconcileSource: 'sync-skip',
-          };
-          result.branches.push(outcome);
-          printBranchOutcome(outcome);
-          recordSource(result.reconcileSources, 'sync-skip');
-          continue;
         }
 
         if (status === 'missing-remote') {
