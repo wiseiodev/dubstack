@@ -1,6 +1,7 @@
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 import { readJsonState, writeJsonState } from '../lib/state';
+import { withStateLock } from '../lib/state-lock';
 import { readSQLiteState, writeSQLiteState } from '../lib/state-sqlite';
 
 export type StorageMigrationTarget = 'json' | 'sqlite';
@@ -14,6 +15,13 @@ export interface StorageMigrationResult {
 }
 
 export async function migrateStorage(
+  cwd: string,
+  to: string,
+): Promise<StorageMigrationResult> {
+  return withStateLock(cwd, async () => migrateStorageLocked(cwd, to));
+}
+
+async function migrateStorageLocked(
   cwd: string,
   to: string,
 ): Promise<StorageMigrationResult> {

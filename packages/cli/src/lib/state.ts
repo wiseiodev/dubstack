@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
+import { withStateLock } from './state-lock';
 import {
   initSQLiteState,
   readSQLiteState,
@@ -144,15 +145,24 @@ export async function readJsonState(cwd: string): Promise<DubState> {
  * Creates the parent directory if it doesn't exist.
  */
 export async function writeState(state: DubState, cwd: string): Promise<void> {
-  const backend = await readConfiguredStorageBackend(cwd);
-  if (backend === 'sqlite') {
-    await writeSQLiteState(state, cwd);
-    return;
-  }
-  await writeJsonState(state, cwd);
+  await withStateLock(cwd, async () => {
+    const backend = await readConfiguredStorageBackend(cwd);
+    if (backend === 'sqlite') {
+      await writeSQLiteState(state, cwd);
+      return;
+    }
+    await writeJsonStateUnlocked(state, cwd);
+  });
 }
 
 export async function writeJsonState(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  await withStateLock(cwd, async () => writeJsonStateUnlocked(state, cwd));
+}
+
+async function writeJsonStateUnlocked(
   state: DubState,
   cwd: string,
 ): Promise<void> {
@@ -188,26 +198,28 @@ export async function writeJsonState(
 export async function initState(
   cwd: string,
 ): Promise<'created' | 'already_exists'> {
-  const backend = await readConfiguredStorageBackend(cwd);
-  if (backend === 'sqlite') {
-    if (await sqliteStateExists(cwd)) {
+  return withStateLock(cwd, async () => {
+    const backend = await readConfiguredStorageBackend(cwd);
+    if (backend === 'sqlite') {
+      if (await sqliteStateExists(cwd)) {
+        return 'already_exists';
+      }
+      await initSQLiteState(cwd);
+      return 'created';
+    }
+
+    const statePath = await getStatePath(cwd);
+    const dir = path.dirname(statePath);
+
+    if (fs.existsSync(statePath)) {
       return 'already_exists';
     }
-    await initSQLiteState(cwd);
+
+    fs.mkdirSync(dir, { recursive: true });
+    const emptyState: DubState = { stacks: [] };
+    fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
     return 'created';
-  }
-
-  const statePath = await getStatePath(cwd);
-  const dir = path.dirname(statePath);
-
-  if (fs.existsSync(statePath)) {
-    return 'already_exists';
-  }
-
-  fs.mkdirSync(dir, { recursive: true });
-  const emptyState: DubState = { stacks: [] };
-  fs.writeFileSync(statePath, `${JSON.stringify(emptyState, null, 2)}\n`);
-  return 'created';
+  });
 }
 
 export async function readConfiguredStorageBackend(

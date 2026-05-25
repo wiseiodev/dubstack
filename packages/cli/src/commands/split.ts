@@ -60,6 +60,7 @@ import {
   readState,
   writeState,
 } from '../lib/state';
+import { assertBranchesNotCheckedOutElsewhere } from '../lib/worktree-guards';
 import { restack } from './restack';
 
 export type SplitMode = 'by-commit' | 'by-file' | 'by-hunk' | 'ai';
@@ -191,6 +192,7 @@ export async function split(
     ]);
   }
   const parentBranch = sourceMeta.parent;
+  await assertBranchesNotCheckedOutElsewhere(cwd, [sourceBranch], 'dub split');
   const parentTip = await getBranchTip(parentBranch, cwd);
   const sourceTipBefore = await getBranchTip(sourceBranch, cwd);
   const existingPrNumber = sourceMeta.pr_number ?? null;

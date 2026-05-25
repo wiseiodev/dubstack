@@ -9,6 +9,7 @@ vi.mock('../lib/git.js', async () => {
     getBranchTip: vi.fn(),
     getCurrentBranch: vi.fn(),
     isWorkingTreeClean: vi.fn(),
+    listWorktreeCheckouts: vi.fn(),
   };
 });
 
@@ -52,6 +53,7 @@ import {
   getBranchTip,
   getCurrentBranch,
   isWorkingTreeClean,
+  listWorktreeCheckouts,
 } from '../lib/git';
 import {
   checkGhAuth,
@@ -88,6 +90,7 @@ function makeState(specs: BranchSpec[]): DubState {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
+  vi.mocked(listWorktreeCheckouts).mockResolvedValue(new Map());
   vi.mocked(branchExists).mockResolvedValue(true);
   vi.mocked(getCurrentBranch).mockResolvedValue('main');
   vi.mocked(getBranchTip).mockImplementation(async (name) => `sha:${name}`);

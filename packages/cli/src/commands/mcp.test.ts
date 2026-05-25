@@ -1,4 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +11,7 @@ import { writeConfig } from '../lib/config';
 import { getCurrentBranch } from '../lib/git';
 import { readHistory } from '../lib/history';
 import { type DubState, initState, writeState } from '../lib/state';
+import { getStateLockPath } from '../lib/state-lock';
 import { configMcpMode } from './config';
 import { type ConfirmMutatingFn, mcp } from './mcp';
 
@@ -412,6 +415,68 @@ describe('mcp mutating tools', () => {
     expect(result.structuredContent.result.branch).toBe('main');
     expect(confirm).not.toHaveBeenCalled();
     expect(await getCurrentBranch(dir)).toBe('main');
+  });
+
+  it('reclaims a stale state lock before running a mutating tool', async () => {
+    await gitInRepo(dir, ['checkout', '-b', 'feat/a']);
+    await gitInRepo(dir, ['commit', '--allow-empty', '-m', 'feat a']);
+    const state: DubState = {
+      stacks: [
+        {
+          id: 'stack-1',
+          branches: [
+            {
+              name: 'main',
+              type: 'root',
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+            {
+              name: 'feat/a',
+              parent: 'main',
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    };
+    await writeState(state, dir);
+    await configMcpMode(dir, 'trusted');
+
+    const lockPath = await getStateLockPath(dir);
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: 2_147_483_647,
+          startedAt: '2026-05-23T10:15:00.000Z',
+          command: 'mcp dubstack.create',
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const response = await runMcpCall(dir, vi.fn<ConfirmMutatingFn>(), {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'dubstack.checkout',
+        arguments: { branch: 'main' },
+      },
+    });
+
+    const result = response.result as {
+      isError?: boolean;
+      structuredContent: { result: { branch: string } };
+    };
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent.result.branch).toBe('main');
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it('runs dubstack.back in trusted mode without confirmation', async () => {

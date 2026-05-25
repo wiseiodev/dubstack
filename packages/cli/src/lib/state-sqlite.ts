@@ -5,6 +5,7 @@ import type BetterSqlite3 from 'better-sqlite3';
 import { DubError } from './errors';
 import { getRepoRoot } from './git';
 import type { Branch, DubState, LastSyncSummary, Stack } from './state';
+import { withStateLock } from './state-lock';
 
 const require = createRequire(import.meta.url);
 const SCHEMA_VERSION = 1;
@@ -87,6 +88,13 @@ export async function readSQLiteState(cwd: string): Promise<DubState> {
 }
 
 export async function writeSQLiteState(
+  state: DubState,
+  cwd: string,
+): Promise<void> {
+  await withStateLock(cwd, async () => writeSQLiteStateUnlocked(state, cwd));
+}
+
+async function writeSQLiteStateUnlocked(
   state: DubState,
   cwd: string,
 ): Promise<void> {
