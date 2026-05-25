@@ -32,15 +32,17 @@ export interface RedoResult {
  * those back.
  */
 export async function redo(cwd: string): Promise<RedoResult> {
-  const entry = await popRedoEntry(cwd);
-  if (!entry) {
+  // Peek the top redo entry without popping so a precondition failure
+  // (dirty tree, missing snapshot) doesn't strand the entry.
+  const top = await peekTopRedoEntry(cwd);
+  if (!top) {
     throw new DubError('Nothing to redo.', [
       "Run 'dub undo' first to populate the redo log.",
       'New mutating commands clear the redo stack — only undone operations can be redone.',
     ]);
   }
 
-  const snapshot = entry.postSnapshot;
+  const snapshot = top.postSnapshot;
   if (!snapshot) {
     throw new DubError('Redo entry is missing its post-snapshot.', [
       'Re-run the original command manually; this redo entry is malformed.',
@@ -49,14 +51,34 @@ export async function redo(cwd: string): Promise<RedoResult> {
   }
 
   if (!(await isWorkingTreeClean(cwd))) {
-    // Put the entry back so the user can retry after stashing.
-    await pushRedoEntryBack(entry, cwd);
     throw new DubError('Working tree has uncommitted changes.', [
       "Run 'git status' to see the uncommitted changes.",
       "Run 'git stash' to set the changes aside, then rerun 'dub redo'.",
     ]);
   }
 
+  // Pop now, then mirror undoOne: on apply failure, push the entry back so
+  // the user can retry after fixing the underlying problem.
+  const entry = await popRedoEntry(cwd);
+  if (!entry) {
+    // Concurrent runs raced; surface the same "nothing to redo" path.
+    throw new DubError('Nothing to redo.', [
+      "Run 'dub undo' first to populate the redo log.",
+    ]);
+  }
+  try {
+    return await applyRedo(cwd, entry, snapshot);
+  } catch (error) {
+    await pushRedoEntryBack(entry, cwd);
+    throw error;
+  }
+}
+
+async function applyRedo(
+  cwd: string,
+  entry: UndoEntry,
+  snapshot: NonNullable<UndoEntry['postSnapshot']>,
+): Promise<RedoResult> {
   const warnings: string[] = [];
   const currentBranch = await getCurrentBranch(cwd);
 
@@ -109,6 +131,12 @@ export async function redo(cwd: string): Promise<RedoResult> {
     ),
     warnings: warnings.length > 0 ? warnings : undefined,
   };
+}
+
+async function peekTopRedoEntry(cwd: string): Promise<UndoEntry | null> {
+  const { readRedoLog } = await import('../lib/undo-log');
+  const entries = await readRedoLog(cwd);
+  return entries.length > 0 ? entries[entries.length - 1] : null;
 }
 
 async function pushRedoEntryBack(entry: UndoEntry, cwd: string): Promise<void> {

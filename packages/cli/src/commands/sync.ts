@@ -478,7 +478,6 @@ export async function sync(
   const originalBranch = await getCurrentBranch(cwd);
   const worktreeCheckouts = await listWorktreeCheckouts(cwd);
   const progress = createProgress();
-  await recordSyncUndo(cwd, state, originalBranch);
 
   const scopeStacks = options.all
     ? state.stacks
@@ -590,6 +589,10 @@ export async function sync(
         ...partition.mustFetch.filter((branch) => !frozenBranches.has(branch)),
       ]),
     ];
+    // Record the undo snapshot just before the first remote/git mutation
+    // (here, the fetch). Earlier sites would have polluted the undo ring
+    // if scope validation threw without making any changes.
+    await recordSyncUndo(cwd, state, originalBranch);
     if (toFetch.length > 0) {
       progress.start('🌲 Fetching branches', toFetch.length);
       await fetchBranches(toFetch, cwd, 'origin', {

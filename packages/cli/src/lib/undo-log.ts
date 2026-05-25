@@ -134,7 +134,25 @@ async function migrateLegacyEntry(cwd: string): Promise<void> {
     fs.unlinkSync(legacyPath);
     return;
   }
-  const legacy = readEntries(legacyPath);
+  // Parse the legacy file directly (not via readEntries, which swallows
+  // JSON errors and returns []). If parsing fails, rename to .bak instead of
+  // deleting so a partial-write crash can be recovered by hand.
+  let legacy: UndoEntry[];
+  try {
+    const raw = fs.readFileSync(legacyPath, 'utf-8').trim();
+    if (!raw) {
+      fs.unlinkSync(legacyPath);
+      return;
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    legacy = Array.isArray(parsed)
+      ? (parsed as UndoEntry[])
+      : [parsed as UndoEntry];
+  } catch {
+    // Preserve the corrupt file for manual recovery rather than discarding.
+    fs.renameSync(legacyPath, `${legacyPath}.bak`);
+    return;
+  }
   if (legacy.length > 0) {
     writeEntries(undoPath, legacy);
   }

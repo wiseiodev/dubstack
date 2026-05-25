@@ -1330,7 +1330,7 @@ program
     'Number of recent operations to undo in sequence (default 1)',
     parsePositiveInt,
   )
-  .option('--list', 'List the undo ring buffer (newest last) without undoing')
+  .option('--list', 'List the undo ring buffer (newest first) without undoing')
   .option('--clear', 'Wipe both the undo and redo ring buffers')
   .addHelpText(
     'after',

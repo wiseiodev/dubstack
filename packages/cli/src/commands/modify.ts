@@ -58,8 +58,6 @@ export async function modify(
   const currentBranch = await getCurrentBranch(cwd);
   const state = await readState(cwd);
 
-  await recordModifyUndo(cwd, state, currentBranch);
-
   if (options.interactiveRebase) {
     const parent = getParent(state, currentBranch);
     if (!parent) {
@@ -75,6 +73,7 @@ export async function modify(
     const parentTip = await getBranchTip(parent, cwd);
 
     console.log(`Starting interactive rebase on top of '${parent}'...`);
+    await recordModifyUndo(cwd, state, currentBranch);
     await interactiveRebase(parentTip, cwd);
 
     await restackChildren(cwd);
@@ -103,9 +102,11 @@ export async function modify(
         'Rerun \'dub modify -ac -m "<message>"\' to stage all changes and commit.',
       ]);
     }
+    await recordModifyUndo(cwd, state, currentBranch);
     await commit(cwd, { message, noEdit: !options.edit });
   } else {
     // When amending, git commit --amend handles empty staged changes by allowing rewording
+    await recordModifyUndo(cwd, state, currentBranch);
     await amendCommit(cwd, { message, noEdit });
   }
 
