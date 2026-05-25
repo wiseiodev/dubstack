@@ -575,6 +575,36 @@ export async function getLastCommitMessage(
   }
 }
 
+/**
+ * Returns the commit messages (subject + body) for the commits on `branch`
+ * since `base`, ordered most-recent-first. Used by `dub squash` to assemble
+ * the default concatenated message when no override is supplied.
+ */
+export async function getCommitMessagesBetween(
+  base: string,
+  branch: string,
+  cwd: string,
+): Promise<string[]> {
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['log', '--format=%B%x1e', `${base}..${branch}`],
+      { cwd },
+    );
+    return stdout
+      .split('\x1e')
+      .map((entry) => entry.replace(/^\n+|\n+$/g, ''))
+      .filter((entry) => entry.length > 0);
+  } catch {
+    throw new DubError(
+      `Failed to read commit messages between '${base}' and '${branch}'.`,
+      [
+        `Run 'git log ${base}..${branch}' manually to inspect the underlying error.`,
+      ],
+    );
+  }
+}
+
 /** Per-branch commit metadata returned by {@link getBranchCommitMetaBatch}. */
 export interface BranchCommitMeta {
   /** `git for-each-ref %(committerdate:relative)`, e.g. "3 hours ago". */
@@ -1187,37 +1217,6 @@ export async function getCommitSubjectsBetween(
   } catch {
     throw new DubError(
       `Failed to read commits between '${baseRef}' and '${headRef}'.`,
-      [
-        `Run 'git log ${baseRef}..${headRef}' manually to inspect the failure.`,
-        `Run 'git fetch origin' to fetch missing history, then retry.`,
-      ],
-    );
-  }
-}
-
-/**
- * Returns full commit messages on `headRef` that are not on `baseRef`, oldest
- * first. Used by AI readiness checks so the judge can inspect both subject
- * quality and body usefulness.
- */
-export async function getCommitMessagesBetween(
-  baseRef: string,
-  headRef: string,
-  cwd: string,
-): Promise<string[]> {
-  try {
-    const { stdout } = await execa(
-      'git',
-      ['log', '--reverse', '--format=%B%x1e', `${baseRef}..${headRef}`],
-      { cwd },
-    );
-    return stdout
-      .split('\x1e')
-      .map((message) => message.trim())
-      .filter((message) => message.length > 0);
-  } catch {
-    throw new DubError(
-      `Failed to read commit messages between '${baseRef}' and '${headRef}'.`,
       [
         `Run 'git log ${baseRef}..${headRef}' manually to inspect the failure.`,
         `Run 'git fetch origin' to fetch missing history, then retry.`,

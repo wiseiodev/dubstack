@@ -22,7 +22,7 @@ files changed and there is no browser-demoable interaction to record.
 
 - `pnpm checks` passed.
 - `pnpm typecheck` passed.
-- `pnpm test` passed: 114 files / 1130 tests.
+- `pnpm test` passed after merging `origin/main`: 116 files / 1160 tests.
 - Focused tests passed: `pnpm --filter dubstack exec vitest run src/commands/ready.test.ts src/lib/ai-readiness.test.ts`.
 - `pnpm evals` was attempted and failed before running assertions because no AI provider is configured in this environment.
 
