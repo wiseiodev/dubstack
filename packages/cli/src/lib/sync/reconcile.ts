@@ -1,6 +1,10 @@
 import type { ReconcilePromptChoice } from './reconcile-prompt';
 
-export type ReconcileDecision = 'rebase-onto-remote' | 'take-remote' | 'abort';
+export type ReconcileDecision =
+  | 'rebase-onto-remote'
+  | 'take-remote'
+  | 'abort'
+  | 'ai';
 
 /**
  * Resolves the three-way reconcile decision for a branch that diverged from

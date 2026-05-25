@@ -1,0 +1,251 @@
+{
+  "meta": {
+    "workId": "DUB-46",
+    "title": "AI option on every interactive prompt (sync, restack, conflict)",
+    "artifactId": "dub-46",
+    "repo": "wiseiodev/dubstack",
+    "date": "2026-05-24",
+    "branch": "feature/dub-46-ai-option-on-every-interactive-prompt-sync-restack-conflict",
+    "baseBranch": "main",
+    "author": "Codex",
+    "contextLabel": "Linear",
+    "contextId": "DUB-46",
+    "prUrl": ""
+  },
+  "stats": {
+    "fileCount": 17,
+    "additions": 1435,
+    "deletions": 53,
+    "diffStat": ".reports/dub-46-adversarial-review.md | 37 +++\n.reports/dub-46-qa.md | 31 ++\nREADME.md | 30 ++\npackages/cli/src/commands/config.ts | 99 ++++++\npackages/cli/src/commands/post-merge.ts | 137 ++++++++-\npackages/cli/src/commands/sync.ts | 342 +++++++++++++++++++--\npackages/cli/src/index.ts | 79 ++++-\npackages/cli/src/lib/ai-prompt-decision.ts | 263 ++++++++++++++++\npackages/cli/src/lib/config.ts | 31 ++\npackages/cli/src/lib/restack-conflict-prompt.ts | 49 ++-\npackages/cli/src/lib/sync/reconcile-prompt.ts | 49 ++-\npackages/cli/src/lib/sync/reconcile.ts | 6 +-"
+  },
+  "prompt": "DUB-46 adds AI-assisted decision options to DubStack interactive prompt surfaces, with config gates, streamed reasoning, confirm/fallback behavior, auto-accept for high confidence, and regression tests.",
+  "tldr": "Added a shared AI prompt decision flow and wired it into sync reconcile, unsubmitted/parent mismatch sync choices, restack conflict handling, and post-merge preferred-branch selection behind repo-local config.",
+  "why": {
+    "motivation": [
+      "DubStack already had AI provider plumbing and AI conflict resolution, but interactive recovery prompts still forced manual decisions.",
+      "DUB-46 requires AI options to stay hidden when AI is disabled, explain recommendations before applying, and preserve manual fallbacks."
+    ],
+    "before": [
+      "Reconcile and restack conflict prompts only rendered manual options.",
+      "Unsubmitted branch and parent-mismatch sync prompts had no AI recommendation path.",
+      "Config had no prompt-specific mode or high-confidence auto-accept control."
+    ],
+    "after": [
+      "AI prompt choices are gated by `aiAssistantEnabled` plus `ai.prompts.mode`.",
+      "A shared resolver streams the model response, validates the recommendation, auto-accepts configured high-confidence choices, and falls back to manual prompts for low/unsupported choices.",
+      "Prompt builders and config commands are covered by focused unit tests plus the full existing suite."
+    ]
+  },
+  "fileTour": [
+    {
+      "path": "packages/cli/src/lib/ai-prompt-decision.ts",
+      "changeType": "new",
+      "additions": 263,
+      "deletions": 0,
+      "explanation": "Centralizes AI prompt recommendation streaming, JSON parsing, confidence handling, high-confidence auto-accept, and manual fallback behavior.",
+      "snippet": "export async function resolveAiPromptDecision<T extends string>(input: {",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/sync.ts",
+      "changeType": "mod",
+      "additions": 323,
+      "deletions": 19,
+      "explanation": "Adds AI decision choices to unsubmitted divergence, parent mismatch, three-way reconcile, and restack conflict paths while preserving non-interactive behavior.",
+      "snippet": "const showAiPromptOptions = options.interactive\n  ? await canShowAiPrompt(cwd)\n  : false;",
+      "snippetLanguage": "ts",
+      "open": true
+    },
+    {
+      "path": "packages/cli/src/commands/post-merge.ts",
+      "changeType": "mod",
+      "additions": 135,
+      "deletions": 2,
+      "explanation": "Offers an AI pick when post-merge has multiple plausible checkout candidates after cleanup, using candidate commit and PR context.",
+      "snippet": "message: 'Which branch should post-merge leave checked out?'",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/commands/config.ts",
+      "changeType": "mod",
+      "additions": 99,
+      "deletions": 0,
+      "explanation": "Adds `ai-prompts` and `ai-prompts-auto-accept` config surfaces with validation and persistence.",
+      "snippet": "export async function configAiPrompts(",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/sync/reconcile-prompt.ts",
+      "changeType": "mod",
+      "additions": 34,
+      "deletions": 15,
+      "explanation": "Adds testable prompt-choice construction and the optional AI choice while keeping the DUB-15 wording stable.",
+      "snippet": "name: 'Let AI decide (shows reasoning before applying)'",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/restack-conflict-prompt.ts",
+      "changeType": "mod",
+      "additions": 34,
+      "deletions": 15,
+      "explanation": "Adds the optional AI conflict-resolution choice and preserves non-interactive continue behavior.",
+      "snippet": "name: 'Let AI resolve (shows reasoning before applying)'",
+      "snippetLanguage": "ts",
+      "open": false
+    },
+    {
+      "path": "packages/cli/src/lib/ai-prompt-decision.test.ts",
+      "changeType": "new",
+      "additions": 208,
+      "deletions": 0,
+      "explanation": "Covers AI prompt visibility gates, streamed recommendation parsing, high-confidence auto-accept, low-confidence fallback, and unsupported-choice fallback.",
+      "snippet": "it('falls back to manual choices for unsupported recommendations', async () => {",
+      "snippetLanguage": "ts",
+      "open": false
+    }
+  ],
+  "reviewFocus": [
+    {
+      "title": "AI gating",
+      "location": "packages/cli/src/lib/ai-prompt-decision.ts",
+      "rationale": "The AI option must remain hidden when the repo AI assistant is disabled and must not leak into manual-only flows."
+    },
+    {
+      "title": "Sync recovery decisions",
+      "location": "packages/cli/src/commands/sync.ts",
+      "rationale": "These paths mutate branches, reset refs, or pause recovery; the AI recommendation must never bypass existing safety semantics."
+    },
+    {
+      "title": "Fallback behavior",
+      "location": "packages/cli/src/lib/ai-prompt-decision.ts",
+      "rationale": "Low confidence, unsupported choices, and rejected recommendations should return to manual choices rather than applying unsafe output."
+    }
+  ],
+  "testPlan": [
+    {
+      "kind": "unit",
+      "label": "AI prompt decision unit coverage",
+      "status": "done",
+      "evidence": "`packages/cli/src/lib/ai-prompt-decision.test.ts` covers gating, parsing, auto-accept, low-confidence fallback, and unsupported-choice fallback."
+    },
+    {
+      "kind": "unit",
+      "label": "Prompt rendering coverage",
+      "status": "done",
+      "evidence": "Reconcile and restack prompt tests assert AI choices are hidden by default and included only when requested."
+    },
+    {
+      "kind": "other",
+      "label": "Full regression suite",
+      "status": "done",
+      "evidence": "`pnpm test` passed with 114 files and 1140 tests."
+    }
+  ],
+  "qualityGates": [
+    {
+      "name": "Biome checks",
+      "command": "pnpm checks",
+      "status": "passed",
+      "evidence": "Biome checked 285 files with no fixes applied."
+    },
+    {
+      "name": "Typecheck",
+      "command": "pnpm typecheck",
+      "status": "passed",
+      "evidence": "Turbo typecheck passed for docs, dubstack, and dubstack-retarget-action."
+    },
+    {
+      "name": "Tests",
+      "command": "pnpm test",
+      "status": "passed",
+      "evidence": "Turbo test passed; dubstack reported 114 test files and 1140 tests passing."
+    }
+  ],
+  "selfQa": {
+    "tsxChanged": false,
+    "videoRequired": false,
+    "videoRequiredReason": "No `.tsx` files or browser-demoable surfaces changed; this is CLI prompt/config behavior.",
+    "fallbackApprovedByUser": false,
+    "mode": "fallback",
+    "artifactPath": ".reports/dub-46-qa.md",
+    "caption": "CLI-only QA fallback with deterministic command evidence.",
+    "scenarios": [
+      "AI prompt choices hidden when AI is disabled.",
+      "Prompt builders include AI choices only when requested.",
+      "High-confidence auto-accept and low-confidence fallback are covered.",
+      "Full repo checks, typecheck, and tests pass."
+    ]
+  },
+  "acceptanceCriteria": [
+    {
+      "criterion": "All four prompt sites offer the AI option when AI is enabled",
+      "status": "satisfied",
+      "evidence": "Reconcile, unsubmitted/parent-mismatch sync, restack conflict, and post-merge multi-candidate checkout paths are wired through AI-enabled prompt choices."
+    },
+    {
+      "criterion": "Streaming reasoning preview before the recommendation",
+      "status": "satisfied",
+      "evidence": "`resolveAiPromptDecision` streams text deltas under an AI reasoning preview before printing the parsed recommendation."
+    },
+    {
+      "criterion": "Confirm-or-fallback UX",
+      "status": "satisfied",
+      "evidence": "Medium/high confidence recommendations ask for confirmation unless high auto-accept is configured; low/unsupported recommendations fall back to manual choices."
+    },
+    {
+      "criterion": "`dub config ai-prompts` and `ai-prompts-auto-accept` work",
+      "status": "satisfied",
+      "evidence": "Config commands, normalization, CLI wiring, README docs, and tests were added."
+    },
+    {
+      "criterion": "When AI is disabled, the AI option is hidden",
+      "status": "satisfied",
+      "evidence": "`aiPromptOptionsEnabled` requires `aiAssistantEnabled` and prompt mode not off; prompt choice tests verify hidden-by-default rendering."
+    },
+    {
+      "criterion": "Tests for prompt rendering, AI selection, auto-accept on high, fallback after low confidence",
+      "status": "satisfied",
+      "evidence": "Added prompt builder tests and `ai-prompt-decision.test.ts` coverage for high auto-accept and low fallback."
+    }
+  ],
+  "adversarialReview": {
+    "iterations": 1,
+    "critical": 0,
+    "major": 0,
+    "minor": 0,
+    "nitpick": 0,
+    "findings": [
+      "Resolved one major prompt-safety finding before commit: invalid numeric input could have selected the appended AI option; AI menus now use safe invalid-input fallbacks and unsupported AI choices return to manual prompts."
+    ]
+  },
+  "dependencies": [
+    {
+      "name": "External blockers",
+      "status": "No external dependencies detected; DUB-15 and DUB-18 were already landed per issue context."
+    }
+  ],
+  "rollout": {
+    "summary": "The feature is opt-in via the existing repo AI assistant gate and defaults to hidden because `aiAssistantEnabled` defaults false.",
+    "steps": [
+      {
+        "when": "merge",
+        "label": "Ship config and prompt support",
+        "details": "Users can enable AI prompt choices with `dub config ai-assistant on`; prompt mode defaults to `auto`."
+      },
+      {
+        "when": "runtime",
+        "label": "Manual fallback remains available",
+        "details": "AI recommendations require confirmation unless high auto-accept is configured, and low/unsupported choices return to the manual prompt."
+      }
+    ]
+  },
+  "commit": {
+    "sha": "bb2a72958c39d1396ff8d3321d43fa9188b987df",
+    "shortSha": "bb2a729",
+    "message": "feat: add AI prompt decisions\n\nCompletes DUB-46"
+  }
+}

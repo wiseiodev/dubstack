@@ -73,6 +73,7 @@ import { unfreeze } from './commands/unfreeze';
 import { unlink } from './commands/unlink';
 import { untrack } from './commands/untrack';
 import { watch } from './commands/watch';
+import { isAiPromptOptionEnabled } from './lib/ai-prompt-decision';
 import {
   collectKnownTopLevelCommands,
   preprocessCliArgs,
@@ -102,6 +103,14 @@ const require = createRequire(import.meta.url);
 const { version } = require('../package.json') as { version: string };
 
 const program = new Command();
+
+async function canShowAiPrompt(cwd: string): Promise<boolean> {
+  try {
+    return await isAiPromptOptionEnabled(cwd);
+  } catch {
+    return false;
+  }
+}
 
 async function showInfo(
   branch: string | undefined,
@@ -1073,12 +1082,20 @@ Examples:
     } else if (result.status === 'conflict') {
       const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
       const conflictBranch = result.conflictBranch ?? 'unknown';
+      const showAiOption = interactive
+        ? await canShowAiPrompt(process.cwd())
+        : false;
       const decision = await resolveRestackConflictDecision({
         branch: conflictBranch,
         interactive,
+        showAiOption,
         promptChoice: (branchName) =>
-          restackConflictPrompt({ branch: branchName }),
+          restackConflictPrompt({ branch: branchName, showAiOption }),
       });
+      if (decision === 'ai') {
+        await continueCommand(process.cwd(), { ai: true });
+        return;
+      }
       if (decision === 'cancel') {
         const rollback = await rollbackRestack(process.cwd());
         console.log(
@@ -1748,6 +1765,66 @@ program
           console.log(
             chalk.yellow(
               `⚠ AI default for '${target}' is already ${result.enabled ? 'enabled' : 'disabled'}`,
+            ),
+          );
+        }
+      }),
+  )
+  .addCommand(
+    new Command('ai-prompts')
+      .argument('[mode]', 'Set to auto/on/off (omit to inspect current value)')
+      .description('Manage AI choices in interactive prompts')
+      .action(async (mode?: string) => {
+        const { configAiPrompts } = await import('./commands/config');
+        const result = await configAiPrompts(process.cwd(), mode);
+
+        if (!mode) {
+          console.log(
+            chalk.blue(
+              `AI prompt choices are '${result.mode}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(`✔ AI prompt choices set to '${result.mode}'`),
+          );
+        } else {
+          console.log(
+            chalk.yellow(`⚠ AI prompt choices are already '${result.mode}'`),
+          );
+        }
+      }),
+  )
+  .addCommand(
+    new Command('ai-prompts-auto-accept')
+      .argument('[level]', 'Set to off/high (omit to inspect current value)')
+      .description('Manage AI prompt recommendation auto-accept behavior')
+      .action(async (level?: string) => {
+        const { configAiPromptsAutoAccept } = await import('./commands/config');
+        const result = await configAiPromptsAutoAccept(process.cwd(), level);
+
+        if (!level) {
+          console.log(
+            chalk.blue(
+              `AI prompt auto-accept is '${result.autoAccept}' for this repository.`,
+            ),
+          );
+          return;
+        }
+
+        if (result.changed) {
+          console.log(
+            chalk.green(
+              `✔ AI prompt auto-accept set to '${result.autoAccept}'`,
+            ),
+          );
+        } else {
+          console.log(
+            chalk.yellow(
+              `⚠ AI prompt auto-accept is already '${result.autoAccept}'`,
             ),
           );
         }
