@@ -23,12 +23,15 @@ browser-demoable UI surface for the behavior.
 - The docs build includes the new multi-trunk guide.
 - `dub sync --all --restack` does not treat legacy detached-root feature stacks
   as configured trunks.
+- Copilot review follow-ups for create undo metadata, create parent SHA
+  anchoring, doctor detached-root reporting, and plain sync detached-root trunk
+  selection are covered by focused tests/assertions.
 
 ## Evidence
 
 - `pnpm checks` passed.
 - `pnpm typecheck` passed.
-- `pnpm test` passed: 123 CLI test files, 1354 CLI tests, docs tests, and
+- `pnpm test` passed: 123 CLI test files, 1356 CLI tests, docs tests, and
   retarget-action tests.
 
 ## Follow-up flag

@@ -2401,6 +2401,55 @@ describe('sync', () => {
       expect(result.trunksSynced).not.toContain('feat/unlinked');
     });
 
+    it('plain sync fetches a detached stack root through its stored trunk', async () => {
+      mockGetCurrentBranch.mockResolvedValue('feat/unlinked');
+      mockReadState.mockResolvedValue({
+        trunks: ['main'],
+        defaultTrunk: 'main',
+        stacks: [
+          {
+            id: 'stack-detached',
+            trunk: 'main',
+            branches: [
+              {
+                name: 'feat/unlinked',
+                type: 'root',
+                detached_root: true,
+                parent: null,
+                pr_number: 99,
+                pr_link: 'https://x/99',
+                last_submitted_version: null,
+                last_synced_at: null,
+                sync_source: null,
+              },
+            ],
+          },
+        ],
+      });
+
+      await sync('/repo', {
+        interactive: false,
+        restack: false,
+      });
+
+      expect(mockFetchBranches).toHaveBeenCalledWith(
+        ['main'],
+        '/repo',
+        'origin',
+        expect.objectContaining({ onBranchStart: expect.any(Function) }),
+      );
+      expect(mockFastForwardBranchToRef).toHaveBeenCalledWith(
+        'main',
+        'origin/main',
+        '/repo',
+      );
+      expect(mockFastForwardBranchToRef).not.toHaveBeenCalledWith(
+        'feat/unlinked',
+        'origin/feat/unlinked',
+        '/repo',
+      );
+    });
+
     it('does NOT restack a legacy detached root as though it were a configured trunk', async () => {
       mockReadState.mockResolvedValue({
         trunks: ['main'],

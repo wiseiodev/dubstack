@@ -245,7 +245,7 @@ export async function create(
     {
       operation: 'create',
       timestamp: new Date().toISOString(),
-      previousBranch: parent,
+      previousBranch: currentBranch,
       previousState: structuredClone(state),
       branchTips: {},
       createdBranches: [branchName],
@@ -257,7 +257,7 @@ export async function create(
   if (currentStack) {
     await createBranch(branchName, cwd);
   } else {
-    await createBranchFrom(branchName, parent, cwd);
+    await createBranchFrom(branchName, parentRevision, cwd);
   }
   addBranchToStack(state, branchName, parent, parentRevision, stackTrunk);
   await writeState(state, cwd);

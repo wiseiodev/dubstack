@@ -115,15 +115,28 @@ describe('create', () => {
     await writeState(state, dir);
     await gitInRepo(dir, ['checkout', '-b', 'scratch', 'main']);
 
+    const parentTip = await getBranchTip('develop', dir);
     const result = await create('feat/from-default-trunk', dir);
 
     expect(result.parent).toBe('develop');
+    const mergeBase = await gitInRepo(dir, [
+      'merge-base',
+      'feat/from-default-trunk',
+      'develop',
+    ]);
+    expect(mergeBase.stdout).toBe(parentTip);
+    const undoEntry = await readUndoEntry(dir);
+    expect(undoEntry.previousBranch).toBe('scratch');
     const loaded = await readState(dir);
     expect(loaded.stacks[0]).toMatchObject({
       trunk: 'develop',
       branches: [
         { name: 'develop', type: 'root', parent: null },
-        { name: 'feat/from-default-trunk', parent: 'develop' },
+        {
+          name: 'feat/from-default-trunk',
+          parent: 'develop',
+          parent_revision: parentTip,
+        },
       ],
     });
   });

@@ -13,7 +13,6 @@ import {
   type Branch,
   findStackForBranch,
   getConfiguredTrunks,
-  getStackTrunk,
   readState,
   type Stack,
 } from '../lib/state';
@@ -95,7 +94,8 @@ export async function doctor(
   }
 
   for (const stack of scopedStacks) {
-    const trunk = getStackTrunk(stack);
+    const trunk = getReportableStackTrunk(stack);
+    if (!trunk) continue;
     if (configuredTrunks.has(trunk)) continue;
     result.issues.push({
       code: 'orphaned-stack',
@@ -288,4 +288,10 @@ function pushRemoteCheckFailed(
     details,
     fixes: ['gh auth status', 'gh auth login', 'git fetch --all --prune'],
   });
+}
+
+function getReportableStackTrunk(stack: Stack): string | undefined {
+  if (stack.trunk) return stack.trunk;
+  const root = stack.branches.find((branch) => branch.type === 'root');
+  return root?.detached_root ? undefined : root?.name;
 }

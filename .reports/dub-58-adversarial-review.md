@@ -36,6 +36,18 @@ Resolution:
 - Added a regression test in `packages/cli/src/commands/sync.test.ts` proving a
   legacy `detached_root` branch is not checked out/restacked as a trunk.
 
+Copilot surfaced four review findings after the PR opened. All were accepted as
+real quality issues:
+
+- `dub create` now records the original current branch in undo metadata when it
+  starts a stack from `defaultTrunk`.
+- `dub create` now creates the branch from the captured parent SHA rather than
+  the moving parent ref.
+- `dub doctor` skips legacy detached-root stacks when no real trunk can be
+  determined, avoiding bad `dub trunk add <feature>` advice.
+- Plain `dub sync` now uses stored `stack.trunk` for detached-root stacks while
+  still excluding legacy detached roots that have no trunk metadata.
+
 ### Critical
 
 None remaining.

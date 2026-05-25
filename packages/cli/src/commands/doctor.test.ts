@@ -205,6 +205,36 @@ describe('doctor', () => {
     expect(result.healthy).toBe(false);
   });
 
+  it('does not report legacy detached roots as orphaned trunks', async () => {
+    mockReadState.mockResolvedValue({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [
+        {
+          id: 'stack-detached',
+          branches: [
+            {
+              name: 'feat/unlinked',
+              type: 'root',
+              detached_root: true,
+              parent: null,
+              pr_number: null,
+              pr_link: null,
+            },
+          ],
+        },
+      ],
+    });
+    mockGetCurrentBranch.mockResolvedValue('feat/unlinked');
+    mockGetRefSha.mockResolvedValue('same-sha');
+
+    const result = await doctor('/repo');
+
+    expect(result.issues.some((entry) => entry.code === 'orphaned-stack')).toBe(
+      false,
+    );
+  });
+
   it('does not flag branching stacks as a doctor issue', async () => {
     mockReadState.mockResolvedValue(
       makeState([

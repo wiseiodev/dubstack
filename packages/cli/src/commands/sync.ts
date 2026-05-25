@@ -475,12 +475,14 @@ export async function sync(
       options.all
         ? getConfiguredTrunks(state)
         : scopeStacks
-            .filter((stack) =>
-              stack.branches.some(
-                (branch) => branch.type === 'root' && !branch.detached_root,
-              ),
-            )
-            .map((stack) => getStackTrunk(stack)),
+            .map((stack) => {
+              if (stack.trunk) return stack.trunk;
+              const root = stack.branches.find(
+                (branch) => branch.type === 'root',
+              );
+              return root?.detached_root ? undefined : root?.name;
+            })
+            .filter((root): root is string => Boolean(root)),
     ),
   );
   const stackBranches = Array.from(
