@@ -24,6 +24,7 @@ describe('readConfig', () => {
     expect(config).toEqual({
       aiAssistantEnabled: false,
       mcpMode: 'interactive',
+      submitDefault: 'auto',
       ai: {
         defaults: {
           createMetadata: false,
@@ -78,6 +79,7 @@ describe('writeConfig', () => {
     await writeConfig({ aiAssistantEnabled: true }, dir);
     const config = await readConfig(dir);
     expect(config.aiAssistantEnabled).toBe(true);
+    expect(config.submitDefault).toBe('auto');
     expect(config.ai.defaults).toEqual({
       createMetadata: false,
       submitDescription: false,
@@ -186,6 +188,19 @@ describe('writeConfig', () => {
     });
   });
 
+  it('persists submit lifecycle defaults', async () => {
+    await writeConfig(
+      {
+        submitDefault: 'publish',
+      },
+      dir,
+    );
+
+    const config = await readConfig(dir);
+
+    expect(config.submitDefault).toBe('publish');
+  });
+
   it('normalizes invalid provider settings back to defaults', async () => {
     const dubDir = path.join(dir, '.git', 'dubstack');
     fs.mkdirSync(dubDir, { recursive: true });
@@ -208,11 +223,13 @@ describe('writeConfig', () => {
             },
           },
         },
+        submitDefault: 'ready',
       }),
     );
 
     const config = await readConfig(dir);
 
+    expect(config.submitDefault).toBe('auto');
     expect(config.ai.prompts).toEqual({
       mode: 'auto',
       autoAccept: 'off',

@@ -1,4 +1,4 @@
-import type { DubConfig, McpMode } from '../lib/config';
+import type { DubConfig, McpMode, SubmitDefault } from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
 
@@ -19,6 +19,11 @@ export interface ConfigModelResult {
 
 export interface ConfigMcpModeResult {
   mode: McpMode;
+  changed: boolean;
+}
+
+export interface ConfigSubmitDefaultResult {
+  mode: SubmitDefault;
   changed: boolean;
 }
 
@@ -293,6 +298,36 @@ export async function configMcpMode(
   };
 }
 
+export async function configSubmitDefault(
+  cwd: string,
+  mode?: string,
+): Promise<ConfigSubmitDefaultResult> {
+  const config = await readConfig(cwd);
+  if (mode == null) {
+    return {
+      mode: config.submitDefault,
+      changed: false,
+    };
+  }
+
+  const parsed = parseSubmitDefault(mode);
+  const changed = config.submitDefault !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        submitDefault: parsed,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    mode: parsed,
+    changed,
+  };
+}
+
 function parseMcpMode(value: string): McpMode {
   if (value === 'read-only' || value === 'interactive' || value === 'trusted') {
     return value;
@@ -303,6 +338,20 @@ function parseMcpMode(value: string): McpMode {
       "Pass 'read-only' to disable mutating MCP tools.",
       "Pass 'interactive' to require terminal confirmation before mutating tools run (default).",
       "Pass 'trusted' to let mutating MCP tools run without confirmation.",
+    ],
+  );
+}
+
+function parseSubmitDefault(value: string): SubmitDefault {
+  if (value === 'auto' || value === 'draft' || value === 'publish') {
+    return value;
+  }
+  throw new DubError(
+    "Submit default must be one of 'auto', 'draft', or 'publish'.",
+    [
+      "Pass 'auto' to create draft PRs when CI workflows are configured.",
+      "Pass 'draft' to create new submit PRs as drafts.",
+      "Pass 'publish' to promote existing draft PRs by default.",
     ],
   );
 }

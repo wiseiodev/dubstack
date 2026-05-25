@@ -9,6 +9,7 @@ import {
   configAiPromptsAutoAccept,
   configAiProvider,
   configMcpMode,
+  configSubmitDefault,
 } from './config';
 
 let dir: string;
@@ -250,6 +251,35 @@ describe('config mcp-mode', () => {
   it('throws for invalid modes', async () => {
     await expect(configMcpMode(dir, 'wide-open')).rejects.toThrow(
       "MCP mode must be one of 'read-only', 'interactive', or 'trusted'.",
+    );
+  });
+});
+
+describe('config submit-default', () => {
+  it('returns the default auto mode when no mode is set', async () => {
+    const result = await configSubmitDefault(dir);
+    expect(result).toEqual({ mode: 'auto', changed: false });
+  });
+
+  it('writes draft mode when set', async () => {
+    const result = await configSubmitDefault(dir, 'draft');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'draft', changed: true });
+    expect(config.submitDefault).toBe('draft');
+  });
+
+  it('writes publish mode when set', async () => {
+    const result = await configSubmitDefault(dir, 'publish');
+    const config = await readConfig(dir);
+
+    expect(result).toEqual({ mode: 'publish', changed: true });
+    expect(config.submitDefault).toBe('publish');
+  });
+
+  it('throws for invalid modes', async () => {
+    await expect(configSubmitDefault(dir, 'ready')).rejects.toThrow(
+      "Submit default must be one of 'auto', 'draft', or 'publish'.",
     );
   });
 });
