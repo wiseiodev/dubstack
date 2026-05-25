@@ -198,6 +198,39 @@ describe('postMerge', () => {
     expect(featB?.parent).toBe('feat/a');
   });
 
+  it('skips merged frozen branches without reparenting or cleaning them', async () => {
+    const frozenState = makeState();
+    const featA = frozenState.stacks[0].branches.find(
+      (b) => b.name === 'feat/a',
+    );
+    if (featA) featA.frozen = true;
+    mockReadState.mockResolvedValue(frozenState);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const result = await postMerge('/repo', {
+        restack: false,
+        submit: false,
+      });
+
+      expect(result.cleaned).toEqual([]);
+      expect(result.skipped).toEqual(['feat/a']);
+      expect(mockRetargetPrBase).not.toHaveBeenCalled();
+      const saved = mockWriteState.mock.calls[0][0] as DubState;
+      expect(
+        saved.stacks[0].branches.find((b) => b.name === 'feat/a'),
+      ).toBeTruthy();
+      expect(
+        saved.stacks[0].branches.find((b) => b.name === 'feat/b')?.parent,
+      ).toBe('feat/a');
+      expect(logSpy).toHaveBeenCalledWith(
+        "🔒 Skipped 'feat/a' (frozen). Run `dub unfreeze feat/a` to allow post-merge cleanup.",
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('preserves parent_revision on reparented children', async () => {
     const stateWithRevision: DubState = {
       stacks: [

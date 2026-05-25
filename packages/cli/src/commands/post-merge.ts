@@ -111,7 +111,14 @@ export async function postMerge(
   const journal = dryRun ? null : await startCleanupJournal(cwd);
 
   for (const stack of workingStacks) {
-    const mergedBottom = await getMergedBottomBranches(stack, cwd);
+    const { merged: mergedBottom, frozen: frozenMerged } =
+      await getPostMergeCleanupCandidates(stack, cwd);
+    for (const branchName of frozenMerged) {
+      console.log(
+        `🔒 Skipped '${branchName}' (frozen). Run \`dub unfreeze ${branchName}\` to allow post-merge cleanup.`,
+      );
+      result.skipped.push(branchName);
+    }
     for (const branchName of mergedBottom) {
       const worktreePath = worktreeCheckouts.get(branchName);
       if (worktreePath) {
@@ -371,14 +378,15 @@ async function safeGitOutput(cwd: string, args: string[]): Promise<string> {
   }
 }
 
-async function getMergedBottomBranches(
+async function getPostMergeCleanupCandidates(
   stack: Stack,
   cwd: string,
-): Promise<string[]> {
+): Promise<{ merged: string[]; frozen: string[] }> {
   const branchMap = new Map(
     stack.branches.map((branch) => [branch.name, branch]),
   );
   const merged = new Set<string>();
+  const frozen = new Set<string>();
   let changed = true;
 
   while (changed) {
@@ -395,12 +403,17 @@ async function getMergedBottomBranches(
         !parent || parent.type === 'root' || merged.has(parent.name);
       if (!parentIsSatisfied) continue;
 
+      if (branch.frozen) {
+        frozen.add(branch.name);
+        continue;
+      }
+
       merged.add(branch.name);
       changed = true;
     }
   }
 
-  return [...merged];
+  return { merged: [...merged], frozen: [...frozen] };
 }
 
 function planReparents(

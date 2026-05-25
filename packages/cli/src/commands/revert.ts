@@ -263,15 +263,39 @@ interface ResolvedTarget {
   prNumber: number | null;
 }
 
+class CommitNotFoundError extends DubError {}
+
+class PrNotFoundError extends DubError {}
+
 async function resolveRevertTarget(
   target: string,
   cwd: string,
 ): Promise<ResolvedTarget> {
-  if (PR_NUMBER_PATTERN.test(target)) {
+  if (target.startsWith('#')) {
     return resolvePrTarget(target.replace(/^#/, ''), cwd);
   }
   if (SHA_PATTERN.test(target)) {
-    return resolveShaTarget(target, cwd);
+    try {
+      return await resolveShaTarget(target, cwd);
+    } catch (error) {
+      if (
+        PR_NUMBER_PATTERN.test(target) &&
+        error instanceof CommitNotFoundError
+      ) {
+        try {
+          return await resolvePrTarget(target, cwd);
+        } catch (prError) {
+          if (prError instanceof PrNotFoundError) {
+            throw error;
+          }
+          throw prError;
+        }
+      }
+      throw error;
+    }
+  }
+  if (PR_NUMBER_PATTERN.test(target)) {
+    return resolvePrTarget(target, cwd);
   }
   throw new DubError(
     `'${target}' is not a recognized PR number or commit SHA.`,
@@ -298,7 +322,7 @@ async function resolvePrTarget(
 
   const info = await getPrMergeInfoByNumber(prNumber, cwd);
   if (!info) {
-    throw new DubError(`PR #${prNumber} was not found.`, [
+    throw new PrNotFoundError(`PR #${prNumber} was not found.`, [
       `Run 'gh pr view ${prNumber}' to confirm the PR exists in this repository.`,
       `Pass a commit SHA directly: 'dub revert <sha>'.`,
     ]);
@@ -378,10 +402,13 @@ async function verifyCommit(
         ],
       );
     }
-    throw new DubError(`Commit '${ref}' not found in this repository.`, [
-      `Run '${hints.fetchHint}' to fetch missing history, then retry.`,
-      `Run 'git log ${ref}' manually to confirm the commit exists.`,
-    ]);
+    throw new CommitNotFoundError(
+      `Commit '${ref}' not found in this repository.`,
+      [
+        `Run '${hints.fetchHint}' to fetch missing history, then retry.`,
+        `Run 'git log ${ref}' manually to confirm the commit exists.`,
+      ],
+    );
   }
 }
 

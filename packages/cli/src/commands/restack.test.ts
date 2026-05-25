@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestRepo, gitInRepo } from '../../test/helpers';
 import { getBranchTip, getCurrentBranch } from '../lib/git';
 import { readState, writeState } from '../lib/state';
@@ -329,6 +329,69 @@ describe('restack', () => {
         worktreeDir,
       ]).catch(() => {});
       await fs.promises.rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips a frozen branch and cascades the skip to descendants', async () => {
+    await create('feat/a', dir);
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'a-commit']);
+
+    await create('feat/b', dir);
+    fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'b-commit']);
+
+    await create('feat/c', dir);
+    fs.writeFileSync(path.join(dir, 'c.txt'), 'c');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'c-commit']);
+
+    await create('feat/d', dir);
+    fs.writeFileSync(path.join(dir, 'd.txt'), 'd');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'd-commit']);
+
+    const state = await readState(dir);
+    const frozenBranch = state.stacks[0].branches.find(
+      (b) => b.name === 'feat/b',
+    );
+    if (frozenBranch) frozenBranch.frozen = true;
+    await writeState(state, dir);
+
+    const before = {
+      b: await getBranchTip('feat/b', dir),
+      c: await getBranchTip('feat/c', dir),
+      d: await getBranchTip('feat/d', dir),
+    };
+
+    await gitInRepo(dir, ['checkout', 'main']);
+    fs.writeFileSync(path.join(dir, 'main-new.txt'), 'main');
+    await gitInRepo(dir, ['add', '.']);
+    await gitInRepo(dir, ['commit', '-m', 'main-new']);
+    await gitInRepo(dir, ['checkout', 'feat/d']);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = await restack(dir);
+
+      expect(result.status).toBe('success');
+      expect(result.rebased).toEqual(['feat/a']);
+      expect(await getBranchTip('feat/b', dir)).toBe(before.b);
+      expect(await getBranchTip('feat/c', dir)).toBe(before.c);
+      expect(await getBranchTip('feat/d', dir)).toBe(before.d);
+      expect(logSpy).toHaveBeenCalledWith(
+        "🔒 Skipped 'feat/b' (frozen). Run `dub unfreeze feat/b` to allow restacking.",
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        "   ↳ Also skipped descendant 'feat/c' (parent is frozen).",
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        "   ↳ Also skipped descendant 'feat/d' (ancestor 'feat/b' is frozen).",
+      );
+    } finally {
+      logSpy.mockRestore();
     }
   });
 });

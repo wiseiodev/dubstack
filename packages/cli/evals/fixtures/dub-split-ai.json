@@ -1,0 +1,41 @@
+[
+  {
+    "input": {
+      "name": "split readiness from docs",
+      "branch": "feature/ready-and-docs",
+      "parentBranch": "main",
+      "knownFiles": [
+        "packages/cli/src/commands/ready.ts",
+        "packages/cli/src/commands/ready.test.ts",
+        "README.md"
+      ],
+      "diff": "Runtime ready command changes, matching tests, and README docs."
+    },
+    "output": {
+      "splits": [
+        {
+          "branch": "feat/ready-ai-gate",
+          "files": [
+            "packages/cli/src/commands/ready.ts",
+            "packages/cli/src/commands/ready.test.ts"
+          ],
+          "summary": "Add the ready AI gate and coverage."
+        },
+        {
+          "branch": "docs/ready-ai-gate",
+          "files": ["README.md"],
+          "summary": "Document the ready AI gate."
+        }
+      ]
+    },
+    "expected": {
+      "summary": "Split proposal covers every known file once with coherent branches.",
+      "knownFiles": [
+        "packages/cli/src/commands/ready.ts",
+        "packages/cli/src/commands/ready.test.ts",
+        "README.md"
+      ],
+      "minSplits": 2
+    }
+  }
+]

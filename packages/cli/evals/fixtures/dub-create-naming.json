@@ -1,0 +1,74 @@
+[
+  {
+    "input": {
+      "name": "feature branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/packages/cli/src/commands/watch.ts b/packages/cli/src/commands/watch.ts\n@@\n+export async function watchStack() {\n+  renderStatusLoop('stack health');\n+}\n"
+    },
+    "expected": {
+      "summary": "Names a feature branch around the new stack watch command.",
+      "prefix": "feat/",
+      "requiredScopeTerms": ["watch", "stack"]
+    }
+  },
+  {
+    "input": {
+      "name": "bug fix branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/packages/cli/src/commands/submit.ts b/packages/cli/src/commands/submit.ts\n@@\n-const diff = await getDiff(cwd, false);\n+const diff = await getDiffBetween(parentBranch, branchName, cwd);\n"
+    },
+    "expected": {
+      "summary": "Names a fix branch around submit diff selection.",
+      "prefix": "fix/",
+      "requiredScopeTerms": ["submit", "diff"]
+    }
+  },
+  {
+    "input": {
+      "name": "refactor branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/packages/cli/src/lib/graph.ts b/packages/cli/src/lib/graph.ts\n@@\n+export function groupStackEdges(edges) {\n+  return normalizeEdges(edges).sort(compareEdges);\n+}\n"
+    },
+    "expected": {
+      "summary": "Names a refactor branch around stack graph edge grouping.",
+      "prefix": "refactor/",
+      "requiredScopeTerms": ["graph"]
+    }
+  },
+  {
+    "input": {
+      "name": "docs branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/README.md b/README.md\n@@\n+### dub ready\n+Use `dub ready --ai` before requesting review.\n"
+    },
+    "expected": {
+      "summary": "Names a docs branch around ready command documentation.",
+      "prefix": "docs/",
+      "requiredScopeTerms": ["ready"]
+    }
+  },
+  {
+    "input": {
+      "name": "test branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/packages/cli/src/commands/ready.test.ts b/packages/cli/src/commands/ready.test.ts\n@@\n+it('blocks review when AI readiness fails', () => {\n+  expect(result.blocked).toBe(true);\n+});\n"
+    },
+    "expected": {
+      "summary": "Names a test branch around ready command readiness coverage.",
+      "prefix": "test/",
+      "requiredScopeTerms": ["ready"]
+    }
+  },
+  {
+    "input": {
+      "name": "chore branch",
+      "parentBranch": "main",
+      "stagedDiff": "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n@@\n+      - name: Upload AI eval report\n+        uses: actions/upload-artifact@v4\n"
+    },
+    "expected": {
+      "summary": "Names a chore branch around CI artifact plumbing.",
+      "prefix": "chore/",
+      "requiredScopeTerms": ["eval"]
+    }
+  }
+]

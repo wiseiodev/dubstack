@@ -7,11 +7,8 @@ export interface UnfreezeCommandOptions {
 
 /**
  * Clears the `frozen` flag on a tracked branch. Defaults to the current
- * branch.
- *
- * Note: the `frozen` flag is currently a passive marker. `dub restack`
- * and `dub sync` do NOT yet read it, so clearing the flag has no effect
- * on rebase behavior until DUB-82 lands.
+ * branch. Restack, sync, and post-merge can mutate the branch again after
+ * this flag is cleared.
  *
  * @throws {DubError} If the branch is not tracked, is the root, or both
  *   `--upstack` and `--downstack` are passed.
