@@ -256,6 +256,12 @@ Use AI to help resolve conflicts:
 dub ai resolve
 ```
 
+If two providers are configured, DubStack asks both providers in parallel,
+marks exact agreement as high confidence, and shows lower-confidence files
+first. Use `dub ai resolve --no-adjudicate` for the original single-provider
+path, or `dub ai resolve --adjudicate` when you want the command to require two
+providers.
+
 ## Notes
 
 - AI requires `dub config ai-assistant on` in the current repository.

@@ -38,6 +38,12 @@ export interface PrMergeStatus {
   mergeStateStatus: string | null;
 }
 
+export type MergeMethod = 'merge' | 'squash' | 'rebase';
+
+export interface EnableAutoMergeResult {
+  method: MergeMethod;
+}
+
 let ghRetryOverrides: Partial<RetryOptions> = {};
 
 /**
@@ -81,6 +87,8 @@ function isPermanentGhError(err: unknown): boolean {
   if (normalized.includes('could not resolve to a pullrequest')) return true;
   if (normalized.includes('no pull requests found')) return true;
   if (normalized.includes('enoent')) return true;
+  if (isMergeMethodUnavailable(message)) return true;
+  if (isAutoMergeSetupUnavailable(message)) return true;
   return false;
 }
 
@@ -780,6 +788,144 @@ export async function getPrMergeStatusByNumber(
   }
 }
 
+/**
+ * Returns whether GitHub auto-merge is already queued for a PR.
+ */
+export async function isPrAutoMergeEnabled(
+  prNumber: number,
+  cwd: string,
+): Promise<boolean> {
+  let stdout: string;
+  try {
+    const result = await runGh(
+      [
+        'pr',
+        'view',
+        String(prNumber),
+        '--json',
+        'autoMergeRequest',
+        '--jq',
+        '.',
+      ],
+      { cwd },
+    );
+    stdout = result.stdout;
+  } catch (error) {
+    const root = unwrapRetryError(error);
+    const message = root instanceof Error ? root.message : String(root);
+    throw new DubError(
+      `Failed to check auto-merge status for PR #${prNumber}: ${message}`,
+      [
+        `Run 'gh pr view ${prNumber} --json autoMergeRequest' to inspect the response.`,
+        "Run 'gh auth status' to verify authentication, then retry.",
+      ],
+    );
+  }
+
+  const trimmed = stdout.trim();
+  if (!trimmed || trimmed === 'null') return false;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      autoMergeRequest?: unknown;
+    };
+    return parsed.autoMergeRequest != null;
+  } catch {
+    throw new DubError(
+      `Failed to parse auto-merge status for PR #${prNumber}.`,
+      [
+        `Run 'gh pr view ${prNumber} --json autoMergeRequest' to inspect.`,
+        'Retry once GitHub is healthy.',
+      ],
+    );
+  }
+}
+
+/**
+ * Enables GitHub auto-merge for a PR. Starts with the requested method and
+ * falls back across the other GitHub-supported methods if the repository does
+ * not allow that merge style.
+ */
+export async function enablePrAutoMerge(
+  prNumber: number,
+  cwd: string,
+  options: { method?: MergeMethod } = {},
+): Promise<EnableAutoMergeResult> {
+  const methods = methodFallbackOrder(options.method ?? 'squash');
+  let lastMethod = methods[0];
+  let lastMessage = '';
+
+  for (const method of methods) {
+    lastMethod = method;
+    try {
+      await runGh(
+        ['pr', 'merge', String(prNumber), '--auto', mergeMethodFlag(method)],
+        { cwd, stdio: 'inherit' },
+      );
+      return { method };
+    } catch (error) {
+      const root = unwrapRetryError(error);
+      lastMessage = root instanceof Error ? root.message : String(root);
+      if (isMergeMethodUnavailable(lastMessage)) continue;
+      throw autoMergeError(prNumber, lastMessage);
+    }
+  }
+
+  throw autoMergeError(
+    prNumber,
+    `none of the requested merge methods are available (last tried '${lastMethod}'): ${lastMessage}`,
+  );
+}
+
+function methodFallbackOrder(preferred: MergeMethod): MergeMethod[] {
+  const fallback: MergeMethod[] = ['squash', 'merge', 'rebase'];
+  return [preferred, ...fallback.filter((method) => method !== preferred)];
+}
+
+function mergeMethodFlag(method: MergeMethod): string {
+  if (method === 'squash') return '--squash';
+  if (method === 'rebase') return '--rebase';
+  return '--merge';
+}
+
+function isMergeMethodUnavailable(message: string): boolean {
+  const normalized = message.toLowerCase();
+  const unavailable =
+    normalized.includes('not allowed') ||
+    normalized.includes('not enabled') ||
+    normalized.includes('disabled') ||
+    normalized.includes('unavailable');
+  return Boolean(
+    unavailable &&
+      (normalized.includes('merge method') ||
+        normalized.includes('squash merge') ||
+        normalized.includes('rebase merge') ||
+        normalized.includes('merge commit')),
+  );
+}
+
+function isAutoMergeSetupUnavailable(message: string): boolean {
+  const normalized = message.toLowerCase();
+  if (!normalized.includes('auto-merge')) return false;
+  return (
+    normalized.includes('not allowed') ||
+    normalized.includes('not available') ||
+    normalized.includes('not enabled') ||
+    normalized.includes('disabled')
+  );
+}
+
+function autoMergeError(prNumber: number, message: string): DubError {
+  return new DubError(
+    `Failed to enable auto-merge for PR #${prNumber}: ${message}`,
+    [
+      'GitHub auto-merge requires repository auto-merge to be enabled and branch protection or required checks on the PR base branch.',
+      `Run 'gh pr view ${prNumber} --web' to inspect merge requirements.`,
+      `Run 'gh pr merge ${prNumber} --auto --squash' manually to see GitHub's raw error.`,
+    ],
+  );
+}
+
 function isPrNotFoundError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
@@ -1007,7 +1153,7 @@ export async function mergePr(
   prNumber: number,
   cwd: string,
   options: {
-    method?: 'merge' | 'squash' | 'rebase';
+    method?: MergeMethod;
     deleteBranch?: boolean;
   } = {},
 ): Promise<void> {

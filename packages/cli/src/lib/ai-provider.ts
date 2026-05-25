@@ -33,6 +33,14 @@ export interface ResolvedAiProvider {
   modelId: string;
 }
 
+const AUTO_PROVIDER_ORDER: ResolvedAiProviderName[] = [
+  'google',
+  'anthropic',
+  'gateway',
+  'bedrock',
+  'openai',
+];
+
 export function resolveAiProvider(input: {
   deps: ResolveAiProviderDeps;
   providerConfig: DubConfig['ai']['provider'];
@@ -96,6 +104,39 @@ export function resolveAiProvider(input: {
   ]);
 }
 
+export function resolveAdjudicationAiProviders(input: {
+  deps: ResolveAiProviderDeps;
+  providerConfig: DubConfig['ai']['provider'];
+}): ResolvedAiProvider[] {
+  if (input.providerConfig.selected !== 'auto') {
+    const selected = normalizeSelectedProvider(input.providerConfig.selected);
+    const primary = resolveProviderByName(
+      selected,
+      input.deps,
+      input.providerConfig,
+    );
+    const secondary = AUTO_PROVIDER_ORDER.filter(
+      (provider) => provider !== selected,
+    )
+      .filter((provider) =>
+        isProviderConfigured(provider, input.providerConfig),
+      )
+      .slice(0, 1)
+      .map((provider) =>
+        resolveProviderByName(provider, input.deps, input.providerConfig),
+      );
+    return [primary, ...secondary];
+  }
+
+  const providers = getAdjudicationProviderOrder(input.providerConfig);
+  return providers
+    .filter((provider) => isProviderConfigured(provider, input.providerConfig))
+    .slice(0, 2)
+    .map((provider) =>
+      resolveProviderByName(provider, input.deps, input.providerConfig),
+    );
+}
+
 export function buildAiProviderOptions(
   provider: Pick<ResolvedAiProvider, 'provider' | 'modelId'>,
   options: { withWebBrowsing: boolean },
@@ -128,6 +169,68 @@ export function buildAiProviderOptions(
   }
 
   return {};
+}
+
+function getAdjudicationProviderOrder(
+  providerConfig: DubConfig['ai']['provider'],
+): ResolvedAiProviderName[] {
+  if (providerConfig.selected === 'auto') return AUTO_PROVIDER_ORDER;
+
+  const selected = normalizeSelectedProvider(providerConfig.selected);
+  return [
+    selected,
+    ...AUTO_PROVIDER_ORDER.filter((provider) => provider !== selected),
+  ];
+}
+
+function normalizeSelectedProvider(
+  selected: Exclude<DubConfig['ai']['provider']['selected'], 'auto'>,
+): ResolvedAiProviderName {
+  return selected === 'gemini' ? 'google' : selected;
+}
+
+function isProviderConfigured(
+  provider: ResolvedAiProviderName,
+  providerConfig: DubConfig['ai']['provider'],
+): boolean {
+  if (provider === 'google') {
+    return Boolean(process.env.DUBSTACK_GEMINI_API_KEY?.trim());
+  }
+
+  if (provider === 'anthropic') {
+    return Boolean(process.env.DUBSTACK_ANTHROPIC_API_KEY?.trim());
+  }
+
+  if (provider === 'gateway') {
+    return Boolean(process.env.DUBSTACK_AI_GATEWAY_API_KEY?.trim());
+  }
+
+  if (provider === 'bedrock') {
+    return Boolean(
+      process.env.DUBSTACK_BEDROCK_AWS_REGION?.trim() &&
+        getConfiguredModel('bedrock', providerConfig),
+    );
+  }
+
+  return Boolean(process.env.DUBSTACK_OPENAI_API_KEY?.trim());
+}
+
+function resolveProviderByName(
+  provider: ResolvedAiProviderName,
+  deps: ResolveAiProviderDeps,
+  providerConfig: DubConfig['ai']['provider'],
+): ResolvedAiProvider {
+  if (provider === 'google') return resolveGoogleProvider(deps, providerConfig);
+  if (provider === 'anthropic') {
+    return resolveAnthropicProvider(deps, providerConfig);
+  }
+  if (provider === 'gateway') {
+    return resolveGatewayProvider(deps, providerConfig);
+  }
+  if (provider === 'bedrock') {
+    return resolveBedrockProvider(deps, providerConfig);
+  }
+  return resolveOpenAiProvider(deps, providerConfig);
 }
 
 function resolveGoogleProvider(

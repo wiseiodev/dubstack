@@ -16,6 +16,7 @@ import {
   __setGhRetryOptionsForTesting,
   checkGhAuth,
   createPr,
+  enablePrAutoMerge,
   ensureGhInstalled,
   getAllPrSyncInfoBatch,
   getBranchPrLifecycleState,
@@ -26,6 +27,7 @@ import {
   getPrStateByNumber,
   getRepositoryWebUrl,
   getStackOverviewPrBatch,
+  isPrAutoMergeEnabled,
   markPrReady,
   mergePr,
   openPrInBrowser,
@@ -215,6 +217,24 @@ describe('getPrMergeStatusByNumber', () => {
       mergeable: null,
       mergeStateStatus: null,
     });
+  });
+});
+
+describe('isPrAutoMergeEnabled', () => {
+  it('returns true when autoMergeRequest is present', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({ autoMergeRequest: { enabledAt: 'now' } }),
+    });
+
+    await expect(isPrAutoMergeEnabled(5, '/repo')).resolves.toBe(true);
+  });
+
+  it('returns false when autoMergeRequest is null', async () => {
+    mockExeca.mockResolvedValueOnce({
+      stdout: JSON.stringify({ autoMergeRequest: null }),
+    });
+
+    await expect(isPrAutoMergeEnabled(5, '/repo')).resolves.toBe(false);
   });
 });
 
@@ -719,6 +739,84 @@ describe('mergePr', () => {
       ['pr', 'merge', '44', '--squash'],
       { cwd: '/repo', stdio: 'inherit' },
     );
+  });
+});
+
+describe('enablePrAutoMerge', () => {
+  it('enables auto-merge with default squash strategy', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(enablePrAutoMerge(44, '/repo')).resolves.toEqual({
+      method: 'squash',
+    });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--squash'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+
+  it('passes through the requested merge method', async () => {
+    mockExeca.mockResolvedValueOnce({ stdout: '' });
+
+    await expect(
+      enablePrAutoMerge(44, '/repo', { method: 'rebase' }),
+    ).resolves.toEqual({ method: 'rebase' });
+    expect(mockExeca).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--rebase'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+
+  it('falls back when the preferred merge method is disabled', async () => {
+    mockExeca
+      .mockRejectedValueOnce(new Error('squash merge is disabled'))
+      .mockResolvedValueOnce({ stdout: '' });
+
+    await expect(enablePrAutoMerge(44, '/repo')).resolves.toEqual({
+      method: 'merge',
+    });
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      1,
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--squash'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+    expect(mockExeca).toHaveBeenNthCalledWith(
+      2,
+      'gh',
+      ['pr', 'merge', '44', '--auto', '--merge'],
+      { cwd: '/repo', stdio: 'inherit' },
+    );
+  });
+
+  it('surfaces branch-protection setup failures with an actionable error', async () => {
+    mockExeca.mockRejectedValueOnce(
+      new Error(
+        'Auto-merge is not available for pull requests without branch protection',
+      ),
+    );
+
+    await expect(enablePrAutoMerge(44, '/repo')).rejects.toMatchObject({
+      message: expect.stringContaining('Failed to enable auto-merge'),
+      recovery: expect.arrayContaining([
+        expect.stringContaining('branch protection'),
+      ]),
+    });
+  });
+
+  it('does not treat repository-level auto-merge setup failures as method fallback', async () => {
+    mockExeca.mockRejectedValueOnce(
+      new Error('Auto-merge is disabled for this repository'),
+    );
+
+    await expect(enablePrAutoMerge(44, '/repo')).rejects.toMatchObject({
+      message: expect.stringContaining(
+        'Auto-merge is disabled for this repository',
+      ),
+    });
+    expect(mockExeca).toHaveBeenCalledTimes(1);
   });
 });
 

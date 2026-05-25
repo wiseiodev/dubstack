@@ -132,6 +132,8 @@ dub submit --branch feat/api
 dub submit --dry-run
 dub submit --ai
 dub submit --no-ai
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method squash
 dub flow --ai -a
 dub f --dry-run
 ```

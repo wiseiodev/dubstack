@@ -170,6 +170,10 @@ dub ss --branch feat/api
 
 # AI-generate PR description body
 dub submit --ai
+
+# queue GitHub auto-merge for submitted PRs
+dub submit --merge-when-ready
+dub submit --merge-when-ready --method squash
 ```
 
 Open PR in browser:
@@ -258,8 +262,9 @@ dub restack --continue
 Unified recovery commands:
 
 ```bash
-dub continue   # continue active restack/rebase
-dub abort      # abort active restack/rebase
+dub continue      # continue active restack/rebase
+dub continue --ai # ask configured AI provider(s) to resolve conflicts first
+dub abort         # abort active restack/rebase
 ```
 
 ## 9) Merge In Safe Order

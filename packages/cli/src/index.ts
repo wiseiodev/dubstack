@@ -1140,8 +1140,16 @@ program
   .command('continue')
   .description('Continue the active restack or git rebase operation')
   .option('--ai', 'Use AI to resolve conflicts before continuing')
-  .action(async (options: { ai?: boolean }) => {
-    const result = await continueCommand(process.cwd(), { ai: options.ai });
+  .option('--adjudicate', 'Resolve conflicts with two configured AI providers')
+  .option(
+    '--no-adjudicate',
+    'Use one configured AI provider for conflict resolution',
+  )
+  .action(async (options: { ai?: boolean; adjudicate?: boolean }) => {
+    const result = await continueCommand(process.cwd(), {
+      ai: options.ai,
+      adjudicate: options.adjudicate,
+    });
     if (result.continued === 'ai-resolve') {
       return;
     }
@@ -1238,6 +1246,15 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option(
+    '--merge-when-ready',
+    'Queue GitHub auto-merge for every submitted PR',
+  )
+  .option(
+    '--method <method>',
+    'Auto-merge strategy: merge|squash|rebase',
+    parseMergeMethod,
+  )
   .addHelpText(
     'after',
     `
@@ -1249,7 +1266,9 @@ Examples:
   $ dub submit --dry-run    Preview what would happen
   $ dub submit --draft      Create new PRs as drafts
   $ dub submit --publish    Promote existing draft PRs to ready for review
-  $ dub submit --ai         Generate a PR description before updating the PR body`,
+  $ dub submit --ai         Generate a PR description before updating the PR body
+  $ dub submit --merge-when-ready --method squash
+                            Queue GitHub auto-merge for submitted PRs`,
   )
   .action(runSubmit);
 
@@ -1277,6 +1296,15 @@ program
     parseSubmitPath,
   )
   .option('--fix', '[deprecated] No-op alias kept for script compatibility')
+  .option(
+    '--merge-when-ready',
+    'Queue GitHub auto-merge for every submitted PR',
+  )
+  .option(
+    '--method <method>',
+    'Auto-merge strategy: merge|squash|rebase',
+    parseMergeMethod,
+  )
   .action(runSubmit);
 
 program
@@ -2109,13 +2137,25 @@ program
       )
       .option('--dry-run', 'Show proposed resolutions without applying')
       .option('--abort', 'Abort the active rebase/restack operation')
-      .action(async (options: { dryRun?: boolean; abort?: boolean }) => {
-        const { aiResolve } = await import('./commands/ai-resolve');
-        await aiResolve(process.cwd(), {
-          dryRun: options.dryRun,
-          abort: options.abort,
-        });
-      }),
+      .option(
+        '--adjudicate',
+        'Resolve conflicts with two configured AI providers',
+      )
+      .option('--no-adjudicate', 'Use one configured AI provider')
+      .action(
+        async (options: {
+          dryRun?: boolean;
+          abort?: boolean;
+          adjudicate?: boolean;
+        }) => {
+          const { aiResolve } = await import('./commands/ai-resolve');
+          await aiResolve(process.cwd(), {
+            dryRun: options.dryRun,
+            abort: options.abort,
+            adjudicate: options.adjudicate,
+          });
+        },
+      ),
   );
 
 program
@@ -2687,6 +2727,8 @@ async function runSubmit(options: {
   stack?: boolean;
   branch?: string;
   fix?: boolean;
+  mergeWhenReady?: boolean;
+  method?: 'merge' | 'squash' | 'rebase';
 }) {
   const result = await submit(process.cwd(), options.dryRun ?? false, {
     ai: options.ai,
@@ -2699,6 +2741,8 @@ async function runSubmit(options: {
     stack: options.stack,
     branch: options.branch,
     fix: options.fix ?? false,
+    mergeWhenReady: options.mergeWhenReady,
+    method: options.method,
   });
 
   if (result.pushed.length > 0 && result.dryRun) {
@@ -2725,6 +2769,23 @@ async function runSubmit(options: {
     }
     for (const branch of [...result.created, ...result.updated]) {
       console.log(chalk.dim(`  ↳ ${branch}`));
+    }
+    if (result.autoMergeEnabled.length > 0) {
+      console.log(
+        chalk.green(
+          `✔ Queued auto-merge for ${result.autoMergeEnabled.length} PR(s)`,
+        ),
+      );
+      for (const branch of result.autoMergeEnabled) {
+        console.log(chalk.dim(`  ↳ ${branch}`));
+      }
+    }
+    if (result.autoMergeSkipped.length > 0) {
+      console.log(
+        chalk.dim(
+          `  ↳ Auto-merge already queued for ${result.autoMergeSkipped.length} PR(s)`,
+        ),
+      );
     }
     return;
   }
