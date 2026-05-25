@@ -1,0 +1,92 @@
+---
+title: Migrating from spr
+description: Move from spr (Stacked Pull Requests) to DubStack and recreate your active stack in 30 minutes.
+---
+
+[spr](https://github.com/getcord/spr) implements stacked pull requests by mapping each git commit to a GitHub PR. Like ghstack, it rewrites commit messages and uses synthesised remote branches. DubStack uses a one-branch-per-PR model that survives normal `git switch` workflows.
+
+## Command Mapping
+
+| spr | DubStack | Notes |
+|---|---|---|
+| `spr diff` | `dub submit --stack` | Push the stack and open/refresh PRs |
+| `spr update` | `dub submit` | Refresh PR contents for the current downstack |
+| `spr land` | `dub merge-next` / `dub land` | Refuses out-of-order landings |
+| `spr amend` | `dub modify` | Amend HEAD and restack descendants |
+| `spr list` | `dub log --stack` | Visual stack tree |
+| `spr status` | `dub status` | Branch + PR state |
+| `spr patch <pr>` | `gh pr checkout <pr>` then `dub track` | DubStack does not own this primitive |
+| `spr close <pr>` | `gh pr close <pr>` | DubStack delegates PR close to `gh` |
+| Pre-commit hook rewriting | n/a | DubStack uses real branches; no commit-msg trailer needed |
+
+## Conceptual Differences
+
+- **One commit per PR vs. one branch per PR.** spr maintains the invariant "1 commit ↔ 1 PR" by injecting a `pr-XXXX` identifier into each commit message and pushing synthesised branches. DubStack maintains "1 branch ↔ 1 PR" and never rewrites your commits.
+- **No commit-msg rewriting.** spr's `commit-msg` hook appends `pr-<number>` to every commit. DubStack never rewrites commits; the PR ↔ branch link lives in `.git/dubstack/state.json` and `refs/dubstack/*`.
+- **Restack is explicit.** `spr update` rewrites every commit in the stack on every invocation. `dub restack` only rebases descendants of branches whose parents have moved, and saves an undo entry.
+- **Merge queue support.** `dub submit --merge-when-ready --method squash` queues GitHub auto-merge for every PR in scope. spr leaves merging to the GitHub UI or `spr land`.
+- **AI features.** `dub create --ai`, `dub submit --ai`, `dub flow`, `dub absorb --ai`. spr does not include LLM features; configure DubStack's provider with `dub config ai-provider`.
+- **Multi-trunk.** DubStack supports multiple long-lived trunks (`dub trunk add`) within one repo. spr assumes a single main branch.
+
+## Common Pitfalls
+
+- **`pr-XXXX` trailers stay in your history.** spr writes those identifiers as commit-message trailers. DubStack does not strip them; you can leave them alone or rewrite history with `git filter-repo --message-callback`. Either way DubStack ignores them.
+- **spr depends on a clean working tree.** DubStack tolerates dirty working trees for read-only commands but refuses to mutate state when a rebase is in progress; use `dub doctor` to diagnose.
+- **PR identifiers are different.** spr-managed PRs include the trailer; DubStack-managed PRs do not. If you keep both during the transition, do not let `spr update` retarget DubStack PRs — it will rewrite their commit messages.
+- **Reviewers.** `spr config.reviewers` is not migrated. Run `dub config reviewers alice,@org/team`.
+
+## 30-Minute Migration Script
+
+```bash
+# 1. Install DubStack
+npm install -g dubstack
+
+# 2. Inside the repo, initialize DubStack
+cd path/to/repo
+dub init
+
+# 3. For each open spr PR you own, create a real git branch at that commit.
+#    spr stores the relationship as a commit-message trailer; list them:
+git log main..HEAD --format='%H %s' | grep -i 'pr-' | tac
+
+# 4. Walking from oldest to newest, create + name a branch at each SHA:
+git switch main
+git switch -c feat/auth-base    <oldest-sha>
+git switch -c feat/auth-login   <next-sha>
+git switch -c feat/auth-mfa     <newest-sha>
+
+# 5. Adopt each branch into DubStack
+git switch feat/auth-base
+dub track --parent main
+git switch feat/auth-login
+dub track --parent feat/auth-base
+git switch feat/auth-mfa
+dub track --parent feat/auth-login
+
+# 6. Verify the stack
+dub log --stack
+
+# 7. (Optional) AI + reviewers
+dub config ai-assistant on
+dub config ai-provider anthropic
+dub config reviewers alice,@org/backend
+
+# 8. Submit the new stack
+dub submit --stack --ai
+
+# 9. After the new PRs are merged, close the matching spr-managed PRs.
+#    Then uninstall spr:
+brew uninstall spr || cargo uninstall spr
+
+# 10. Remove spr's pre-commit hook
+git config --unset commit.template || true
+rm -f .git/hooks/commit-msg     # if it was an spr hook only
+```
+
+If your team uses spr only as a land tool, you can hold off on closing the spr PRs and use `dub` for local stack manipulation until the last spr PR merges.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [JSON Output](/docs/guides/json-output)

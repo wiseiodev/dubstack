@@ -2,13 +2,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as readline from 'node:readline/promises';
 import type { Readable, Writable } from 'node:stream';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import {
   type AiMetadataDependencies,
@@ -108,17 +102,13 @@ const PROTOCOL_VERSION = '2025-11-25';
 const SUPPORTED_PROTOCOL_VERSIONS = new Set(['2025-11-25', '2025-06-18']);
 const MAX_HISTORY_ARGS_LENGTH = 500;
 
-const DEFAULT_AI_METADATA_DEPS: AiMetadataDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
+let cachedAiMetadataDeps: AiMetadataDependencies | null = null;
+async function defaultAiMetadataDeps(): Promise<AiMetadataDependencies> {
+  if (!cachedAiMetadataDeps) {
+    cachedAiMetadataDeps = await loadAiDeps();
+  }
+  return cachedAiMetadataDeps;
+}
 
 const HISTORY_ARG_KEYS: Record<string, string[]> = {
   'dubstack.log': ['stack', 'all', 'reverse', 'prs', 'ci', 'refresh'],
@@ -999,7 +989,8 @@ export async function mcp(
   const output = options.output ?? process.stdout;
   const serverVersion = options.version ?? '0.0.0';
   const confirmMutating = options.confirmMutating ?? confirmMutatingTool;
-  const aiMetadataDeps = options.aiMetadataDeps ?? DEFAULT_AI_METADATA_DEPS;
+  const aiMetadataDeps =
+    options.aiMetadataDeps ?? (await defaultAiMetadataDeps());
   let buffer = '';
   let queue: Promise<void> = Promise.resolve();
 

@@ -1,11 +1,5 @@
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import input from '@inquirer/input';
-import { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import type { AiMetadataDependencies } from '../lib/ai-metadata';
 import {
@@ -124,18 +118,6 @@ export interface SplitResult {
 
 type SplitDependencies = AiMetadataDependencies;
 
-const DEFAULT_DEPS: SplitDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
-
 /**
  * Splits the current branch into the source branch plus one or more new
  * sibling branches sharing the same parent.
@@ -154,8 +136,9 @@ const DEFAULT_DEPS: SplitDependencies = {
 export async function split(
   cwd: string,
   options: SplitOptions,
-  deps: SplitDependencies = DEFAULT_DEPS,
+  depsArg?: SplitDependencies,
 ): Promise<SplitResult> {
+  const deps = depsArg ?? (await loadAiDeps());
   if (!(await isWorkingTreeClean(cwd))) {
     throw new DubError('Working tree has uncommitted changes.', [
       "Run 'git status' to see uncommitted changes.",

@@ -1,0 +1,97 @@
+---
+title: Migrating from ghstack
+description: Move from Meta's ghstack workflow (`ghstack`) to DubStack without re-creating any branches.
+---
+
+[ghstack](https://github.com/ezyang/ghstack) implements stacked diffs on top of GitHub by treating one local commit per PR and synthesising orphan `gh/<user>/<n>/{base,head,orig}` branches on push. DubStack takes the opposite approach: every PR has its own branch in your local checkout, mirroring how you work in `git switch`.
+
+This guide explains the model shift and walks through migrating an in-flight ghstack series in roughly 30 minutes.
+
+## Command Mapping
+
+| ghstack | DubStack | Notes |
+|---|---|---|
+| `ghstack` | `dub submit --stack` | Push everything in the stack and open/refresh PRs |
+| `ghstack land $URL` | `dub merge-next` / `dub land` | Land the next safe PR; retargets dependents |
+| `ghstack unlink` | `dub unlink <branch>` | Detach a branch from its parent |
+| `ghstack rage` | `dub doctor` | Diagnostic for misconfigured state |
+| `ghstack checkout $URL` | `dub co <branch>` | Charles will name the branch; pick it from the picker |
+| `ghstack hash` (n/a) | `dub info` | Stack-aware branch metadata |
+| Implicit rebase on push | `dub restack` | Explicit, undo-able restack |
+| Implicit PR description prefix | `dub submit --ai` or templated body | DubStack does not auto-prefix; configure via templates |
+
+(ghstack has a narrower surface than Graphite/Charcoal; many DubStack commands have no ghstack analog because ghstack does not model stacked branches locally.)
+
+## Conceptual Differences
+
+- **One commit per PR vs. one branch per PR.** ghstack rewrites your local history so each commit is mapped to its own pseudo-branch on the remote. DubStack keeps a real branch per PR in your working copy. The DubStack model is friendlier to bisect, blame, and IDE workflows because each PR is an ordinary git branch you can check out.
+- **No commit re-authoring.** DubStack does not amend or rewrite commits when you submit. ghstack rewrites the `gh-metadata` trailer on every push.
+- **PR base is a real branch.** DubStack PRs target the previous branch in your stack directly. ghstack PRs target a synthesised `gh/$user/$n/base` orphan branch, which can confuse code review tooling.
+- **Land semantics.** `ghstack land` squash-merges the bottom commit into `main`. `dub merge-next` (alias `dub land`) merges the next mergeable PR and retargets every dependent before deleting the branch — including in the GitHub merge queue when configured.
+- **Multi-author safe.** Because each PR is a real branch, collaborators can push to your stack without your local `gh-metadata` getting in the way.
+- **No remote write on read.** DubStack never pushes anything during `dub log`, `dub status`, or `dub info`. ghstack's `checkout` walks the remote to assemble the working copy.
+
+## Common Pitfalls
+
+- **Squash vs. merge.** `ghstack land` always squash-merges. DubStack's default is configurable per repo with `dub config submit-default` and per merge with `dub merge-next --method squash|merge|rebase`.
+- **PR commit messages.** ghstack uses the commit subject as the PR title and the body as the PR description. DubStack uses the same convention for new PRs but does **not** rewrite the PR title on subsequent submits. Edit titles in GitHub or pass `--ai` for an LLM-suggested rewrite.
+- **The `gh-metadata: Pull-Request resolved:` trailer.** DubStack does not add or rely on this trailer. You can leave it on existing commits or strip it during the migration with `git rebase -i`.
+- **Submodules and worktrees.** DubStack supports git worktrees and stores per-worktree state under `.git/worktrees/<id>/dubstack/`. ghstack does not.
+
+## 30-Minute Migration Script
+
+The cleanest path: convert each in-flight ghstack PR into a real local branch, then track it.
+
+```bash
+# 1. Install DubStack
+npm install -g dubstack
+
+# 2. Initialize. Safe alongside ghstack — DubStack writes only under .git/dubstack/
+cd path/to/repo
+dub init
+
+# 3. For each open ghstack PR you own, materialise a local branch.
+#    ghstack PR titles include "[ghstack-poisoned]" markers — these refer to
+#    your `orig` commits. Use the GitHub UI or `gh pr list --author @me` to
+#    enumerate; for each one, create a local branch off the PR's head SHA:
+#
+#    gh pr checkout <pr-number>
+#    git switch -c feat/<your-name>      # rename to something human
+#
+#    Or, for the entire stack at once, walk from oldest to newest and chain:
+git switch main
+git switch -c feat/auth-base         # bottom of the old ghstack
+git cherry-pick <bottom-orig-sha>    # the orig commit ghstack tracked
+git switch -c feat/auth-login        # next one up
+git cherry-pick <next-orig-sha>
+# ... and so on.
+
+# 4. Track every new branch in DubStack
+git switch feat/auth-base
+dub track --parent main
+git switch feat/auth-login
+dub track --parent feat/auth-base
+# etc.
+
+# 5. Sanity-check the chain
+dub log --stack
+
+# 6. Open new DubStack PRs and close the old ghstack PRs by hand. New PRs use
+#    real branch bases instead of the synthesised gh/<user>/<n>/base branches.
+dub submit --stack
+
+# 7. Once the team has approved + merged the new PRs, prune ghstack:
+pip uninstall ghstack
+git for-each-ref --format='%(refname)' refs/heads/gh/ \
+  | xargs -I {} git update-ref -d {}
+git push origin --delete $(git for-each-ref \
+  --format='%(refname:lstrip=3)' refs/heads/gh/)
+```
+
+If your team uses ghstack as a merge tool only (and not for daily local stacking), the simpler answer is: keep ghstack for landing, use DubStack for local stack manipulation, and switch fully once the last ghstack PR lands.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [JSON Output](/docs/guides/json-output)

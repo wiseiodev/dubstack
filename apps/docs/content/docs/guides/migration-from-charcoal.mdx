@@ -1,0 +1,97 @@
+---
+title: Migrating from Charcoal
+description: Map Charcoal (`ch`) commands to DubStack equivalents and migrate an active stack in under 30 minutes.
+---
+
+Charcoal is the open-source descendant of Graphite that ships under the `ch` binary. If you have `ch` muscle memory, this guide is the fast path to DubStack. Charcoal shares Graphite's command surface, so most patterns map one-to-one.
+
+## Command Mapping
+
+| Charcoal | DubStack | Notes |
+|---|---|---|
+| `ch create` / `ch c` | `dub create` | Same flags: `-a`, `-m`, `--ai` |
+| `ch modify` / `ch m` | `dub modify` / `dub m` | Amend HEAD and restack descendants |
+| `ch submit` / `ch s` | `dub submit` / `dub ss` | Defaults to downstack; pass `--stack` for the full tree |
+| `ch sync` | `dub sync` | `--all` covers every tracked stack |
+| `ch checkout` / `ch co` | `dub checkout` / `dub co` | Interactive picker with no argument |
+| `ch log` / `ch ls` | `dub log` / `dub ls` | `--stack`, `--all`, `--json` |
+| `ch up` / `ch down` | `dub up` / `dub down` | Identical |
+| `ch top` / `ch bottom` | `dub top` / `dub bottom` | Identical |
+| `ch info` | `dub info` | `--json` available |
+| `ch pr` | `dub pr` | Opens GitHub PR for the current branch |
+| `ch restack` | `dub restack` | Run after `git rebase` to fix up children |
+| `ch continue` | `dub continue` | `--ai` to resolve conflicts via LLM |
+| `ch abort` | `dub abort` | Restack/rebase rollback |
+| `ch track` / `ch trunk` | `dub track` / `dub trunk` | Multi-trunk supported |
+| `ch untrack` | `dub untrack` | Keep the branch, drop metadata |
+| `ch delete` | `dub delete` | `--upstack`/`--downstack`/`--force` |
+| `ch absorb` | `dub absorb` | `--ai` for ambiguous fixups |
+| `ch fold` | `dub fold` | `--squash` for single-commit collapse |
+| `ch undo` | `dub undo` | 20-entry ring buffer + `dub redo` |
+
+## Conceptual Differences
+
+- **Local-first by design.** DubStack stores everything in `.git/dubstack/`. No external service, no telemetry, no shared cache file.
+- **State mirrored into git refs.** `refs/dubstack/*` lets you rebuild state on a fresh clone with `dub init --restore-from-refs`. Charcoal relies on `.charcoal_cache` and is sensitive to manual file deletion.
+- **Optional AI throughout.** `dub create --ai`, `dub submit --ai`, `dub flow`, `dub absorb --ai`. Configured per-repo with `dub config ai-provider` and friends; none of it is required to use the stacked-diff workflow.
+- **Safe merge order.** `dub merge-next` (alias `dub land`) refuses to merge a PR whose ancestors are open and retargets every child PR atomically.
+- **Multi-trunk support.** Register additional trunks with `dub trunk add` and `dub trunk set-default`.
+- **GitHub Action for retargeting.** `dub install retarget-action` drops a workflow that retargets dependents when a stack PR merges through the GitHub UI.
+
+## Common Pitfalls
+
+- **`ch submit` defaulted to the full stack; `dub submit` defaults to downstack.** Pass `--stack` explicitly in CI scripts.
+- **Charcoal's `.charcoal_user_config` is not migrated.** Re-run `dub config ai-provider`, `dub config reviewers`, and `dub config submit-default`.
+- **`ch downstack edit` has no direct equivalent.** Use `dub reorder` for interactive reordering or `dub move --before/--after` for one-shot moves.
+- **`ch sync --pull` is implicit.** `dub sync` fetches the trunk by default; pass `--fresh` to force a full refetch.
+
+## 30-Minute Migration Script
+
+```bash
+# 1. Install DubStack
+npm install -g dubstack
+
+# 2. Initialize alongside Charcoal — non-destructive
+cd path/to/repo
+dub init
+
+# 3. Adopt every Charcoal branch. DubStack walks ancestry to infer parents.
+for branch in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
+  if [ "$branch" != "main" ]; then
+    git switch "$branch"
+    dub track --no-interactive || true
+  fi
+done
+
+# 4. Verify the tree matches what Charcoal showed
+dub log --all
+
+# 5. (Optional) restore AI configuration
+dub config ai-assistant on
+dub config ai-provider anthropic
+dub config ai-model --provider anthropic claude-sonnet-4-7
+
+# 6. (Optional) reviewers
+dub config reviewers alice,@org/backend
+
+# 7. Restack to confirm the chain is intact
+dub restack
+
+# 8. Refresh PR descriptions with DubStack metadata
+dub submit --downstack --no-ai
+
+# 9. Once stable, remove Charcoal and its caches
+npm uninstall -g @stackedgit/charcoal
+rm -rf .charcoal_cache .charcoal_repo_config .charcoal_user_config
+
+# 10. Shim the muscle memory:
+#     alias ch=dub
+```
+
+If `dub log --all` differs from `ch log`, run `dub doctor` to diagnose. State is recoverable via `dub init --restore-from-refs`.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [GitHub Action: retarget](/docs/guides/github-action-retarget)

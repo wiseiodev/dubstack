@@ -1,10 +1,4 @@
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import {
   type AiReadinessDependencies,
   type AiReadinessIssue,
@@ -46,23 +40,19 @@ export interface ReadyOptions {
   aiSkipReview?: boolean;
 }
 
-const DEFAULT_AI_DEPS: AiReadinessDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
-
 export async function ready(
   cwd: string,
   options: ReadyOptions = {},
-  aiDeps: AiReadinessDependencies = DEFAULT_AI_DEPS,
+  aiDepsArg?: AiReadinessDependencies,
 ): Promise<ReadyResult> {
+  // Only resolve AI deps when the AI review path is actually exercised.
+  let aiDepsResolved: AiReadinessDependencies | null = aiDepsArg ?? null;
+  const aiDeps = async (): Promise<AiReadinessDependencies> => {
+    if (!aiDepsResolved) {
+      aiDepsResolved = await loadAiDeps();
+    }
+    return aiDepsResolved;
+  };
   const scope = options.scope ?? 'downstack';
   const doctorResult = await doctor(cwd);
   const blockers: string[] = doctorResult.issues.map((issue) => issue.code);
@@ -128,7 +118,7 @@ export async function ready(
               commitMessages,
               prDescription,
             },
-            aiDeps,
+            await aiDeps(),
             config.ai.provider,
           );
 

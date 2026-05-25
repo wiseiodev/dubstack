@@ -4,6 +4,7 @@ import type {
   McpMode,
   StorageBackend,
   SubmitDefault,
+  ThemeMode,
 } from '../lib/config';
 import { readConfig, writeConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
@@ -43,6 +44,11 @@ export interface ConfigStorageBackendResult {
 
 export interface ConfigSubmitDefaultResult {
   mode: SubmitDefault;
+  changed: boolean;
+}
+
+export interface ConfigThemeResult {
+  theme: ThemeMode;
   changed: boolean;
 }
 
@@ -389,6 +395,36 @@ export async function configStorageBackend(
   };
 }
 
+export async function configTheme(
+  cwd: string,
+  theme?: string,
+): Promise<ConfigThemeResult> {
+  const config = await readConfig(cwd);
+  if (theme == null) {
+    return {
+      theme: config.theme,
+      changed: false,
+    };
+  }
+
+  const parsed = parseTheme(theme);
+  const changed = config.theme !== parsed;
+  if (changed) {
+    await writeConfig(
+      {
+        ...config,
+        theme: parsed,
+      },
+      cwd,
+    );
+  }
+
+  return {
+    theme: parsed,
+    changed,
+  };
+}
+
 export async function configSubmitDefault(
   cwd: string,
   mode?: string,
@@ -479,6 +515,25 @@ function parseStorageBackend(value: string): StorageBackend {
     "Pass 'json' to use the default state.json backend.",
     "Pass 'sqlite' after running 'dub migrate storage --to sqlite'.",
   ]);
+}
+
+function parseTheme(value: string): ThemeMode {
+  if (
+    value === 'auto' ||
+    value === 'dark' ||
+    value === 'light' ||
+    value === 'none'
+  ) {
+    return value;
+  }
+  throw new DubError(
+    "Theme must be one of 'auto', 'dark', 'light', or 'none'.",
+    [
+      "Pass 'auto' to detect the terminal background (default).",
+      "Pass 'dark' or 'light' to force a palette.",
+      "Pass 'none' to disable colors entirely.",
+    ],
+  );
 }
 
 function parseAiAssistantState(value: string): boolean {

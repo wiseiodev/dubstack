@@ -1,14 +1,18 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import type { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import type { createAnthropic } from '@ai-sdk/anthropic';
+import type { createGoogleGenerativeAI } from '@ai-sdk/google';
+import type { createOpenAI } from '@ai-sdk/openai';
+import type { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import type {
+  fromIni,
+  fromNodeProviderChain,
+} from '@aws-sdk/credential-providers';
+import type { createGateway, generateText } from 'ai';
 import { execa } from 'execa';
+import { loadAiDeps } from '../lib/ai-deps';
 import { resolveAiProvider } from '../lib/ai-provider';
 import { readConfig } from '../lib/config';
 import { DubError } from '../lib/errors';
@@ -57,18 +61,9 @@ export interface AbsorbDependencies {
   readConfig: typeof readConfig;
 }
 
-const DEFAULT_DEPS: AbsorbDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-  readConfig,
-};
+async function defaultDeps(): Promise<AbsorbDependencies> {
+  return { ...(await loadAiDeps()), readConfig };
+}
 
 interface CommitInfo {
   sha: string;
@@ -118,8 +113,9 @@ const FIXUP_PREFIX_RE = /^(fixup|squash|amend)!\s+(.+)$/;
 export async function absorb(
   cwd: string,
   options: AbsorbOptions = {},
-  deps: AbsorbDependencies = DEFAULT_DEPS,
+  depsArg?: AbsorbDependencies,
 ): Promise<AbsorbResult> {
+  const deps = depsArg ?? (await defaultDeps());
   if (options.ai && options.stack) {
     throw new DubError("'--ai' cannot be combined with '--stack'.", [
       "Run 'dub absorb --ai' to resolve ambiguous WIP commits on the current branch.",

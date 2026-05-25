@@ -10,6 +10,10 @@
     "json-output",
     "multi-trunk",
     "github-action-retarget",
-    "migration-from-graphite"
+    "migration-from-graphite",
+    "migration-from-charcoal",
+    "migration-from-ghstack",
+    "migration-from-sapling",
+    "migration-from-spr"
   ]
 }

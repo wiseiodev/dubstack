@@ -1,0 +1,88 @@
+---
+title: Migrating from Sapling
+description: Map Sapling (`sl`) commands to DubStack and migrate a Sapling stack onto plain git in 30 minutes.
+---
+
+[Sapling](https://sapling-scm.com/) is Meta's open-source Mercurial-flavored git client. Its `sl` binary speaks to git repositories but presents an entirely different surface (commits as the unit, not branches). DubStack works on top of plain git with one branch per PR — closer to what GitHub expects. The migration is therefore largely about converting Sapling's anonymous-commit stacks into named branches.
+
+## Command Mapping
+
+| Sapling | DubStack | Notes |
+|---|---|---|
+| `sl pr submit` | `dub submit --stack` | DubStack defaults to downstack; pass `--stack` for full stacks |
+| `sl ssl` / `sl smartlog` | `dub log` / `dub log --stack` | ASCII tree of branches; `--json` available |
+| `sl next` / `sl prev` | `dub up` / `dub down` | Identical |
+| `sl goto <bookmark>` | `dub co <branch>` | Sapling's bookmarks ≈ DubStack's branches |
+| `sl rebase --restack` | `dub restack` | Restack everything that depends on a moved parent |
+| `sl absorb` | `dub absorb` | `--ai` for ambiguous fixups |
+| `sl fold` | `dub fold` | Default keeps commits; `--squash` collapses |
+| `sl split` | `dub split` | Interactive commit split |
+| `sl undo` | `dub undo` | Multi-step undo + `dub redo` |
+| `sl pull --rebase` | `dub sync` | Fetch trunks, restack tracked stacks |
+| `sl status` | `dub status` | DubStack also surfaces stack context |
+| `sl uncommit` | `git reset --soft HEAD^` | DubStack does not own this primitive; use git |
+| `sl debugdiff` / `sl pr` | `dub pr` | Opens GitHub PR for current branch |
+| `sl land` / `sl pr land` | `dub merge-next` / `dub land` | Refuses to land out-of-order PRs |
+
+## Conceptual Differences
+
+- **Branches replace bookmarks.** Sapling's bookmarks are lightweight pointers to commits and can be detached. DubStack uses real git branches, one per PR. The migration step below names every Sapling commit you care about as a branch.
+- **Restack is explicit and undoable.** Sapling's `sl rebase` auto-restacks descendants. DubStack restacks via `dub restack`, which saves an undo entry. Run `dub undo` to roll back if you misjudge a parent move.
+- **Smartlog → `dub log`.** DubStack's tree is branch-rooted; it shows PR state and CI status inline (`dub log --no-prs` / `dub log --no-ci` to hide).
+- **No `.sl` metadata.** DubStack keeps everything under `.git/dubstack/`. After migration, deleting `.sl` is safe.
+- **Conflict resolution.** Sapling's `sl continue` advances the rebase. DubStack offers `dub continue` and `dub continue --ai`, where AI proposes resolutions for two-way merge conflicts.
+- **Merge queue & auto-merge.** `dub submit --merge-when-ready --method squash` integrates with GitHub auto-merge. Sapling does not expose this directly.
+
+## Common Pitfalls
+
+- **Commits without branches won't survive the migration.** Walk the smartlog and create a branch at every Sapling commit you have an open PR for, then run `dub track --parent`.
+- **`sl pr submit` keeps a stable PR identifier.** DubStack opens new PRs when it sees new branches. Plan to close the Sapling-managed PRs after the migration; do not try to retarget them onto the new branches.
+- **Anonymous heads.** If you have anonymous heads in Sapling (no bookmark), give them names with `sl bookmark <name>` before exporting.
+- **Sapling's "preserved" commits across rebase.** DubStack respects git's standard `git rebase` semantics; in-flight rebases are picked up by `dub continue`.
+
+## 30-Minute Migration Script
+
+```bash
+# 1. Install DubStack
+npm install -g dubstack
+
+# 2. Map every Sapling commit you care about to a git branch.
+#    Inside the Sapling-managed working copy, list every commit with an active PR:
+sl ssl --template '{node|short} {desc|firstline}\n' | head -50
+
+# 3. For each open PR, create a real git branch at that commit.
+#    Sapling already writes git refs under .sl/store, so the SHAs are valid.
+git switch -c feat/auth-base    <sha-of-bottom-commit>
+git switch -c feat/auth-login   <sha-of-next-commit>
+# ... continue up the stack
+
+# 4. Switch to DubStack and adopt the new branches
+dub init
+git switch feat/auth-base
+dub track --parent main
+git switch feat/auth-login
+dub track --parent feat/auth-base
+# ...
+
+# 5. Verify the tree
+dub log --stack
+
+# 6. Re-submit the stack so each branch has a real GitHub PR
+dub submit --stack --ai
+
+# 7. After review + merge of the new PRs, close the corresponding Sapling PRs.
+#    Then delete .sl and uninstall Sapling.
+rm -rf .sl
+# Follow Sapling's uninstall instructions for your OS.
+
+# 8. (Optional) Wire up muscle memory:
+#     alias sl=dub
+```
+
+If your team relies on Sapling's interactive UI (`sl web`), keep it for review until everyone is on DubStack. DubStack does not ship a web UI; it relies on GitHub's PR view.
+
+## See Also
+
+- [Stacking Workflow](/docs/guides/stacking-workflow)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
+- [Multi-trunk stacks](/docs/guides/multi-trunk)

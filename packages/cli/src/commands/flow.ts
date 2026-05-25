@@ -1,14 +1,8 @@
 import * as fs from 'node:fs';
 import { stdin as input, stdout as output } from 'node:process';
 import * as readline from 'node:readline/promises';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
 import { execa } from 'execa';
+import { loadAiDeps } from '../lib/ai-deps';
 import { buildAiDiffContext } from '../lib/ai-diff-context';
 import {
   type AiMetadataDependencies,
@@ -88,34 +82,29 @@ interface FlowDependencies extends AiMetadataDependencies {
   ) => Promise<{ commitMessage: string; prDescription: string }>;
 }
 
-const DEFAULT_DEPS: FlowDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-  generateFlowMetadata,
-  readMetadataTemplates,
-  readConfig,
-  getCurrentBranch,
-  hasStagedChanges,
-  stageAll,
-  stageUpdate,
-  interactiveStage,
-  getDiff,
-  getDiffFileNames,
-  getDiffNumStat,
-  create,
-  submit,
-  commitStagedFromFile,
-  createTerminalRenderer,
-  promptApproval: promptApprovalChoice,
-  editGeneratedContent: editGeneratedContent,
-};
+async function buildDefaultDeps(): Promise<FlowDependencies> {
+  const ai = await loadAiDeps();
+  return {
+    ...ai,
+    generateFlowMetadata,
+    readMetadataTemplates,
+    readConfig,
+    getCurrentBranch,
+    hasStagedChanges,
+    stageAll,
+    stageUpdate,
+    interactiveStage,
+    getDiff,
+    getDiffFileNames,
+    getDiffNumStat,
+    create,
+    submit,
+    commitStagedFromFile,
+    createTerminalRenderer,
+    promptApproval: promptApprovalChoice,
+    editGeneratedContent: editGeneratedContent,
+  };
+}
 
 export async function flow(
   cwd: string,
@@ -123,7 +112,7 @@ export async function flow(
   deps: Partial<FlowDependencies> = {},
 ): Promise<FlowResult> {
   const resolvedDeps: FlowDependencies = {
-    ...DEFAULT_DEPS,
+    ...(await buildDefaultDeps()),
     ...deps,
   };
 

@@ -1,12 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
-import { fromIni, fromNodeProviderChain } from '@aws-sdk/credential-providers';
-import { createGateway, generateText } from 'ai';
+import { loadAiDeps } from '../lib/ai-deps';
 import {
   type AiMetadataDependencies,
   generatePrDescriptionSummary,
@@ -121,18 +115,6 @@ export interface SubmitResult {
 type SubmitDependencies = AiMetadataDependencies;
 type SubmitLifecycle = 'ready' | 'draft' | 'publish';
 
-const DEFAULT_DEPS: SubmitDependencies = {
-  generateText,
-  createGoogleGenerativeAI,
-  createAnthropic,
-  createGateway,
-  createAmazonBedrock,
-  createOpenAI,
-  createOpenAICompatible,
-  fromIni,
-  fromNodeProviderChain,
-};
-
 /**
  * Pushes branches in the current stack and creates/updates GitHub PRs.
  *
@@ -144,8 +126,9 @@ export async function submit(
   cwd: string,
   dryRun: boolean,
   options: SubmitOptions = {},
-  deps: SubmitDependencies = DEFAULT_DEPS,
+  depsArg?: SubmitDependencies,
 ): Promise<SubmitResult> {
+  const deps = depsArg ?? (await loadAiDeps());
   if (options.ai && options.noAi) {
     throw new DubError("'--ai' cannot be combined with '--no-ai'.", [
       "Pass '--ai' alone to force AI-generated PR descriptions.",

@@ -6,6 +6,7 @@ import { getDubDir } from './state';
 export type McpMode = 'read-only' | 'interactive' | 'trusted';
 export type StorageBackend = 'json' | 'sqlite';
 export type SubmitDefault = 'auto' | 'draft' | 'publish';
+export type ThemeMode = 'auto' | 'dark' | 'light' | 'none';
 
 export interface DubConfig {
   aiAssistantEnabled: boolean;
@@ -13,6 +14,7 @@ export interface DubConfig {
   reviewers: string[];
   storageBackend: StorageBackend;
   submitDefault: SubmitDefault;
+  theme: ThemeMode;
   ai: {
     defaults: {
       createMetadata: boolean;
@@ -72,6 +74,7 @@ const DEFAULT_CONFIG: DubConfig = {
   reviewers: [],
   storageBackend: 'json',
   submitDefault: 'auto',
+  theme: 'auto',
   ai: {
     defaults: {
       createMetadata: false,
@@ -164,6 +167,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
     reviewers: normalizeReviewers(config.reviewers),
     storageBackend: normalizeStorageBackend(config.storageBackend),
     submitDefault: normalizeSubmitDefault(config.submitDefault),
+    theme: normalizeTheme(config.theme),
     ai: {
       defaults: {
         createMetadata:
@@ -294,6 +298,18 @@ function normalizeSubmitDefault(value: unknown): SubmitDefault {
     return value;
   }
   return DEFAULT_CONFIG.submitDefault;
+}
+
+function normalizeTheme(value: unknown): ThemeMode {
+  if (
+    value === 'auto' ||
+    value === 'dark' ||
+    value === 'light' ||
+    value === 'none'
+  ) {
+    return value;
+  }
+  return DEFAULT_CONFIG.theme;
 }
 
 function normalizeAiProviderModel(value: unknown): string | null {
