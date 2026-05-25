@@ -1261,6 +1261,7 @@ DubStack stores local state in your repo:
 .git/dubstack/
 ├── state.json
 ├── undo-log.json
+├── redo-log.json
 └── restack-progress.json
 ```
 

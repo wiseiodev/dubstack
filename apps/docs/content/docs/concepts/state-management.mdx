@@ -9,7 +9,8 @@ DubStack stores all state locally in your repository under `.git/dubstack/`.
 
 - **`state.json`** — Branch tracking relationships (parent/child graph)
 - **`state.sqlite`** — Optional SQLite-backed branch tracking state for large repositories
-- **`undo-log.json`** — Multi-level undo/redo ring buffer (20 entries)
+- **`undo-log.json`** — Multi-level undo ring buffer (20 entries)
+- **`redo-log.json`** — Redo ring populated when `dub undo` runs; cleared on the next new mutation
 - **`restack-progress.json`** — In-progress rebase/restack state for recovery
 
 `state.json` is the default. See [SQLite Backend](/docs/guides/sqlite-backend) to opt in to SQLite storage.
