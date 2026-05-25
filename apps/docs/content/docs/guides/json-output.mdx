@@ -61,27 +61,31 @@ for the user to do.
 
 ## TypeScript types
 
-All wire shapes are exported from a single module so the CLI, the MCP server,
-and downstream tooling stay in sync:
+All wire shapes are defined in a single module so the CLI and the MCP server
+stay in sync. The `dubstack` npm package ships as a CLI binary only and does
+not publish a sub-path import, so downstream tooling should reference the
+source of truth at
+[`packages/cli/src/lib/json-schemas.ts`](https://github.com/wiseiodev/dubstack/blob/main/packages/cli/src/lib/json-schemas.ts)
+and mirror the types it needs:
 
 ```ts
-import type {
-  BranchInfoJsonOutput,
-  ChildrenJsonOutput,
-  DoctorJsonOutput,
-  HistoryJsonOutput,
-  JsonErrorEnvelope,
-  LogJsonOutput,
-  MergeCheckJsonOutput,
-  ParentJsonOutput,
-  ReadyJsonOutput,
-  StatusJsonOutput,
-  TrunkJsonOutput,
-} from 'dubstack/lib/json-schemas';
+// Mirror these exported types from packages/cli/src/lib/json-schemas.ts
+type BranchInfoJsonOutput = /* ... */;
+type ChildrenJsonOutput = /* ... */;
+type DoctorJsonOutput = /* ... */;
+type HistoryJsonOutput = /* ... */;
+type JsonErrorEnvelope = /* ... */;
+type LogJsonOutput = /* ... */;
+type MergeCheckJsonOutput = /* ... */;
+type ParentJsonOutput = /* ... */;
+type ReadyJsonOutput = /* ... */;
+type StatusJsonOutput = /* ... */;
+type TrunkJsonOutput = /* ... */;
 ```
 
-The module also exports `SCHEMA_VERSION`, `withSchemaVersion`, and
-`jsonErrorEnvelope` for code that produces or asserts on these payloads.
+The same module exports `SCHEMA_VERSION`, `withSchemaVersion`, and
+`jsonErrorEnvelope` for code inside this repo that produces or asserts on
+these payloads.
 
 ## Compatibility
 
@@ -91,8 +95,9 @@ The module also exports `SCHEMA_VERSION`, `withSchemaVersion`, and
 - `merge-check --json` exits 1 when any branch in scope fails the mergeability
   check, but still prints the full structured result so scripts can act on the
   per-branch findings instead of parsing an error message.
-- `ready --json` exits 1 when the AI readiness check finds critical issues
-  (same as the non-JSON behavior).
+- `ready --json` exits 1 whenever the readiness result reports `ready: false`
+  (any blocker — doctor failures, submit-preflight issues, or AI review).
+  Inspect the `blockers` array on the payload for the specific reasons.
 
 ## Examples
 

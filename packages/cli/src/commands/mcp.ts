@@ -1663,8 +1663,9 @@ async function mergeCheckTool(
   // `runMergeCheck` returns a full `MergeCheckResult` with `ok: false` for
   // per-branch failures, so MCP consumers see the same wire shape on success
   // and failure. Scope-resolution errors (e.g. untracked current branch)
-  // still throw `DubError`, which is propagated and handled by the outer
-  // MCP tool error envelope.
+  // still throw `DubError`, which is propagated and surfaced by the outer
+  // tool dispatcher as a JSON-RPC `tools/call` result with `isError: true`
+  // and the error message in a text content block (see handleToolCallRequest).
   return await runMergeCheck(cwd, {
     pr: optionalPositiveInteger(args.pr),
     branch: optionalString(args.branch),

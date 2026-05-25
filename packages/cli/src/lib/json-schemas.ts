@@ -71,7 +71,7 @@ export type ReadyJsonOutput = ReadyResult & { schemaVersion: SchemaVersion };
  */
 export function withSchemaVersion<T extends object>(
   payload: T,
-): T & { schemaVersion: SchemaVersion } {
+): Omit<T, 'schemaVersion'> & { schemaVersion: SchemaVersion } {
   return { ...payload, schemaVersion: SCHEMA_VERSION };
 }
 
