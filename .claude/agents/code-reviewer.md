@@ -47,7 +47,7 @@ Apply these principles from the code-principles skill. Read the reference files 
 - `create` must auto-initialize state via `ensureState(...)` — never assume state exists
 - `restack` and `submit` must fail clearly when stack context is invalid
 - `submit` scope flags (`--upstack`/`--downstack`/`--stack`/`--branch`) are mutually exclusive; tree stacks are supported. Legacy `--path` emits a deprecation warning.
-- `undo` is single-level only — don't silently extend it
+- `undo`/`redo` is multi-level (20-entry ring at `.git/dubstack/undo-log.json`); mutating commands save an entry before mutation, and a new mutation clears the redo log
 - Error messages are UX and tested — change them deliberately, update tests
 - Keep command files thin, push logic to `src/lib/*`
 - ESM imports, 2-space indent, single quotes, kebab-case files

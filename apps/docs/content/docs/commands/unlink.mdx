@@ -28,7 +28,7 @@ dub unlink <branch> --no-retarget
 
 ### Default (`--keep-children`)
 
-```
+```text
 Before:                           After (dub unlink feat/auth-login):
 main                              main
 └─ feat/auth-base                 └─ feat/auth-base
@@ -42,7 +42,7 @@ retargeted from `feat/auth-base` to `main` via `gh pr edit`.
 
 ### `--orphan-children`
 
-```
+```text
 Before:                           After (dub unlink feat/auth-login --orphan-children):
 main                              main
 └─ feat/auth-base                 └─ feat/auth-base

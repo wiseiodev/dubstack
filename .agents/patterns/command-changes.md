@@ -16,7 +16,7 @@ Use this pattern when modifying files under `src/commands/*`.
 
 - Ensure stack context is validated before mutating state.
 - Preserve submit linearity constraints during submit workflows.
-- Keep undo behavior single-level unless a scoped change explicitly expands it.
+- Preserve the multi-level `undo`/`redo` ring buffer contract (20 entries, mutating commands save before mutation, new mutations clear the redo log); don't shrink coverage without a scoped change.
 
 ## 4) Test Nearby
 
