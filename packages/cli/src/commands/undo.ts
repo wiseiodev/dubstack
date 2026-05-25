@@ -25,6 +25,7 @@ interface UndoResult {
     | 'rename'
     | 'move'
     | 'pop'
+    | 'reorder'
     | 'freeze'
     | 'unfreeze'
     | 'absorb'
@@ -34,12 +35,14 @@ interface UndoResult {
 
 /**
  * Undoes the last `dub create`, `dub restack`, `dub rename`, `dub move`,
- * `dub pop`, `dub freeze`, `dub unfreeze`, `dub absorb`, or `dub unlink` operation.
+ * `dub pop`, `dub reorder`, `dub freeze`, `dub unfreeze`, `dub absorb`,
+ * or `dub unlink` operation.
  *
  * Reversal strategy:
  * - **create**: Deletes the created branch, restores state, checks out the previous branch.
- * - **restack** or **move**: Resets every rebased branch to its pre-mutation tip
- *   via `git branch -f`, restores state, checks out the previous branch.
+ * - **restack**, **move**, **reorder**, or **absorb**: Resets every rebased branch to its
+ *   pre-mutation tip via `git branch -f`, restores state, checks out the
+ *   previous branch.
  * - **rename**: Renames the branch back to its original name via `git branch -m`, reverses
  *   the `refs/dubstack/last-pushed/<branch>` migration, and restores state. Refuses if a
  *   branch with the original name has been re-created in the meantime. Any push that
@@ -217,17 +220,38 @@ export async function undo(cwd: string): Promise<UndoResult> {
   await clearUndoEntry(cwd);
 
   const branchCount = Object.keys(entry.branchTips).length;
-  const details =
-    entry.operation === 'move'
-      ? `Restored ${branchCount} branches to pre-move state`
-      : entry.operation === 'absorb'
-        ? `Reset ${branchCount} branches to pre-absorb state`
-        : entry.operation === 'unlink'
-          ? 'Restored stack metadata to pre-unlink state'
-          : `Reset ${branchCount} branches to pre-restack state`;
+  const details = describeBranchResetDetails(entry.operation, branchCount);
 
   return {
     undone: entry.operation,
     details,
   };
+}
+
+/**
+ * Renders the success message for the branch-reset undo path
+ * (`restack`/`move`/`reorder`/`absorb`/`unlink`). Exhaustive switch with a `never` fallback
+ * so any future `UndoEntry.operation` value lands here as a typecheck error
+ * rather than silently falling through to the restack wording.
+ */
+function describeBranchResetDetails(
+  operation: 'restack' | 'move' | 'reorder' | 'absorb' | 'unlink',
+  branchCount: number,
+): string {
+  switch (operation) {
+    case 'move':
+      return `Restored ${branchCount} branches to pre-move state`;
+    case 'reorder':
+      return `Restored ${branchCount} branches to pre-reorder state`;
+    case 'absorb':
+      return `Reset ${branchCount} branches to pre-absorb state`;
+    case 'unlink':
+      return 'Restored stack metadata to pre-unlink state';
+    case 'restack':
+      return `Reset ${branchCount} branches to pre-restack state`;
+    default: {
+      const _exhaustive: never = operation;
+      return _exhaustive;
+    }
+  }
 }

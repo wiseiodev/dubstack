@@ -61,6 +61,7 @@ If you have `gt` muscle memory, use this as a fast map:
 | `gt submit` / `gt ss` | `dub submit` / `dub ss` |
 | `gt sync` | `dub sync` |
 | `gt checkout` / `gt co` | `dub checkout` / `dub co` |
+| `git checkout -` | `dub back` |
 | `gt log` / `gt ls` | `dub log` / `dub ls` |
 | `gt up` / `gt down` | `dub up` / `dub down` |
 | `gt top` / `gt bottom` | `dub top` / `dub bottom` |
@@ -320,6 +321,25 @@ dub trunk feat/auth-tests
 ```
 
 If branch metadata is missing, these commands print a remediation path using `dub track`.
+
+### `dub back`
+
+Return to a previously checked-out branch from DubStack checkout history.
+
+```bash
+# return to the previous branch
+dub back
+
+# go two available branch visits back
+dub back 2
+
+# inspect recent checkout history without switching
+dub back --list
+```
+
+Deleted local branches are skipped with a warning, and consumed history entries
+are removed so repeated `dub back` calls continue farther back instead of
+bouncing between the same two branches.
 
 ### `dub track [branch] [--parent <branch>]`
 

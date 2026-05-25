@@ -1,0 +1,37 @@
+---
+title: dub back
+description: Return to a previously checked-out branch from DubStack checkout history.
+---
+
+## Back
+
+```bash
+# Return to the previous branch
+dub back
+
+# Go two available branch visits back
+dub back 2
+
+# Show recent checkout history without switching
+dub back --list
+```
+
+`dub back` uses the DubStack checkout history recorded by commands such as
+`dub checkout`, `dub co`, `dub up`, `dub down`, `dub top`, `dub bottom`, and
+`dub create`.
+
+The command consumes history entries as it goes, so running `dub back` again
+continues farther back instead of bouncing between the same two branches.
+
+| Argument / Flag | Description |
+|---|---|
+| `[steps]` | Number of available history entries to go back. Defaults to `1`. |
+| `--list` | Print recent checkout history without switching branches. |
+
+### Missing branches
+
+If a branch recorded in history no longer exists locally, `dub back` skips it,
+prints a warning, and keeps looking for the next available branch.
+
+If no usable history exists, the command exits with a hint to run `dub co` or
+another DubStack navigation command first.

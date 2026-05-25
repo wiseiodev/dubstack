@@ -23,6 +23,7 @@ import chalk, { Chalk } from 'chalk';
 import { Command } from 'commander';
 import { abortCommand } from './commands/abort';
 import { absorb } from './commands/absorb';
+import { back, listBackHistory } from './commands/back';
 import { branchInfoOutput } from './commands/branch';
 import {
   checkout,
@@ -51,8 +52,9 @@ import { pop } from './commands/pop';
 import { postMerge } from './commands/post-merge';
 import { pr } from './commands/pr';
 import { prune } from './commands/prune';
-import { ready } from './commands/ready';
+import { type ReadyAiReviewResult, ready } from './commands/ready';
 import { rename } from './commands/rename';
+import { reorder } from './commands/reorder';
 import { repo } from './commands/repo';
 import { restack, restackContinue } from './commands/restack';
 import { revert } from './commands/revert';
@@ -426,6 +428,37 @@ program
       await printLog(process.cwd(), options);
     },
   );
+
+program
+  .command('back')
+  .argument('[steps]', 'Number of checkout-history entries to go back')
+  .option('-l, --list', 'List recent checkout history without switching')
+  .description('Return to a previously checked-out branch')
+  .action(async (stepsArg: string | undefined, options: { list?: boolean }) => {
+    if (options.list) {
+      const entries = await listBackHistory(process.cwd());
+      if (entries.length === 0) {
+        console.log(chalk.yellow('⚠ No checkout history found'));
+        return;
+      }
+      for (const [index, entry] of entries.entries()) {
+        console.log(
+          `${index + 1}. ${entry.branch} ${chalk.dim(`(${entry.via}, ${entry.at})`)}`,
+        );
+      }
+      return;
+    }
+
+    const result = await back(process.cwd(), parseBackSteps(stepsArg));
+    for (const entry of result.skipped) {
+      console.log(
+        chalk.yellow(
+          `⚠ Skipped '${entry.branch}' from checkout history because it no longer exists locally.`,
+        ),
+      );
+    }
+    console.log(chalk.green(`✔ Switched back to '${result.branch}'`));
+  });
 
 program
   .command('up')
@@ -1166,7 +1199,7 @@ program
 program
   .command('undo')
   .description(
-    'Undo the last dub create, restack, rename, move, pop, freeze, unfreeze, or unlink operation',
+    'Undo the last dub create, restack, rename, move, pop, reorder, freeze, unfreeze, absorb, or unlink operation',
   )
   .addHelpText(
     'after',
@@ -1478,6 +1511,13 @@ Examples:
 program
   .command('ready')
   .description('Run health + submit preflight checks for the current branch')
+  .option('--ai', 'Run an AI review-readiness check before submit')
+  .option(
+    '--ai-skip-review',
+    'Warn but do not block when the AI readiness check finds critical issues',
+  )
+  .option('--json', 'Output ready status as JSON')
+  .option('--verbose', 'Show the full AI readiness issue list')
   .option(
     '--scope <mode>',
     'Validation scope: current | downstack (default) | stack',
@@ -1490,27 +1530,52 @@ program
 Examples:
   $ dub ready                    Check current branch + ancestors (downstack)
   $ dub ready --scope current    Check just the current branch
-  $ dub ready --scope stack      Check every branch in the stack`,
+  $ dub ready --scope stack      Check every branch in the stack
+  $ dub ready --ai               Run AI review-readiness checks
+  $ dub ready --ai --scope stack Run AI checks for every branch in the stack`,
   )
-  .action(async (options: { scope: ScopeMode }) => {
-    const result = await ready(process.cwd(), { scope: options.scope });
-    console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
-    if (result.submitBranches.length > 0) {
-      console.log(
-        chalk.dim(
-          `Submit scope (${result.scope}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
-        ),
-      );
-    }
-    if (result.ready) {
-      console.log(chalk.green('✔ Ready to submit.'));
-      return;
-    }
-    console.log(chalk.yellow('⚠ Not ready to submit yet.'));
-    for (const blocker of result.blockers) {
-      console.log(chalk.yellow(`  - ${blocker}`));
-    }
-  });
+  .action(
+    async (options: {
+      scope: ScopeMode;
+      ai?: boolean;
+      aiSkipReview?: boolean;
+      json?: boolean;
+      verbose?: boolean;
+    }) => {
+      const result = await ready(process.cwd(), {
+        scope: options.scope,
+        ai: options.ai,
+        aiSkipReview: options.aiSkipReview,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        if (result.blockers.includes('ai-review')) {
+          process.exitCode = 1;
+        }
+        return;
+      }
+      console.log(chalk.dim(`Branch: ${result.checkedBranch}`));
+      if (result.submitBranches.length > 0) {
+        console.log(
+          chalk.dim(
+            `Submit scope (${result.scope}): ${result.submitBranches.join(' -> ')} (trunk: ${result.rootBranch})`,
+          ),
+        );
+      }
+      printReadyAiReview(result.aiReview, Boolean(options.verbose));
+      if (result.ready) {
+        console.log(chalk.green('✔ Ready to submit.'));
+        return;
+      }
+      console.log(chalk.yellow('⚠ Not ready to submit yet.'));
+      for (const blocker of result.blockers) {
+        console.log(chalk.yellow(`  - ${blocker}`));
+      }
+      if (result.blockers.includes('ai-review')) {
+        process.exitCode = 1;
+      }
+    },
+  );
 
 program
   .command('prune')
@@ -2218,6 +2283,81 @@ Examples:
   });
 
 program
+  .command('reorder')
+  .description(
+    'Interactively reorder or drop commits within the current branch',
+  )
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ dub reorder    Open the picker for the current branch's commits`,
+  )
+  .action(async () => {
+    const result = await reorder(process.cwd());
+
+    if (result.status === 'no-op') {
+      console.log(
+        chalk.yellow(
+          `⚠ Nothing to do: ${result.noOpReason ?? 'no changes in picker'}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'cancelled') {
+      console.log(
+        chalk.yellow(
+          `⚠ Reorder cancelled${result.noOpReason ? `: ${result.noOpReason}` : ''}.`,
+        ),
+      );
+      return;
+    }
+    if (result.status === 'exit' || result.status === 'conflict') {
+      const isReorderRebase = result.conflictSource === 'reorder';
+      const subject = isReorderRebase
+        ? `reordering '${result.conflictBranch}'`
+        : `restacking descendant '${result.conflictBranch}'`;
+      const verb = result.status === 'exit' ? 'left in conflict' : 'Conflict';
+      console.log(chalk.yellow(`⚠ ${verb} while ${subject}`));
+      if (isReorderRebase) {
+        // No `restack-progress.json` was written, so `dub continue` cannot
+        // resume on its own — point the user at the underlying git command,
+        // then `dub restack` afterwards to rebase descendants.
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: git rebase --continue',
+          ),
+        );
+        console.log(
+          chalk.dim(
+            "  Once the rebase finishes, run 'dub restack' to rebase descendants.",
+          ),
+        );
+        console.log(
+          chalk.dim('  Or run: git rebase --abort, then dub undo, to bail.'),
+        );
+      } else {
+        console.log(
+          chalk.dim(
+            '  Resolve conflicts, stage changes, then run: dub continue --ai (or dub continue)',
+          ),
+        );
+      }
+      return;
+    }
+    const kept = result.finalPicks.length;
+    const dropped = result.dropped.length;
+    console.log(
+      chalk.green(
+        `✔ Reordered ${kept} commit(s)${dropped > 0 ? `, dropped ${dropped}` : ''}`,
+      ),
+    );
+    if (result.rebased.length > 0) {
+      console.log(chalk.dim(`  ↳ rebased: ${result.rebased.join(', ')}`));
+    }
+  });
+
+program
   .command('pr')
   .argument('[branch]', 'Branch name or PR number to open')
   .description('Open a branch PR in your browser')
@@ -2739,6 +2879,17 @@ function parseSteps(positional?: string, option?: string): number {
   return parsed;
 }
 
+function parseBackSteps(positional?: string): number {
+  if (!positional) return 1;
+  const parsed = Number(positional);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new DubError('Back steps must be a positive integer.', [
+      "Pass a positive integer, for example 'dub back 2'.",
+    ]);
+  }
+  return parsed;
+}
+
 function parseSubmitPath(value: string): SubmitPathMode {
   if (value === 'current' || value === 'stack') return value;
   throw new DubError("Submit path must be either 'current' or 'stack'.", [
@@ -2807,6 +2958,49 @@ function describeScopeLabel(scope: SubmitScope): string {
       return 'downstack';
     case 'branch':
       return `branch ${scope.branch}`;
+  }
+}
+
+function printReadyAiReview(
+  aiReview: ReadyAiReviewResult | null,
+  verbose: boolean,
+): void {
+  if (!aiReview) return;
+
+  const issueCount = aiReview.branches.reduce(
+    (sum, branch) => sum + branch.issues.length,
+    0,
+  );
+  if (issueCount === 0) {
+    console.log(chalk.green('✔ AI review found no readiness issues.'));
+    return;
+  }
+
+  if (aiReview.skipped) {
+    console.log(
+      chalk.yellow('⚠ AI review gate bypassed with --ai-skip-review.'),
+    );
+  }
+
+  for (const branch of aiReview.branches) {
+    if (branch.issues.length === 0) {
+      console.log(chalk.green(`✔ AI review (${branch.branch}): no issues.`));
+      continue;
+    }
+
+    const visibleIssues = verbose ? branch.issues : branch.issues.slice(0, 3);
+    console.log(chalk.yellow(`AI review (${branch.branch}):`));
+    for (const issue of visibleIssues) {
+      console.log(chalk.yellow(`  - [${issue.severity}] ${issue.message}`));
+      console.log(chalk.dim(`    Action: ${issue.action}`));
+    }
+    if (!verbose && branch.issues.length > visibleIssues.length) {
+      console.log(
+        chalk.dim(
+          `    ${branch.issues.length - visibleIssues.length} more issue(s); rerun with --ai --verbose to show all.`,
+        ),
+      );
+    }
   }
 }
 
