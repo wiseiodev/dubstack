@@ -96,7 +96,7 @@ dub config reviewers
 dub config reviewers --clear
 ```
 
-`dub submit` applies configured defaults unless you pass `--reviewers` for a one-run override or `--no-reviewers` to skip reviewer requests. DubStack validates user reviewers against repository collaborators and team reviewers against organization team slugs before it pushes branches or mutates PRs, so invalid handles fail early with a DubStack error.
+`dub submit` applies configured defaults unless you pass `--reviewers` for a one-run override or `--no-reviewers` to skip reviewer requests. DubStack validates user reviewers against repository collaborators and team reviewers against organization team slugs with repository access before it pushes branches or mutates PRs, so invalid handles fail early with a DubStack error.
 
 ## Auto-Merge Queue
 

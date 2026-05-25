@@ -1108,15 +1108,21 @@ async function validateTeamReviewer(
   const normalized = reviewer.startsWith('@') ? reviewer.slice(1) : reviewer;
   const [org, slug] = normalized.split('/');
   try {
-    await runGh(['api', `orgs/${org}/teams/${slug}`, '--silent'], { cwd });
+    await runGh(
+      ['api', `orgs/${org}/teams/${slug}/repos/{owner}/{repo}`, '--silent'],
+      { cwd },
+    );
   } catch (error) {
     const root = unwrapRetryError(error);
     const message = root instanceof Error ? root.message : String(root);
-    throw new DubError(`Team reviewer '${reviewer}' could not be found.`, [
-      `Run 'gh api orgs/${org}/teams/${slug}' to inspect the failure.`,
-      `Remove '${reviewer}' from '--reviewers' or fix the organization/team slug.`,
-      `GitHub response: ${message}`,
-    ]);
+    throw new DubError(
+      `Team reviewer '${reviewer}' cannot review this repository.`,
+      [
+        `Run 'gh api orgs/${org}/teams/${slug}/repos/{owner}/{repo}' to inspect the failure.`,
+        `Remove '${reviewer}' from '--reviewers', fix the organization/team slug, or grant the team repository access.`,
+        `GitHub response: ${message}`,
+      ],
+    );
   }
 }
 

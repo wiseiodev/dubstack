@@ -719,7 +719,7 @@ describe('addPrReviewers', () => {
 });
 
 describe('validatePrReviewers', () => {
-  it('validates users against repo collaborators and teams against org team slugs', async () => {
+  it('validates users against repo collaborators and teams against repo access', async () => {
     mockExeca.mockResolvedValue({ stdout: '' });
 
     await validatePrReviewers(['alice', '@org/team'], '/repo');
@@ -733,7 +733,7 @@ describe('validatePrReviewers', () => {
     expect(mockExeca).toHaveBeenNthCalledWith(
       2,
       'gh',
-      ['api', 'orgs/org/teams/team', '--silent'],
+      ['api', 'orgs/org/teams/team/repos/{owner}/{repo}', '--silent'],
       { cwd: '/repo' },
     );
   });
@@ -743,6 +743,14 @@ describe('validatePrReviewers', () => {
 
     await expect(validatePrReviewers(['ghost'], '/repo')).rejects.toThrow(
       "Reviewer 'ghost' is not a collaborator",
+    );
+  });
+
+  it('surfaces team reviewers without repository access with a clean error', async () => {
+    mockExeca.mockRejectedValueOnce(new Error('HTTP 404: Not Found'));
+
+    await expect(validatePrReviewers(['@org/team'], '/repo')).rejects.toThrow(
+      "Team reviewer '@org/team' cannot review this repository",
     );
   });
 });
