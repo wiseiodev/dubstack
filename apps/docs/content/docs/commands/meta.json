@@ -24,6 +24,7 @@
     "unlink",
     "undo",
     "doctor",
+    "ready",
     "track",
     "rename",
     "revert",
