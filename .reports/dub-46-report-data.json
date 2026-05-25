@@ -244,8 +244,8 @@
     ]
   },
   "commit": {
-    "sha": "ad1fce1e640960db711d5b19dee3998038fcb343",
-    "shortSha": "ad1fce1",
+    "sha": "bb2a72958c39d1396ff8d3321d43fa9188b987df",
+    "shortSha": "bb2a729",
     "message": "feat: add AI prompt decisions\n\nCompletes DUB-46"
   }
 }
