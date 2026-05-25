@@ -227,8 +227,14 @@ export async function initState(
       if (await sqliteStateExists(cwd)) {
         return 'already_exists';
       }
-      await initSQLiteState(cwd);
-      await mirrorStateRefs({ stacks: [] }, cwd);
+      const defaultTrunk = await detectDefaultTrunk(cwd);
+      const emptyState: DubState = {
+        trunks: [defaultTrunk],
+        defaultTrunk,
+        stacks: [],
+      };
+      await initSQLiteState(cwd, emptyState);
+      await mirrorStateRefs(emptyState, cwd);
       return 'created';
     }
 
@@ -485,10 +491,13 @@ function normalizeStack(stack: Stack): Stack {
   };
 }
 
-function uniqueNonEmpty(values: string[]): string[] {
+function uniqueNonEmpty(values: unknown[]): string[] {
   return Array.from(
     new Set(
-      values.map((value) => value.trim()).filter((value) => value.length > 0),
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
     ),
   );
 }

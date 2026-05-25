@@ -18,6 +18,11 @@ interface StackRow {
   position: number;
 }
 
+interface TrunkRow {
+  name: string;
+  is_default: number | null;
+}
+
 interface BranchRow {
   name: string;
   stack_id: string;
@@ -49,14 +54,17 @@ export async function sqliteStateExists(cwd: string): Promise<boolean> {
   return fs.existsSync(await getSQLiteStatePath(cwd));
 }
 
-export async function initSQLiteState(cwd: string): Promise<void> {
+export async function initSQLiteState(
+  cwd: string,
+  initialState: DubState = { stacks: [] },
+): Promise<void> {
   const dbPath = await getSQLiteStatePath(cwd);
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = openDatabase(dbPath);
   try {
     configureDatabase(db);
     ensureSchema(db);
-    writeSQLiteStateToOpenDatabase(db, { stacks: [] });
+    writeSQLiteStateToOpenDatabase(db, initialState);
   } finally {
     db.close();
   }
@@ -272,10 +280,17 @@ function writeSQLiteStateToOpenDatabase(
       nextState.last_sync ? JSON.stringify(nextState.last_sync) : null,
     );
 
+    const configuredTrunks = nextState.trunks ?? [];
+    const defaultTrunk = nextState.defaultTrunk ?? configuredTrunks[0] ?? null;
+    configuredTrunks.forEach((trunk) => {
+      insertTrunk.run(trunk, trunk === defaultTrunk ? 1 : 0);
+    });
+
     nextState.stacks.forEach((stack, stackPosition) => {
       const root = stack.branches.find((branch) => branch.type === 'root');
-      insertStack.run(stack.id, root?.name ?? null, stackPosition);
-      if (root) {
+      const stackTrunk = stack.trunk ?? root?.name ?? null;
+      insertStack.run(stack.id, stackTrunk, stackPosition);
+      if (root && !configuredTrunks.includes(root.name)) {
         insertTrunk.run(root.name, stackPosition === 0 ? 1 : 0);
       }
       stack.branches.forEach((branch, position) => {
@@ -323,6 +338,11 @@ function readSQLiteStateFromOpenDatabase(db: BetterSqlite3.Database): DubState {
       'SELECT id, trunk, position FROM stacks ORDER BY position ASC, id ASC',
     )
     .all();
+  const trunkRows = db
+    .prepare<[], TrunkRow>(
+      'SELECT name, is_default FROM trunks ORDER BY is_default DESC, name ASC',
+    )
+    .all();
   const branchRows = db
     .prepare<[], BranchRow>(
       `
@@ -354,10 +374,16 @@ function readSQLiteStateFromOpenDatabase(db: BetterSqlite3.Database): DubState {
     branchesByStack.set(row.stack_id, branches);
   }
 
+  const trunks = trunkRows.map((trunk) => trunk.name);
+  const defaultTrunk =
+    trunkRows.find((trunk) => trunk.is_default === 1)?.name ?? trunks[0];
   const state: DubState = {
+    ...(trunks.length > 0 ? { trunks } : {}),
+    ...(defaultTrunk ? { defaultTrunk } : {}),
     stacks: stackRows.map((stack): Stack => {
       return {
         id: stack.id,
+        ...(stack.trunk ? { trunk: stack.trunk } : {}),
         branches: branchesByStack.get(stack.id) ?? [],
       };
     }),

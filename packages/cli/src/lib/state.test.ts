@@ -857,16 +857,23 @@ describe('SQLite storage backend', () => {
     expect(
       fs.existsSync(path.join(dir, '.git', 'dubstack', 'state.json')),
     ).toBe(false);
-    await expect(readState(dir)).resolves.toEqual({ stacks: [] });
+    await expect(readState(dir)).resolves.toEqual({
+      trunks: ['main'],
+      defaultTrunk: 'main',
+      stacks: [],
+    });
   });
 
   it('roundtrips full branch metadata through SQLite', async () => {
     await writeConfig({ storageBackend: 'sqlite' }, dir);
     await initState(dir);
     const state: DubState = {
+      trunks: ['main'],
+      defaultTrunk: 'main',
       stacks: [
         {
           id: 'stack-1',
+          trunk: 'main',
           branches: [
             {
               name: 'main',
