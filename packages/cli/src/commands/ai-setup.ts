@@ -1,6 +1,7 @@
 import input from '@inquirer/input';
 import password from '@inquirer/password';
 import select from '@inquirer/select';
+import { checkOllamaEndpoint, getOllamaBaseUrl } from '../lib/ai-provider';
 import {
   type ConfigureAiEnvOptions,
   type ConfigureAiEnvResult,
@@ -34,8 +35,10 @@ interface AiSetupDeps {
   inputAnthropicKey: () => Promise<string | undefined>;
   inputGatewayKey: () => Promise<string | undefined>;
   inputOpenAiKey: () => Promise<string | undefined>;
+  inputOllamaBaseUrl: () => Promise<string | undefined>;
   inputBedrockProfile: () => Promise<string | undefined>;
   inputBedrockRegion: () => Promise<string | undefined>;
+  checkOllamaEndpoint: (baseUrl: string) => void;
   configureAiEnv: (
     options: ConfigureAiEnvOptions,
   ) => Promise<ConfigureAiEnvResult>;
@@ -53,6 +56,7 @@ const DEFAULT_DEPS: AiSetupDeps = {
         { name: 'AI Gateway', value: 'gateway' },
         { name: 'Amazon Bedrock', value: 'bedrock' },
         { name: 'OpenAI', value: 'openai' },
+        { name: 'Ollama / LM Studio', value: 'ollama' },
       ],
     }),
   selectModel: async (provider) =>
@@ -89,10 +93,18 @@ const DEFAULT_DEPS: AiSetupDeps = {
   inputGatewayKey: async () =>
     optionalSecret('Enter DUBSTACK_AI_GATEWAY_API_KEY'),
   inputOpenAiKey: async () => optionalSecret('Enter DUBSTACK_OPENAI_API_KEY'),
+  inputOllamaBaseUrl: async () => {
+    const value = await input({
+      message: `Enter DUBSTACK_OLLAMA_BASE_URL (default ${getOllamaBaseUrl()})`,
+    });
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  },
   inputBedrockProfile: async () =>
     optionalText('Enter DUBSTACK_BEDROCK_AWS_PROFILE'),
   inputBedrockRegion: async () =>
     optionalText('Enter DUBSTACK_BEDROCK_AWS_REGION'),
+  checkOllamaEndpoint,
   configureAiEnv,
   configAiProvider,
   configAiModel,
@@ -186,6 +198,16 @@ async function buildEnvOptions(
     };
   }
 
+  if (provider === 'ollama') {
+    const baseUrl = await deps.inputOllamaBaseUrl();
+    const resolvedBaseUrl = baseUrl ?? getOllamaBaseUrl();
+    deps.checkOllamaEndpoint(resolvedBaseUrl);
+    return {
+      ollamaBaseUrl: resolvedBaseUrl,
+      ollamaModel: modelScope === 'global' ? model : undefined,
+    };
+  }
+
   return {
     bedrockProfile: await deps.inputBedrockProfile(),
     bedrockRegion: await deps.inputBedrockRegion(),
@@ -248,6 +270,14 @@ function getModelChoices(provider: AiModelProvider): Array<{
     return [
       { label: 'GPT-5.5', value: 'gpt-5.5' },
       { label: 'GPT-5.4 Mini', value: 'gpt-5.4-mini' },
+      { label: 'Custom model', value: CUSTOM_MODEL },
+    ];
+  }
+
+  if (provider === 'ollama') {
+    return [
+      { label: 'Qwen 2.5 Coder', value: 'qwen2.5-coder' },
+      { label: 'Llama 3.1', value: 'llama3.1' },
       { label: 'Custom model', value: CUSTOM_MODEL },
     ];
   }

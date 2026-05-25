@@ -42,6 +42,7 @@ describe('readConfig', () => {
             gateway: null,
             bedrock: null,
             openai: null,
+            ollama: null,
           },
         },
         shortcutFallback: {
@@ -95,6 +96,7 @@ describe('writeConfig', () => {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     });
   });
@@ -132,6 +134,7 @@ describe('writeConfig', () => {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     });
   });
@@ -161,6 +164,7 @@ describe('writeConfig', () => {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     });
   });
@@ -205,6 +209,7 @@ describe('writeConfig', () => {
               gateway: '',
               bedrock: '   ',
               openai: '   ',
+              ollama: 'qwen2.5-coder',
             },
           },
         },
@@ -225,6 +230,7 @@ describe('writeConfig', () => {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: 'qwen2.5-coder',
       },
     });
   });

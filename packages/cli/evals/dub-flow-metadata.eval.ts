@@ -1,6 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { createGateway, generateText, type LanguageModel } from 'ai';
 import { createScorer, evalite } from 'evalite';
 import { buildAiDiffContext } from '../src/lib/ai-diff-context';
@@ -8,6 +9,10 @@ import {
   type AiMetadataDependencies,
   generateFlowMetadata,
 } from '../src/lib/ai-metadata';
+import {
+  getOllamaBaseUrl,
+  toOpenAiCompatibleBaseUrl,
+} from '../src/lib/ai-provider';
 import type { DubConfig } from '../src/lib/config';
 
 interface FlowEvalInput {
@@ -45,6 +50,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
       gateway: null,
       bedrock: null,
       openai: null,
+      ollama: null,
     },
   };
 }
@@ -582,6 +588,8 @@ function createEvalDependencies(): AiMetadataDependencies {
     createAnthropic,
     createGateway,
     createOpenAI,
+    createOpenAICompatible,
+    checkOllamaEndpoint: () => undefined,
   };
 }
 
@@ -618,8 +626,21 @@ function resolveEvalJudgeModel(): LanguageModel {
     return openai(modelId);
   }
 
+  if (
+    process.env.DUBSTACK_OLLAMA_BASE_URL?.trim() ||
+    process.env.DUBSTACK_OLLAMA_MODEL?.trim()
+  ) {
+    const modelId =
+      process.env.DUBSTACK_OLLAMA_MODEL?.trim() || 'qwen2.5-coder';
+    const ollama = createOpenAICompatible({
+      name: 'ollama',
+      baseURL: toOpenAiCompatibleBaseUrl(getOllamaBaseUrl()),
+    });
+    return ollama(modelId);
+  }
+
   throw new Error(
-    'Evalite requires DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, DUBSTACK_AI_GATEWAY_API_KEY, or DUBSTACK_OPENAI_API_KEY.',
+    'Evalite requires DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, DUBSTACK_AI_GATEWAY_API_KEY, DUBSTACK_OPENAI_API_KEY, or DUBSTACK_OLLAMA_BASE_URL/DUBSTACK_OLLAMA_MODEL.',
   );
 }
 

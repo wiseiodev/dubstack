@@ -25,13 +25,15 @@ export interface DubConfig {
         | 'anthropic'
         | 'gateway'
         | 'bedrock'
-        | 'openai';
+        | 'openai'
+        | 'ollama';
       models: {
         gemini: string | null;
         anthropic: string | null;
         gateway: string | null;
         bedrock: string | null;
         openai: string | null;
+        ollama: string | null;
       };
     };
     shortcutFallback: {
@@ -80,6 +82,7 @@ const DEFAULT_CONFIG: DubConfig = {
         gateway: null,
         bedrock: null,
         openai: null,
+        ollama: null,
       },
     },
     shortcutFallback: {
@@ -177,6 +180,7 @@ function normalizeConfig(config: DeepPartial<DubConfig>): DubConfig {
           gateway: normalizeAiProviderModel(provider?.models?.gateway),
           bedrock: normalizeAiProviderModel(provider?.models?.bedrock),
           openai: normalizeAiProviderModel(provider?.models?.openai),
+          ollama: normalizeAiProviderModel(provider?.models?.ollama),
         },
       },
       shortcutFallback: {
@@ -247,7 +251,8 @@ function normalizeAiProviderSelection(
     value === 'anthropic' ||
     value === 'gateway' ||
     value === 'bedrock' ||
-    value === 'openai'
+    value === 'openai' ||
+    value === 'ollama'
   ) {
     return value;
   }

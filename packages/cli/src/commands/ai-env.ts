@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { normalizeOllamaBaseUrl } from '../lib/ai-provider';
 import { DubError } from '../lib/errors';
 
 const GEMINI_KEY_NAME = 'DUBSTACK_GEMINI_API_KEY';
@@ -14,6 +15,8 @@ const BEDROCK_REGION_NAME = 'DUBSTACK_BEDROCK_AWS_REGION';
 const BEDROCK_MODEL_NAME = 'DUBSTACK_BEDROCK_MODEL';
 const OPENAI_KEY_NAME = 'DUBSTACK_OPENAI_API_KEY';
 const OPENAI_MODEL_NAME = 'DUBSTACK_OPENAI_MODEL';
+const OLLAMA_BASE_URL_NAME = 'DUBSTACK_OLLAMA_BASE_URL';
+const OLLAMA_MODEL_NAME = 'DUBSTACK_OLLAMA_MODEL';
 
 export interface ConfigureAiEnvOptions {
   geminiKey?: string;
@@ -27,6 +30,8 @@ export interface ConfigureAiEnvOptions {
   bedrockModel?: string;
   openaiKey?: string;
   openaiModel?: string;
+  ollamaBaseUrl?: string;
+  ollamaModel?: string;
   shell?: string;
   profile?: string;
 }
@@ -51,10 +56,12 @@ export async function configureAiEnv(
     !options.bedrockRegion &&
     !options.bedrockModel &&
     !options.openaiKey &&
-    !options.openaiModel
+    !options.openaiModel &&
+    !options.ollamaBaseUrl &&
+    !options.ollamaModel
   ) {
     throw new DubError('Provide at least one key, model, or Bedrock setting.', [
-      "Pass at least one of '--gemini-key', '--anthropic-key', '--gateway-key', '--openai-key', '--gemini-model', '--anthropic-model', '--gateway-model', '--openai-model', '--bedrock-profile', '--bedrock-region', or '--bedrock-model'.",
+      "Pass at least one of '--gemini-key', '--anthropic-key', '--gateway-key', '--openai-key', '--gemini-model', '--anthropic-model', '--gateway-model', '--openai-model', '--bedrock-profile', '--bedrock-region', '--bedrock-model', '--ollama-base-url', or '--ollama-model'.",
     ]);
   }
 
@@ -141,6 +148,20 @@ export async function configureAiEnv(
     content = upsertExport(content, OPENAI_MODEL_NAME, model);
     updated.push(OPENAI_MODEL_NAME);
     appliedValues[OPENAI_MODEL_NAME] = model;
+  }
+
+  if (options.ollamaBaseUrl !== undefined) {
+    const baseUrl = normalizeOllamaBaseUrl(options.ollamaBaseUrl);
+    content = upsertExport(content, OLLAMA_BASE_URL_NAME, baseUrl);
+    updated.push(OLLAMA_BASE_URL_NAME);
+    appliedValues[OLLAMA_BASE_URL_NAME] = baseUrl;
+  }
+
+  if (options.ollamaModel !== undefined) {
+    const model = normalizeOllamaModel(options.ollamaModel);
+    content = upsertExport(content, OLLAMA_MODEL_NAME, model);
+    updated.push(OLLAMA_MODEL_NAME);
+    appliedValues[OLLAMA_MODEL_NAME] = model;
   }
 
   if (!content.endsWith('\n')) {
@@ -333,6 +354,16 @@ function normalizeOpenAiModel(value: string): string {
   if (model.includes('/')) {
     throw new DubError("OpenAI model should not include '/'.", [
       "Pass the bare model name without provider prefix (e.g. 'gpt-5.5').",
+    ]);
+  }
+  return model;
+}
+
+function normalizeOllamaModel(value: string): string {
+  const model = value.trim();
+  if (model.length === 0) {
+    throw new DubError('Ollama model cannot be empty.', [
+      "Pass a non-empty Ollama model identifier (e.g. 'qwen2.5-coder').",
     ]);
   }
   return model;

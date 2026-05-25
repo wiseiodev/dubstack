@@ -27,6 +27,7 @@ function createProviderConfig(): DubConfig['ai']['provider'] {
       gateway: null,
       bedrock: null,
       openai: null,
+      ollama: null,
     },
   };
 }

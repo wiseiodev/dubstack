@@ -11,8 +11,10 @@ function createDeps() {
     inputAnthropicKey: vi.fn(),
     inputGatewayKey: vi.fn(),
     inputOpenAiKey: vi.fn(),
+    inputOllamaBaseUrl: vi.fn(),
     inputBedrockProfile: vi.fn(),
     inputBedrockRegion: vi.fn(),
+    checkOllamaEndpoint: vi.fn(),
     configureAiEnv: vi.fn().mockResolvedValue({
       profilePath: '/tmp/.zshrc',
       updated: [],
@@ -159,6 +161,35 @@ describe('aiSetup', () => {
     );
     expect(result.provider).toBe('openai');
     expect(result.model).toBe('gpt-5.5');
+  });
+
+  it('checks Ollama reachability and writes local endpoint defaults', async () => {
+    const deps = createDeps();
+    deps.selectProvider.mockResolvedValue('ollama');
+    deps.selectModel.mockResolvedValue('qwen2.5-coder');
+    deps.selectModelScope.mockResolvedValue('global');
+    deps.inputOllamaBaseUrl.mockResolvedValue('http://localhost:11434');
+
+    const result = await aiSetup('/repo', deps);
+
+    expect(deps.checkOllamaEndpoint).toHaveBeenCalledWith(
+      'http://localhost:11434',
+    );
+    expect(deps.configureAiEnv).toHaveBeenCalledWith({
+      ollamaBaseUrl: 'http://localhost:11434',
+      ollamaModel: 'qwen2.5-coder',
+    });
+    expect(deps.configAiProvider).toHaveBeenCalledWith('/repo', 'ollama');
+    expect(deps.configAiModel).toHaveBeenCalledWith(
+      '/repo',
+      'ollama',
+      undefined,
+      {
+        clear: true,
+      },
+    );
+    expect(result.provider).toBe('ollama');
+    expect(result.model).toBe('qwen2.5-coder');
   });
 
   it('clears an existing repo override when switching back to global scope', async () => {

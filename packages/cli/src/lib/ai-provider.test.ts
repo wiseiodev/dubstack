@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildAiProviderOptions,
+  checkOllamaEndpoint,
   type ResolveAiProviderDeps,
   resolveAiProvider,
 } from './ai-provider';
@@ -23,6 +24,8 @@ function createDeps(): ResolveAiProviderDeps {
     createGateway: vi.fn().mockReturnValue(vi.fn()),
     createAmazonBedrock: vi.fn().mockReturnValue(vi.fn()),
     createOpenAI: vi.fn().mockReturnValue(vi.fn()),
+    createOpenAICompatible: vi.fn().mockReturnValue(vi.fn()),
+    checkOllamaEndpoint: vi.fn(),
     fromIni: vi.fn().mockReturnValue('ini-credentials'),
     fromNodeProviderChain: vi.fn().mockReturnValue('default-chain'),
   };
@@ -40,6 +43,7 @@ function createConfig(
     gateway: null,
     bedrock: null,
     openai: null,
+    ollama: null,
     ...overrides.models,
   };
 
@@ -182,6 +186,68 @@ describe('resolveAiProvider', () => {
     expect(openAiModel).toHaveBeenCalledWith('gpt-5.5');
     expect(resolved.provider).toBe('openai');
     expect(resolved.modelId).toBe('gpt-5.5');
+  });
+
+  it('uses Ollama when selected explicitly with repo model override', () => {
+    process.env.DUBSTACK_OLLAMA_BASE_URL = 'http://localhost:11434';
+    process.env.DUBSTACK_OLLAMA_MODEL = 'env-ollama-model';
+
+    const deps = createDeps();
+    const ollamaModel = vi.fn().mockReturnValue('ollama-model');
+    deps.createOpenAICompatible = vi.fn().mockReturnValue(ollamaModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig({
+        selected: 'ollama',
+        models: {
+          ollama: 'repo-ollama-model',
+        },
+      }),
+    });
+
+    expect(deps.checkOllamaEndpoint).toHaveBeenCalledWith(
+      'http://localhost:11434',
+    );
+    expect(deps.createOpenAICompatible).toHaveBeenCalledWith({
+      name: 'ollama',
+      baseURL: 'http://localhost:11434/v1',
+    });
+    expect(ollamaModel).toHaveBeenCalledWith('repo-ollama-model');
+    expect(resolved.provider).toBe('ollama');
+    expect(resolved.modelId).toBe('repo-ollama-model');
+  });
+
+  it('uses Ollama in auto mode when Ollama env is configured', () => {
+    process.env.DUBSTACK_OLLAMA_MODEL = 'qwen2.5-coder';
+
+    const deps = createDeps();
+    const ollamaModel = vi.fn().mockReturnValue('ollama-model');
+    deps.createOpenAICompatible = vi.fn().mockReturnValue(ollamaModel);
+
+    const resolved = resolveAiProvider({
+      deps,
+      providerConfig: createConfig(),
+    });
+
+    expect(deps.checkOllamaEndpoint).toHaveBeenCalledWith(
+      'http://localhost:11434',
+    );
+    expect(ollamaModel).toHaveBeenCalledWith('qwen2.5-coder');
+    expect(resolved.provider).toBe('ollama');
+  });
+
+  it('surfaces a clean Ollama reachability error', () => {
+    expect(() =>
+      checkOllamaEndpoint(
+        'http://localhost:11434',
+        vi.fn(() => {
+          throw new Error('connection refused');
+        }),
+      ),
+    ).toThrow(
+      'Ollama provider is selected but the local endpoint is not reachable.',
+    );
   });
 
   it('uses the explicitly selected Anthropic provider and repo model override', () => {
