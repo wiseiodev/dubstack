@@ -755,6 +755,27 @@ Undo the last `dub create`, `dub restack`, `dub rename`, `dub move`, `dub pop`, 
 dub undo
 ```
 
+### `dub completion <shell>` and `dub man`
+
+Generate shell completions and a man page from the live commander definitions.
+
+```bash
+# bash, zsh, fish — pipe into the location your shell loads completions from
+dub completion bash > ~/.local/share/bash-completion/completions/dub
+dub completion zsh > "${fpath[1]}/_dub"
+dub completion fish > ~/.config/fish/completions/dub.fish
+
+# roff man page — drop into any MANPATH location
+mkdir -p ~/.local/share/man/man1
+dub man > ~/.local/share/man/man1/dub.1
+man dub
+```
+
+Completions cover top-level subcommands, per-command flags, and local branch
+names for `co`, `up`, `down`, `delete`, `track`, and `untrack`. Regenerate
+after upgrading `dub` to pick up new commands and flags. Full docs:
+[`apps/docs/content/docs/guides/shell-integration.mdx`](apps/docs/content/docs/guides/shell-integration.mdx).
+
 ### `dub skills`
 
 Install or remove packaged agent skills.

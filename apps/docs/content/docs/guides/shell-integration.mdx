@@ -115,6 +115,50 @@ Enable the plugin in `~/.zshrc`:
 plugins=(... dubstack)
 ```
 
+## Shell completions
+
+`dub completion <shell>` writes a completion script to stdout. Pipe it into
+the location your shell loads completions from:
+
+```bash
+# bash
+dub completion bash > ~/.local/share/bash-completion/completions/dub
+
+# zsh — drop into any directory on $fpath, then restart your shell
+dub completion zsh > "${fpath[1]}/_dub"
+
+# fish
+dub completion fish > ~/.config/fish/completions/dub.fish
+```
+
+The generated script completes:
+
+- Top-level subcommands (`dub <Tab>`).
+- Local branch names for branch-arg commands (`dub co <Tab>`, `dub up <Tab>`,
+  `dub down <Tab>`, `dub delete <Tab>`, `dub track <Tab>`, `dub untrack <Tab>`).
+- Per-command flags read directly from the `dub` binary's commander metadata,
+  so completions stay in sync with the CLI version installed in `$PATH`.
+- File paths for commands that take a file argument.
+
+Regenerate the script after upgrading `dub` so new flags and commands show up.
+
+## Man page
+
+`dub man` emits a roff-formatted man page to stdout. Redirect it into any
+directory on your `MANPATH`:
+
+```bash
+mkdir -p ~/.local/share/man/man1
+dub man > ~/.local/share/man/man1/dub.1
+man dub
+```
+
+The page is generated from the same commander.js definitions that power `dub
+--help`, so every subcommand and option is documented automatically.
+
+Distributors can bundle the man page alongside the binary — for example, the
+Homebrew formula installs `dub.1` into `share/man/man1/`.
+
 ## Refreshing the cache
 
 Most shell integrations should rely on the default (cache-first) behavior —
