@@ -72,6 +72,24 @@ describe('history', () => {
     ]);
   });
 
+  it('redacts --openai-key args in both spaced and = forms', () => {
+    const sanitized = sanitizeCommandArgs([
+      'ai',
+      'env',
+      '--openai-key',
+      'sk-proj-abc123_DEF-456ghiJKLmno0pqRstuVwx',
+      '--openai-key=sk-proj-zzz999_YYY-888xxxWWWvvvUUU',
+    ]);
+
+    expect(sanitized).toEqual([
+      'ai',
+      'env',
+      '--openai-key',
+      '[REDACTED]',
+      '--openai-key=[REDACTED]',
+    ]);
+  });
+
   it('does not redact non-secret model args', () => {
     const sanitized = sanitizeCommandArgs([
       'ai',
@@ -102,6 +120,25 @@ describe('history', () => {
     expect(redacted).not.toContain('abc');
     expect(redacted).not.toContain('super-secret-token');
     expect(redacted).toContain('[REDACTED]');
+  });
+
+  it('redacts modern openai/anthropic key formats containing - and _', () => {
+    const redacted = redactSensitiveText(
+      [
+        'dub ai env --openai-key sk-proj-abc123_DEF-456ghiJKLmno0pqRstuVwx',
+        'pasted sk-ant-api03-abc_def-ghiJKLmno0pqRstuVwx12345 into a note',
+      ].join('\n'),
+    );
+
+    expect(redacted).not.toContain('sk-proj-');
+    expect(redacted).not.toContain('sk-ant-');
+    expect(redacted).toContain('[REDACTED]');
+  });
+
+  it('does not redact short sk- branch names', () => {
+    expect(redactSensitiveText('git checkout sk-fix-login')).toBe(
+      'git checkout sk-fix-login',
+    );
   });
 
   it('normalizes carriage-return spinner lines to the final visible content', () => {
