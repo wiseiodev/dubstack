@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { configureAiEnv } from './ai-env';
+import { assertNoApiKeyFlags, configureAiEnv } from './ai-env';
 
 let tempDir: string;
 let envSnapshot: NodeJS.ProcessEnv;
@@ -286,5 +286,23 @@ describe('configureAiEnv', () => {
     await expect(configureAiEnv({ profile })).rejects.toThrow(
       'Provide at least one key, model, or Bedrock setting',
     );
+  });
+});
+
+describe('assertNoApiKeyFlags', () => {
+  it('throws and names the offending flag when an API key is passed', () => {
+    expect(() => assertNoApiKeyFlags({ openaiKey: 'sk-proj-leak' })).toThrow(
+      '--openai-key',
+    );
+  });
+
+  it('lists every offending flag when several keys are passed', () => {
+    expect(() =>
+      assertNoApiKeyFlags({ geminiKey: 'g', anthropicKey: 'a' }),
+    ).toThrow('--gemini-key, --anthropic-key');
+  });
+
+  it('is a no-op when no API key flags are present', () => {
+    expect(() => assertNoApiKeyFlags({})).not.toThrow();
   });
 });

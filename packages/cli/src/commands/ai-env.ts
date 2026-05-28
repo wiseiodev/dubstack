@@ -18,6 +18,41 @@ const OPENAI_MODEL_NAME = 'DUBSTACK_OPENAI_MODEL';
 const OLLAMA_BASE_URL_NAME = 'DUBSTACK_OLLAMA_BASE_URL';
 const OLLAMA_MODEL_NAME = 'DUBSTACK_OLLAMA_MODEL';
 
+const API_KEY_FLAGS: ReadonlyArray<[keyof ApiKeyFlagInput, string]> = [
+  ['geminiKey', '--gemini-key'],
+  ['anthropicKey', '--anthropic-key'],
+  ['gatewayKey', '--gateway-key'],
+  ['openaiKey', '--openai-key'],
+];
+
+export interface ApiKeyFlagInput {
+  geminiKey?: string;
+  anthropicKey?: string;
+  gatewayKey?: string;
+  openaiKey?: string;
+}
+
+/**
+ * Rejects API keys supplied as CLI flags. Passing a secret in argv leaks it
+ * into shell history and the OS process list — exposure dub cannot redact.
+ * Keys must come from the masked `dub ai setup` wizard or a pre-set env var.
+ */
+export function assertNoApiKeyFlags(flags: ApiKeyFlagInput): void {
+  const used = API_KEY_FLAGS.filter(([key]) => flags[key] !== undefined).map(
+    ([, name]) => name,
+  );
+  if (used.length === 0) return;
+
+  throw new DubError(
+    `Passing API keys as CLI flags is no longer supported (${used.join(', ')}).`,
+    [
+      'Run `dub ai setup` for an interactive, masked prompt — the key never enters your shell history or the process list.',
+      'For non-interactive or CI use, set the env var directly (e.g. `export DUBSTACK_OPENAI_API_KEY=…`) via your shell profile or a secrets manager.',
+      'If you already ran this with a real key, rotate it now: it was written to your shell history and was visible to other local processes.',
+    ],
+  );
+}
+
 export interface ConfigureAiEnvOptions {
   geminiKey?: string;
   anthropicKey?: string;
@@ -61,7 +96,8 @@ export async function configureAiEnv(
     !options.ollamaModel
   ) {
     throw new DubError('Provide at least one key, model, or Bedrock setting.', [
-      "Pass at least one of '--gemini-key', '--anthropic-key', '--gateway-key', '--openai-key', '--gemini-model', '--anthropic-model', '--gateway-model', '--openai-model', '--bedrock-profile', '--bedrock-region', '--bedrock-model', '--ollama-base-url', or '--ollama-model'.",
+      "Pass at least one of '--gemini-model', '--anthropic-model', '--gateway-model', '--openai-model', '--bedrock-profile', '--bedrock-region', '--bedrock-model', '--ollama-base-url', or '--ollama-model'.",
+      "To set an API key, run 'dub ai setup' (masked prompt) or export the DUBSTACK_*_API_KEY env var.",
     ]);
   }
 

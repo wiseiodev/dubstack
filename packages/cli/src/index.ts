@@ -22,7 +22,7 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import chalk, { Chalk } from 'chalk';
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import { abortCommand } from './commands/abort';
 import { absorb } from './commands/absorb';
 import { back, listBackHistory } from './commands/back';
@@ -3333,10 +3333,13 @@ See also:
       .description(
         'Write DubStack AI provider settings to your shell profile (macOS/Linux)',
       )
-      .option('--gemini-key <key>', 'Set DUBSTACK_GEMINI_API_KEY')
-      .option('--anthropic-key <key>', 'Set DUBSTACK_ANTHROPIC_API_KEY')
-      .option('--gateway-key <key>', 'Set DUBSTACK_AI_GATEWAY_API_KEY')
-      .option('--openai-key <key>', 'Set DUBSTACK_OPENAI_API_KEY')
+      // Removed: API keys must not be passed in argv (leaks into shell history
+      // and the process list). Hidden but still parsed so we can reject with a
+      // helpful message instead of a cryptic "unknown option" error.
+      .addOption(new Option('--gemini-key <key>').hideHelp())
+      .addOption(new Option('--anthropic-key <key>').hideHelp())
+      .addOption(new Option('--gateway-key <key>').hideHelp())
+      .addOption(new Option('--openai-key <key>').hideHelp())
       .option('--ollama-base-url <url>', 'Set DUBSTACK_OLLAMA_BASE_URL')
       .option('--gemini-model <model>', 'Set DUBSTACK_GEMINI_MODEL')
       .option('--anthropic-model <model>', 'Set DUBSTACK_ANTHROPIC_MODEL')
@@ -3383,12 +3386,11 @@ See also:
           profile?: string;
           shell?: string;
         }) => {
-          const { configureAiEnv } = await import('./commands/ai-env');
+          const { assertNoApiKeyFlags, configureAiEnv } = await import(
+            './commands/ai-env'
+          );
+          assertNoApiKeyFlags(options);
           const result = await configureAiEnv({
-            geminiKey: options.geminiKey,
-            anthropicKey: options.anthropicKey,
-            gatewayKey: options.gatewayKey,
-            openaiKey: options.openaiKey,
             ollamaBaseUrl: options.ollamaBaseUrl,
             geminiModel: options.geminiModel,
             anthropicModel: options.anthropicModel,

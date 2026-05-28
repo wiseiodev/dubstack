@@ -1014,21 +1014,16 @@ When the wizard writes env vars, DubStack loads them into the current `dub` proc
 
 ### `dub ai env`
 
-Write DubStack AI provider settings into your shell profile (macOS/Linux shells).
+Write DubStack AI provider model/endpoint settings into your shell profile (macOS/Linux shells).
+
+> **API keys are not set through `dub ai env`.** Passing a secret as a CLI flag leaks it into your shell history and the OS process list. Set keys one of two ways:
+>
+> - **Interactive:** `dub ai setup` — prompts for the key with masked input that never enters your shell history.
+> - **Non-interactive / CI:** export the env var directly, e.g. `export DUBSTACK_OPENAI_API_KEY="<your-key>"` (via your shell profile or a secrets manager).
+>
+> DubStack reads keys from `DUBSTACK_GEMINI_API_KEY`, `DUBSTACK_ANTHROPIC_API_KEY`, `DUBSTACK_AI_GATEWAY_API_KEY`, and `DUBSTACK_OPENAI_API_KEY`.
 
 ```bash
-# write Gemini key
-dub ai env --gemini-key "<your-key>"
-
-# write Gateway key
-dub ai env --gateway-key "<your-key>"
-
-# write Anthropic key
-dub ai env --anthropic-key "<your-key>"
-
-# write OpenAI key
-dub ai env --openai-key "<your-key>"
-
 # write Ollama endpoint
 dub ai env --ollama-base-url "http://localhost:11434"
 
@@ -1053,14 +1048,8 @@ dub ai env \
   --bedrock-region "us-west-2" \
   --bedrock-model "us.anthropic.claude-sonnet-4-6"
 
-# write multiple keys
-dub ai env --gemini-key "<gemini-key>" --gateway-key "<gateway-key>" --openai-key "<openai-key>"
-
-# write key + model together
-dub ai env --gemini-key "<gemini-key>" --gemini-model "gemini-3-flash-preview"
-
 # target a specific profile file explicitly
-dub ai env --gemini-key "<your-key>" --profile ~/.zshrc
+dub ai env --gemini-model "gemini-3-flash-preview" --profile ~/.zshrc
 ```
 
 Supported automatic profile detection:

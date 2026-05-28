@@ -122,23 +122,21 @@ When the wizard writes env vars, DubStack loads them into the current `dub` proc
 
 ## `dub ai env`
 
-Use `dub ai env` when you want explicit shell-profile edits without the wizard.
+Use `dub ai env` for explicit shell-profile edits to models and endpoints without the wizard.
+
+API keys are **not** set here — passing a secret as a CLI flag leaks it into your shell history and the OS process list. Set keys with `dub ai setup` (masked prompt) or export the env var directly: `DUBSTACK_GEMINI_API_KEY`, `DUBSTACK_ANTHROPIC_API_KEY`, `DUBSTACK_AI_GATEWAY_API_KEY`, or `DUBSTACK_OPENAI_API_KEY`.
 
 ```bash
 # Gemini
-dub ai env --gemini-key "<your-key>"
 dub ai env --gemini-model "gemini-3-flash-preview"
 
 # AI Gateway
-dub ai env --gateway-key "<your-key>"
 dub ai env --gateway-model "google/gemini-3-flash"
 
 # Anthropic
-dub ai env --anthropic-key "<your-key>"
 dub ai env --anthropic-model "claude-sonnet-4-20250514"
 
 # OpenAI
-dub ai env --openai-key "<your-key>"
 dub ai env --openai-model "gpt-5.5"
 
 # Bedrock
