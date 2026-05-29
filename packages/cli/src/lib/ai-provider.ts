@@ -111,12 +111,9 @@ export function resolveAiProvider(input: {
   }
 
   throw new DubError('AI assistant has no configured provider.', [
-    "Run 'dub ai setup' for an interactive guided setup.",
-    "Run 'dub ai env --gemini-key <key>' to configure Gemini.",
-    "Run 'dub ai env --anthropic-key <key>' to configure Anthropic.",
-    "Run 'dub ai env --gateway-key <key>' to configure the AI Gateway.",
+    "Run 'dub ai setup' for an interactive guided setup (prompts for your key with masked input).",
+    'Or set a provider key env var directly: DUBSTACK_GEMINI_API_KEY, DUBSTACK_ANTHROPIC_API_KEY, DUBSTACK_AI_GATEWAY_API_KEY, or DUBSTACK_OPENAI_API_KEY.',
     "Run 'dub ai env --bedrock-region <region> --bedrock-model <model>' to configure Bedrock.",
-    "Run 'dub ai env --openai-key <key>' to configure OpenAI.",
     "Run 'dub config ai-provider ollama' to use a local Ollama endpoint.",
   ]);
 }
@@ -259,8 +256,8 @@ function resolveGoogleProvider(
     throw new DubError(
       'Gemini is selected but DUBSTACK_GEMINI_API_KEY is not set.',
       [
-        "Run 'dub ai setup' for guided provider setup.",
-        "Run 'dub ai env --gemini-key <key>' to write the key to your shell profile.",
+        "Run 'dub ai setup' for guided provider setup (masked key prompt).",
+        'Or set DUBSTACK_GEMINI_API_KEY in your shell profile or secrets manager.',
       ],
     );
   }
@@ -292,8 +289,8 @@ function resolveAnthropicProvider(
     throw new DubError(
       'Anthropic is selected but DUBSTACK_ANTHROPIC_API_KEY is not set.',
       [
-        "Run 'dub ai setup' for guided provider setup.",
-        "Run 'dub ai env --anthropic-key <key>' to write the key to your shell profile.",
+        "Run 'dub ai setup' for guided provider setup (masked key prompt).",
+        'Or set DUBSTACK_ANTHROPIC_API_KEY in your shell profile or secrets manager.',
       ],
     );
   }
@@ -319,8 +316,8 @@ function resolveGatewayProvider(
     throw new DubError(
       'AI Gateway is selected but DUBSTACK_AI_GATEWAY_API_KEY is not set.',
       [
-        "Run 'dub ai setup' for guided provider setup.",
-        "Run 'dub ai env --gateway-key <key>' to write the key to your shell profile.",
+        "Run 'dub ai setup' for guided provider setup (masked key prompt).",
+        'Or set DUBSTACK_AI_GATEWAY_API_KEY in your shell profile or secrets manager.',
       ],
     );
   }
@@ -406,8 +403,8 @@ function resolveOpenAiProvider(
     throw new DubError(
       'OpenAI is selected but DUBSTACK_OPENAI_API_KEY is not set.',
       [
-        "Run 'dub ai setup' for guided provider setup.",
-        "Run 'dub ai env --openai-key <key>' to write the key to your shell profile.",
+        "Run 'dub ai setup' for guided provider setup (masked key prompt).",
+        'Or set DUBSTACK_OPENAI_API_KEY in your shell profile or secrets manager.',
       ],
     );
   }

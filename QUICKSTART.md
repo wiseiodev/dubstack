@@ -56,15 +56,15 @@ dub ai env \
 dub config ai-provider bedrock
 ```
 
-For direct Anthropic API access:
+For direct Anthropic API access (set the key with `dub ai setup` or your shell profile / secrets manager — never pass it as a CLI flag, which leaks it into shell history):
 
 ```bash
-dub ai env \
-  --anthropic-key "<your-key>" \
-  --anthropic-model "claude-sonnet-4-20250514"
+dub ai env --anthropic-model "claude-sonnet-4-20250514"
 
 dub config ai-provider anthropic
 ```
+
+DubStack reads the key from the `DUBSTACK_ANTHROPIC_API_KEY` environment variable.
 
 DubStack does not add or manage AWS secret key environment variables for Bedrock.
 `dub ai setup` and `dub ai env` print the exact activation command to run after updating your shell profile.

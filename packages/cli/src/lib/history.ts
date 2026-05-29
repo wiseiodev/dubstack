@@ -23,6 +23,7 @@ const REDACTED_ARGS = new Set([
   '--gemini-key',
   '--anthropic-key',
   '--gateway-key',
+  '--openai-key',
 ]);
 const REDACTED_PLACEHOLDER = '[REDACTED]';
 
@@ -118,6 +119,11 @@ export function sanitizeCommandArgs(args: string[]): string[] {
 
     if (arg.startsWith('--gateway-key=')) {
       sanitized[sanitized.length - 1] = `--gateway-key=${REDACTED_PLACEHOLDER}`;
+      continue;
+    }
+
+    if (arg.startsWith('--openai-key=')) {
+      sanitized[sanitized.length - 1] = `--openai-key=${REDACTED_PLACEHOLDER}`;
     }
   }
 
@@ -148,7 +154,9 @@ export function redactSensitiveText(value: string): string {
     REDACTED_PLACEHOLDER,
   );
 
-  redacted = redacted.replace(/\bsk-[A-Za-z0-9]{12,}\b/g, REDACTED_PLACEHOLDER);
+  // Matches modern key formats whose body contains '-'/'_' (e.g. OpenAI
+  // 'sk-proj-…', Anthropic 'sk-ant-api03-…') as well as legacy 'sk-…' keys.
+  redacted = redacted.replace(/\bsk-[A-Za-z0-9_-]{12,}/g, REDACTED_PLACEHOLDER);
 
   return redacted;
 }

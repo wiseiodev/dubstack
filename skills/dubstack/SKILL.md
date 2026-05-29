@@ -179,11 +179,9 @@ dub trunk
 ## AI Setup
 
 ```bash
-dub ai env --gemini-key "<your-key>"
-# or
-dub ai env --gateway-key "<your-key>"
-# or
-dub ai env --openai-key "<your-key>"
+# choose a provider and enter your key via a masked prompt
+# (keys passed as CLI flags would leak into shell history)
+dub ai setup
 
 dub config ai-assistant on
 dub config ai-defaults create on

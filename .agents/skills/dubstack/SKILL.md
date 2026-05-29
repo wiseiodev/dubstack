@@ -169,9 +169,9 @@ dub trunk
 ## AI Workflow
 
 ```bash
-dub ai env --gemini-key "<your-key>"
-# or
-dub ai env --gateway-key "<your-key>"
+# choose a provider and enter your key via a masked prompt
+# (keys passed as CLI flags would leak into shell history)
+dub ai setup
 
 dub config ai-assistant on
 dub config ai-defaults create on

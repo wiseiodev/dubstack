@@ -120,14 +120,11 @@ dub post-merge
 ## Optional: Enable AI Assistant
 
 ```bash
-# Add one API key to your shell profile
-dub ai env --gemini-key "<your-gemini-key>"
-# or:
-dub ai env --gateway-key "<your-ai-gateway-key>"
-# or:
-dub ai env --openai-key "<your-openai-key>"
+# Choose a provider and enter your key via a masked prompt
+# (the wizard never writes the key to your shell history)
+dub ai setup
 
-# Reload your shell
+# Reload your shell so the new env vars take effect
 source ~/.zshrc
 
 # Enable assistant for this repo
